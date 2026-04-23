@@ -113,8 +113,8 @@ export const CS_42: ChangeSet = {
             { kind: "context", text: "import type { User } from \"../types/user\";", oldNo: 1, newNo: 1 },
             { kind: "add", text: "import type { Preferences } from \"../types/user\";", newNo: 2 },
             { kind: "context", text: "", oldNo: 2, newNo: 3 },
-            { kind: "context", text: "const USER_KEY = \"critica:user\";", oldNo: 3, newNo: 4 },
-            { kind: "add", text: "const PREFS_KEY = \"critica:prefs\";", newNo: 5 },
+            { kind: "context", text: "const USER_KEY = \"shippable:user\";", oldNo: 3, newNo: 4 },
+            { kind: "add", text: "const PREFS_KEY = \"shippable:prefs\";", newNo: 5 },
           ],
         },
         {
@@ -140,7 +140,7 @@ export const CS_42: ChangeSet = {
             [
               { kind: "context", text: "import type { User } from \"../types/user\";", oldNo: 1, newNo: 1 },
               { kind: "context", text: "", oldNo: 2, newNo: 3 },
-              { kind: "context", text: "const USER_KEY = \"critica:user\";", oldNo: 3, newNo: 4 },
+              { kind: "context", text: "const USER_KEY = \"shippable:user\";", oldNo: 3, newNo: 4 },
               { kind: "context", text: "", oldNo: 4, newNo: 6 },
             ],
           ],

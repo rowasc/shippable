@@ -226,7 +226,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="topbar__brand">critica</span>
+        <span className="topbar__brand">shippable</span>
         <span className="topbar__sep">│</span>
         <span className="topbar__id">{cs.id}</span>
         <span className="topbar__title">{cs.title}</span>

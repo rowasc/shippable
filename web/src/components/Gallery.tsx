@@ -27,7 +27,7 @@ export function Gallery() {
     <div className="gallery">
       <nav className="gallery__nav">
         <div className="gallery__brand">
-          <span className="gallery__brand-name">critica</span>
+          <span className="gallery__brand-name">shippable</span>
           <span className="gallery__brand-sep">│</span>
           <span className="gallery__brand-label">screen catalog</span>
         </div>
