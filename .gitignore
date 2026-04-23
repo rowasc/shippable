@@ -9,3 +9,7 @@
 # directory is untracked.
 .playwright-mcp/
 screenshots/
+
+# Project-level Claude Code MCP config — kept out for now; bring back if
+# we want the playwright MCP to be shared with collaborators.
+.mcp.json
