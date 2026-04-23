@@ -1,4 +1,4 @@
-import type { PullRequest, ReviewState } from "./types";
+import type { ChangeSet, ReviewState } from "./types";
 import { hunkCoverage } from "./state";
 
 export interface GuideSuggestion {
@@ -13,14 +13,14 @@ export interface GuideSuggestion {
 
 /**
  * Fires when the cursor is on a hunk that references a symbol defined in
- * another hunk in the same PR, the user has visited more than half of the
- * current hunk, and the target hunk is still mostly unreviewed.
+ * another hunk in the same changeset, the user has visited more than half
+ * of the current hunk, and the target hunk is still mostly unreviewed.
  */
 export function maybeSuggest(
-  pr: PullRequest,
+  cs: ChangeSet,
   state: ReviewState,
 ): GuideSuggestion | null {
-  const file = pr.files.find((f) => f.id === state.cursor.fileId);
+  const file = cs.files.find((f) => f.id === state.cursor.fileId);
   if (!file) return null;
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId);
   if (!hunk || !hunk.referencesSymbols?.length) return null;
@@ -28,7 +28,7 @@ export function maybeSuggest(
   if (hunkCoverage(hunk, state.reviewedLines) < 0.5) return null;
 
   for (const symbol of hunk.referencesSymbols) {
-    for (const otherFile of pr.files) {
+    for (const otherFile of cs.files) {
       if (otherFile.id === file.id) continue;
       for (const otherHunk of otherFile.hunks) {
         if (!otherHunk.definesSymbols?.includes(symbol)) continue;

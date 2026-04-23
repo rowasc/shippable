@@ -61,7 +61,7 @@ export interface Skill {
   reason: string;
 }
 
-export interface PullRequest {
+export interface ChangeSet {
   id: string;
   title: string;
   author: string;
@@ -74,7 +74,7 @@ export interface PullRequest {
 }
 
 export interface Cursor {
-  prId: string;
+  changesetId: string;
   fileId: string;
   hunkId: string;
   lineIdx: number;

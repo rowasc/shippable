@@ -1,4 +1,4 @@
-import type { PullRequest, Reply } from "./types";
+import type { ChangeSet, Reply } from "./types";
 import {
   lineNoteReplyKey,
   hunkSummaryReplyKey,
@@ -6,9 +6,9 @@ import {
   userCommentKey,
 } from "./types";
 
-export const PRS: PullRequest[] = [
+export const CHANGESETS: ChangeSet[] = [
   {
-    id: "pr-42",
+    id: "cs-42",
     title: "Add user preferences panel",
     author: "romina",
     branch: "feat/user-preferences",
@@ -30,13 +30,13 @@ export const PRS: PullRequest[] = [
     ],
     files: [
       {
-        id: "pr-42/src/types/user.ts",
+        id: "cs-42/src/types/user.ts",
         path: "src/types/user.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-42/src/types/user.ts#h1",
+            id: "cs-42/src/types/user.ts#h1",
             header: "@@ -4,6 +4,14 @@ export interface User",
             oldStart: 4,
             oldCount: 6,
@@ -99,13 +99,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-42/src/utils/storage.ts",
+        id: "cs-42/src/utils/storage.ts",
         path: "src/utils/storage.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-42/src/utils/storage.ts#h1",
+            id: "cs-42/src/utils/storage.ts#h1",
             header: "@@ -1,3 +1,5 @@",
             oldStart: 1,
             oldCount: 3,
@@ -120,7 +120,7 @@ export const PRS: PullRequest[] = [
             ],
           },
           {
-            id: "pr-42/src/utils/storage.ts#h2",
+            id: "cs-42/src/utils/storage.ts#h2",
             header: "@@ -20,4 +22,24 @@ export function saveUser",
             oldStart: 20,
             oldCount: 4,
@@ -203,13 +203,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-42/src/components/PreferencesPanel.tsx",
+        id: "cs-42/src/components/PreferencesPanel.tsx",
         path: "src/components/PreferencesPanel.tsx",
         language: "tsx",
         status: "added",
         hunks: [
           {
-            id: "pr-42/src/components/PreferencesPanel.tsx#h1",
+            id: "cs-42/src/components/PreferencesPanel.tsx#h1",
             header: "@@ -0,0 +1,36 @@",
             oldStart: 0,
             oldCount: 0,
@@ -295,13 +295,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-42/src/components/__tests__/PreferencesPanel.test.tsx",
+        id: "cs-42/src/components/__tests__/PreferencesPanel.test.tsx",
         path: "src/components/__tests__/PreferencesPanel.test.tsx",
         language: "tsx",
         status: "added",
         hunks: [
           {
-            id: "pr-42/src/components/__tests__/PreferencesPanel.test.tsx#h1",
+            id: "cs-42/src/components/__tests__/PreferencesPanel.test.tsx#h1",
             header: "@@ -0,0 +1,18 @@",
             oldStart: 0,
             oldCount: 0,
@@ -344,7 +344,7 @@ export const PRS: PullRequest[] = [
     ],
   },
   {
-    id: "pr-57",
+    id: "cs-57",
     title: "Fix race condition in session hydration",
     author: "dan",
     branch: "fix/session-race",
@@ -361,13 +361,13 @@ export const PRS: PullRequest[] = [
     ],
     files: [
       {
-        id: "pr-57/shared/types.ts",
+        id: "cs-57/shared/types.ts",
         path: "shared/types.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-57/shared/types.ts#h1",
+            id: "cs-57/shared/types.ts#h1",
             header: "@@ -12,3 +12,8 @@ export interface Session",
             oldStart: 12,
             oldCount: 3,
@@ -388,13 +388,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-57/server/session.ts",
+        id: "cs-57/server/session.ts",
         path: "server/session.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-57/server/session.ts#h1",
+            id: "cs-57/server/session.ts#h1",
             header: "@@ -3,6 +3,8 @@ import { readStore }",
             oldStart: 3,
             oldCount: 6,
@@ -412,7 +412,7 @@ export const PRS: PullRequest[] = [
             ],
           },
           {
-            id: "pr-57/server/session.ts#h2",
+            id: "cs-57/server/session.ts#h2",
             header: "@@ -22,0 +26,14 @@ export function hydrate",
             oldStart: 22,
             oldCount: 0,
@@ -491,13 +491,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-57/server/middleware/auth.ts",
+        id: "cs-57/server/middleware/auth.ts",
         path: "server/middleware/auth.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-57/server/middleware/auth.ts#h1",
+            id: "cs-57/server/middleware/auth.ts#h1",
             header: "@@ -1,3 +1,4 @@",
             oldStart: 1,
             oldCount: 3,
@@ -511,7 +511,7 @@ export const PRS: PullRequest[] = [
             ],
           },
           {
-            id: "pr-57/server/middleware/auth.ts#h2",
+            id: "cs-57/server/middleware/auth.ts#h2",
             header: "@@ -8,3 +9,4 @@ export async function authMiddleware",
             oldStart: 8,
             oldCount: 3,
@@ -543,13 +543,13 @@ export const PRS: PullRequest[] = [
         ],
       },
       {
-        id: "pr-57/test/session.test.ts",
+        id: "cs-57/test/session.test.ts",
         path: "test/session.test.ts",
         language: "ts",
         status: "modified",
         hunks: [
           {
-            id: "pr-57/test/session.test.ts#h1",
+            id: "cs-57/test/session.test.ts#h1",
             header: "@@ -30,0 +31,16 @@ describe(\"session\"",
             oldStart: 30,
             oldCount: 0,
@@ -581,8 +581,8 @@ export const PRS: PullRequest[] = [
 ];
 
 export const SEED_REPLIES: Record<string, Reply[]> = {
-  // pr-42: thread on the "silent swallow" warning at storage.ts:28
-  [lineNoteReplyKey("pr-42/src/utils/storage.ts#h2", 6)]: [
+  // cs-42: thread on the "silent swallow" warning at storage.ts:28
+  [lineNoteReplyKey("cs-42/src/utils/storage.ts#h2", 6)]: [
     {
       id: "r1",
       author: "dan",
@@ -590,8 +590,8 @@ export const SEED_REPLIES: Record<string, Reply[]> = {
       createdAt: "2026-04-22T10:14:00Z",
     },
   ],
-  // pr-42: thread on the teammate note in PreferencesPanel.tsx
-  [teammateReplyKey("pr-42/src/components/PreferencesPanel.tsx#h1")]: [
+  // cs-42: thread on the teammate note in PreferencesPanel.tsx
+  [teammateReplyKey("cs-42/src/components/PreferencesPanel.tsx#h1")]: [
     {
       id: "r2",
       author: "romina",
@@ -599,8 +599,8 @@ export const SEED_REPLIES: Record<string, Reply[]> = {
       createdAt: "2026-04-22T10:30:00Z",
     },
   ],
-  // pr-57: thread on the hunk summary about ensureSessionReady
-  [hunkSummaryReplyKey("pr-57/server/session.ts#h2")]: [
+  // cs-57: thread on the hunk summary about ensureSessionReady
+  [hunkSummaryReplyKey("cs-57/server/session.ts#h2")]: [
     {
       id: "r3",
       author: "mina",
@@ -608,8 +608,8 @@ export const SEED_REPLIES: Record<string, Reply[]> = {
       createdAt: "2026-04-22T09:55:00Z",
     },
   ],
-  // pr-42: reviewer-started comment on notifyOnMention default (no AI note here)
-  [userCommentKey("pr-42/src/components/PreferencesPanel.tsx#h1", 7)]: [
+  // cs-42: reviewer-started comment on notifyOnMention default (no AI note here)
+  [userCommentKey("cs-42/src/components/PreferencesPanel.tsx#h1", 7)]: [
     {
       id: "u1",
       author: "dan",

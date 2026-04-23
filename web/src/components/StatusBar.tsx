@@ -1,15 +1,15 @@
-import type { Cursor, DiffFile, Hunk, PullRequest } from "../types";
+import type { ChangeSet, Cursor, DiffFile, Hunk } from "../types";
 
 interface Props {
-  pr: PullRequest;
+  cs: ChangeSet;
   file: DiffFile;
   hunk: Hunk;
   cursor: Cursor;
   coverage: number;
 }
 
-export function StatusBar({ pr, file, hunk, cursor, coverage }: Props) {
-  const fileIdx = pr.files.findIndex((f) => f.id === file.id);
+export function StatusBar({ cs, file, hunk, cursor, coverage }: Props) {
+  const fileIdx = cs.files.findIndex((f) => f.id === file.id);
   const hunkIdx = file.hunks.findIndex((h) => h.id === hunk.id);
   return (
     <footer className="statusbar">
@@ -20,10 +20,10 @@ export function StatusBar({ pr, file, hunk, cursor, coverage }: Props) {
         hunk {hunkIdx + 1}/{file.hunks.length}
       </span>
       <span className="statusbar__cell">
-        file {fileIdx + 1}/{pr.files.length}
+        file {fileIdx + 1}/{cs.files.length}
       </span>
       <span className="statusbar__cell statusbar__cell--cov">
-        pr reviewed {Math.round(coverage * 100)}%
+        reviewed {Math.round(coverage * 100)}%
       </span>
       <span className="statusbar__spacer" />
       <span className="statusbar__hint">

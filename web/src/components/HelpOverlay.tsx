@@ -21,8 +21,8 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
         <div className="help__title help__title--sub">testing</div>
         <table className="help__table">
           <tbody>
-            <tr><td><kbd>[</kbd>/<kbd>]</kbd></td><td>cycle sample PR</td></tr>
-            <tr><td><code>?pr=&lt;id&gt;</code></td><td>load a specific sample on boot</td></tr>
+            <tr><td><kbd>[</kbd>/<kbd>]</kbd></td><td>cycle sample changeset</td></tr>
+            <tr><td><code>?cs=&lt;id&gt;</code></td><td>load a specific sample on boot</td></tr>
           </tbody>
         </table>
         <div className="help__hint">Lines you've visited are marked as reviewed.</div>

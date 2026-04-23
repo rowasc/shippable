@@ -61,7 +61,7 @@ body,
 .topbar__sep {
   color: var(--fg-mute);
 }
-.topbar__pr {
+.topbar__id {
   color: var(--yellow);
 }
 .topbar__title {

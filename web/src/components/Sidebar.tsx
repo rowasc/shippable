@@ -1,20 +1,20 @@
-import type { PullRequest, ReviewState } from "../types";
+import type { ChangeSet, ReviewState } from "../types";
 import { fileCoverage } from "../state";
 
 interface Props {
-  pr: PullRequest;
+  cs: ChangeSet;
   state: ReviewState;
   onPickFile: (fileId: string) => void;
   onToggleSkill: (skillId: string) => void;
 }
 
-export function Sidebar({ pr, state, onPickFile, onToggleSkill }: Props) {
+export function Sidebar({ cs, state, onPickFile, onToggleSkill }: Props) {
   return (
     <aside className="sidebar">
       <section className="panel">
         <header className="panel__h">Files</header>
         <ul className="panel__list">
-          {pr.files.map((f) => {
+          {cs.files.map((f) => {
             const cov = fileCoverage(f, state.reviewedLines);
             const active = f.id === state.cursor.fileId;
             return (
@@ -41,7 +41,7 @@ export function Sidebar({ pr, state, onPickFile, onToggleSkill }: Props) {
           Skills <span className="panel__sub">contextual</span>
         </header>
         <ul className="panel__list">
-          {pr.skills.map((s) => {
+          {cs.skills.map((s) => {
             const active = state.activeSkills.has(s.id);
             return (
               <li key={s.id}>

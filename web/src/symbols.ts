@@ -1,10 +1,10 @@
-import type { Cursor, PullRequest } from "./types";
+import type { Cursor, ChangeSet } from "./types";
 
 export type SymbolIndex = Map<string, Cursor>;
 
-export function buildSymbolIndex(pr: PullRequest): SymbolIndex {
+export function buildSymbolIndex(cs: ChangeSet): SymbolIndex {
   const index: SymbolIndex = new Map();
-  for (const file of pr.files) {
+  for (const file of cs.files) {
     for (const hunk of file.hunks) {
       if (!hunk.definesSymbols?.length) continue;
       for (const sym of hunk.definesSymbols) {
@@ -14,7 +14,7 @@ export function buildSymbolIndex(pr: PullRequest): SymbolIndex {
           hunk.lines.findIndex((l) => l.text.includes(sym)),
         );
         index.set(sym, {
-          prId: pr.id,
+          changesetId: cs.id,
           fileId: file.id,
           hunkId: hunk.id,
           lineIdx,

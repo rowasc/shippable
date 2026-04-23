@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import "./App.css";
-import { PRS } from "./fixtures";
-import { initialState, reducer, prCoverage } from "./state";
+import { CHANGESETS } from "./fixtures";
+import { initialState, reducer, changesetCoverage } from "./state";
 import { maybeSuggest } from "./guide";
 import { Sidebar } from "./components/Sidebar";
 import { DiffView } from "./components/DiffView";
@@ -14,34 +14,34 @@ import type { Cursor } from "./types";
 import { lineNoteReplyKey, userCommentKey } from "./types";
 
 export default function App() {
-  const red = useMemo(() => reducer(PRS), []);
-  const [state, dispatch] = useReducer(red, PRS, (prs) => {
-    // ?pr=<id> loads a specific sample PR (not-very-visible testing affordance).
-    const initial = initialState(prs);
+  const red = useMemo(() => reducer(CHANGESETS), []);
+  const [state, dispatch] = useReducer(red, CHANGESETS, (changesets) => {
+    // ?cs=<id> loads a specific sample changeset (not-very-visible testing affordance).
+    const initial = initialState(changesets);
     const params = new URLSearchParams(window.location.search);
-    const wanted = params.get("pr");
+    const wanted = params.get("cs");
     if (!wanted) return initial;
-    const target = prs.find((p) => p.id === wanted);
+    const target = changesets.find((c) => c.id === wanted);
     if (!target) return initial;
     const file = target.files[0];
     const hunk = file.hunks[0];
     return {
       ...initial,
-      cursor: { prId: target.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
+      cursor: { changesetId: target.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
     };
   });
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
 
-  const pr = PRS.find((p) => p.id === state.cursor.prId)!;
-  const file = pr.files.find((f) => f.id === state.cursor.fileId)!;
+  const cs = CHANGESETS.find((c) => c.id === state.cursor.changesetId)!;
+  const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
-  const symbolIndex = useMemo(() => buildSymbolIndex(pr), [pr]);
+  const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
-  const suggestion = maybeSuggest(pr, state);
+  const suggestion = maybeSuggest(cs, state);
   const suggestionRef = useRef(suggestion);
   suggestionRef.current = suggestion;
 
@@ -69,7 +69,7 @@ export default function App() {
         dispatch({
           type: "SET_CURSOR",
           cursor: {
-            prId: state.cursor.prId,
+            changesetId: state.cursor.changesetId,
             fileId: s.toFileId,
             hunkId: s.toHunkId,
             lineIdx: s.toLineIdx,
@@ -146,11 +146,17 @@ export default function App() {
           break;
         case "[":
           e.preventDefault();
-          dispatch({ type: "SWITCH_PR", prId: prevPr(state.cursor.prId) });
+          dispatch({
+            type: "SWITCH_CHANGESET",
+            changesetId: prevChangeset(state.cursor.changesetId),
+          });
           break;
         case "]":
           e.preventDefault();
-          dispatch({ type: "SWITCH_PR", prId: nextPr(state.cursor.prId) });
+          dispatch({
+            type: "SWITCH_CHANGESET",
+            changesetId: nextChangeset(state.cursor.changesetId),
+          });
           break;
       }
     }
@@ -158,33 +164,33 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [showHelp, state.cursor]);
 
-  const coverage = prCoverage(pr, state.reviewedLines);
+  const coverage = changesetCoverage(cs, state.reviewedLines);
 
   return (
     <div className="app">
       <header className="topbar">
         <span className="topbar__brand">critica</span>
         <span className="topbar__sep">│</span>
-        <span className="topbar__pr">{pr.id}</span>
-        <span className="topbar__title">{pr.title}</span>
+        <span className="topbar__id">{cs.id}</span>
+        <span className="topbar__title">{cs.title}</span>
         <span className="topbar__sep">│</span>
         <span className="topbar__branch">
-          {pr.branch} → {pr.base}
+          {cs.branch} → {cs.base}
         </span>
         <span className="topbar__spacer" />
-        <span className="topbar__author">@{pr.author}</span>
+        <span className="topbar__author">@{cs.author}</span>
       </header>
 
       <div className={`main ${showInspector ? "main--with-inspector" : ""}`}>
         <Sidebar
-          pr={pr}
+          cs={cs}
           state={state}
           onPickFile={(fileId) => {
-            const f = pr.files.find((ff) => ff.id === fileId)!;
+            const f = cs.files.find((ff) => ff.id === fileId)!;
             dispatch({
               type: "SET_CURSOR",
               cursor: {
-                prId: pr.id,
+                changesetId: cs.id,
                 fileId,
                 hunkId: f.hunks[0].id,
                 lineIdx: 0,
@@ -254,7 +260,7 @@ export default function App() {
       <StatusBar
         file={file}
         hunk={hunk}
-        pr={pr}
+        cs={cs}
         cursor={state.cursor}
         coverage={coverage}
       />
@@ -262,11 +268,11 @@ export default function App() {
   );
 }
 
-function nextPr(id: string): string {
-  const i = PRS.findIndex((p) => p.id === id);
-  return PRS[(i + 1) % PRS.length].id;
+function nextChangeset(id: string): string {
+  const i = CHANGESETS.findIndex((c) => c.id === id);
+  return CHANGESETS[(i + 1) % CHANGESETS.length].id;
 }
-function prevPr(id: string): string {
-  const i = PRS.findIndex((p) => p.id === id);
-  return PRS[(i - 1 + PRS.length) % PRS.length].id;
+function prevChangeset(id: string): string {
+  const i = CHANGESETS.findIndex((c) => c.id === id);
+  return CHANGESETS[(i - 1 + CHANGESETS.length) % CHANGESETS.length].id;
 }

@@ -1,13 +1,13 @@
-import type { Cursor, PullRequest, Reply, ReviewState } from "./types";
+import type { Cursor, ChangeSet, Reply, ReviewState } from "./types";
 import { noteKey } from "./types";
 import { SEED_REPLIES } from "./fixtures";
 
-export function initialState(prs: PullRequest[]): ReviewState {
-  const pr = prs[0];
-  const file = pr.files[0];
+export function initialState(changesets: ChangeSet[]): ReviewState {
+  const cs = changesets[0];
+  const file = cs.files[0];
   const hunk = file.hunks[0];
   return {
-    cursor: { prId: pr.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
+    cursor: { changesetId: cs.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
     reviewedLines: markLine({}, hunk.id, 0),
     dismissedGuides: new Set(),
     activeSkills: new Set(),
@@ -34,7 +34,7 @@ export type Action =
   | { type: "MOVE_HUNK"; delta: number }
   | { type: "MOVE_FILE"; delta: number }
   | { type: "SET_CURSOR"; cursor: Cursor }
-  | { type: "SWITCH_PR"; prId: string }
+  | { type: "SWITCH_CHANGESET"; changesetId: string }
   | { type: "TOGGLE_SKILL"; skillId: string }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
@@ -42,23 +42,28 @@ export type Action =
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string };
 
-export function reducer(prs: PullRequest[]) {
+export function reducer(changesets: ChangeSet[]) {
   return function (state: ReviewState, action: Action): ReviewState {
     switch (action.type) {
       case "MOVE_LINE":
-        return moveLine(state, prs, action.delta);
+        return moveLine(state, changesets, action.delta);
       case "MOVE_HUNK":
-        return moveHunk(state, prs, action.delta);
+        return moveHunk(state, changesets, action.delta);
       case "MOVE_FILE":
-        return moveFile(state, prs, action.delta);
+        return moveFile(state, changesets, action.delta);
       case "SET_CURSOR":
         return applyCursor(state, action.cursor);
-      case "SWITCH_PR": {
-        const pr = prs.find((p) => p.id === action.prId);
-        if (!pr) return state;
-        const file = pr.files[0];
+      case "SWITCH_CHANGESET": {
+        const cs = changesets.find((c) => c.id === action.changesetId);
+        if (!cs) return state;
+        const file = cs.files[0];
         const hunk = file.hunks[0];
-        const cursor = { prId: pr.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 };
+        const cursor = {
+          changesetId: cs.id,
+          fileId: file.id,
+          hunkId: hunk.id,
+          lineIdx: 0,
+        };
         return {
           ...state,
           cursor,
@@ -113,9 +118,9 @@ function togglein(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-function moveLine(state: ReviewState, prs: PullRequest[], delta: number): ReviewState {
-  const pr = prs.find((p) => p.id === state.cursor.prId)!;
-  const file = pr.files.find((f) => f.id === state.cursor.fileId)!;
+function moveLine(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
+  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+  const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
   const hunk = file.hunks[hunkIdx];
   const nextLineIdx = state.cursor.lineIdx + delta;
@@ -137,9 +142,9 @@ function moveLine(state: ReviewState, prs: PullRequest[], delta: number): Review
   return applyCursor(state, { ...state.cursor, lineIdx: nextLineIdx });
 }
 
-function moveHunk(state: ReviewState, prs: PullRequest[], delta: number): ReviewState {
-  const pr = prs.find((p) => p.id === state.cursor.prId)!;
-  const file = pr.files.find((f) => f.id === state.cursor.fileId)!;
+function moveHunk(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
+  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+  const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
   const next = Math.max(0, Math.min(file.hunks.length - 1, hunkIdx + delta));
   if (next === hunkIdx) return state;
@@ -150,12 +155,12 @@ function moveHunk(state: ReviewState, prs: PullRequest[], delta: number): Review
   });
 }
 
-function moveFile(state: ReviewState, prs: PullRequest[], delta: number): ReviewState {
-  const pr = prs.find((p) => p.id === state.cursor.prId)!;
-  const fileIdx = pr.files.findIndex((f) => f.id === state.cursor.fileId);
-  const next = Math.max(0, Math.min(pr.files.length - 1, fileIdx + delta));
+function moveFile(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
+  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+  const fileIdx = cs.files.findIndex((f) => f.id === state.cursor.fileId);
+  const next = Math.max(0, Math.min(cs.files.length - 1, fileIdx + delta));
   if (next === fileIdx) return state;
-  const nextFile = pr.files[next];
+  const nextFile = cs.files[next];
   return applyCursor(state, {
     ...state.cursor,
     fileId: nextFile.id,
@@ -194,13 +199,13 @@ export function fileCoverage(
   return total === 0 ? 0 : seen / total;
 }
 
-export function prCoverage(
-  pr: PullRequest,
+export function changesetCoverage(
+  cs: ChangeSet,
   reviewed: Record<string, Set<number>>,
 ): number {
   let total = 0;
   let seen = 0;
-  for (const f of pr.files) {
+  for (const f of cs.files) {
     for (const h of f.hunks) {
       total += h.lines.length;
       seen += reviewed[h.id]?.size ?? 0;
