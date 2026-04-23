@@ -388,7 +388,8 @@ body,
   grid-template-columns: 40px 40px 14px 16px 1fr;
   gap: 0;
   padding: 0 8px;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   position: relative;
 }
 .line__ai {
@@ -396,6 +397,7 @@ body,
   color: var(--fg-mute);
   user-select: none;
   font-weight: 600;
+  align-self: start;
 }
 .line--ai-info .line__ai { color: var(--accent); }
 .line--ai-question .line__ai { color: var(--yellow); }
@@ -413,15 +415,16 @@ body,
   padding-right: 8px;
   font-variant-numeric: tabular-nums;
   user-select: none;
+  align-self: start;
 }
 .line__sign {
   text-align: center;
   user-select: none;
+  align-self: start;
 }
 .line__text {
   color: var(--fg);
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
 }
 .line--add {
   background: var(--green-bg);
