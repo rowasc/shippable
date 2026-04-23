@@ -22,7 +22,10 @@ export type ActionId =
   | "COLLAPSE_SELECTION"
   | "TOGGLE_HELP"
   | "TOGGLE_INSPECTOR"
+  | "TOGGLE_PLAN"
+  | "CLOSE_PLAN"
   | "TOGGLE_ACK"
+  | "MARK_FILE_REVIEWED"
   | "START_REPLY"
   | "START_COMMENT"
   | "ACCEPT_GUIDE"
@@ -32,7 +35,11 @@ export type ActionId =
   | "NEXT_CHANGESET"
   | "OPEN_LOAD";
 
-export type ContextPredicate = "hasSuggestion" | "lineHasAiNote" | "hasSelection";
+export type ContextPredicate =
+  | "hasSuggestion"
+  | "lineHasAiNote"
+  | "hasSelection"
+  | "hasPlan";
 
 export type KeyGroup = "navigation" | "review" | "guide" | "ui" | "testing";
 
@@ -68,6 +75,7 @@ export const KEYMAP: KeyEntry[] = [
   { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK" },
   { key: "r", label: "reply to AI note on current line",     group: "review", action: "START_REPLY",   when: "lineHasAiNote" },
   { key: "c", label: "start a new comment on current line",  group: "review", action: "START_COMMENT" },
+  { key: "M", shift: true, label: "mark current file as read (toggle)", group: "review", action: "MARK_FILE_REVIEWED" },
 
   // ── guide ───────────────────────────────────────────────────────────────────
   { key: "Enter",  label: "accept guide", group: "guide", action: "ACCEPT_GUIDE",  when: "hasSuggestion" },
@@ -78,6 +86,9 @@ export const KEYMAP: KeyEntry[] = [
   // ── ui ──────────────────────────────────────────────────────────────────────
   { key: "?",      label: "toggle this help",    group: "ui", action: "TOGGLE_HELP" },
   { key: "i",      label: "toggle AI inspector", group: "ui", action: "TOGGLE_INSPECTOR" },
+  { key: "p",      label: "where to start (plan)", group: "ui", action: "TOGGLE_PLAN" },
+  // Escape closes plan before falling through to help / guide Escape handlers.
+  { key: "Escape", when: "hasPlan", label: "close plan", group: "ui", action: "CLOSE_PLAN" },
   { key: "Escape", label: "close help",          group: "ui", action: "CLOSE_HELP" },
   { key: "L", shift: true, label: "load a changeset (URL / file / paste)", group: "ui", action: "OPEN_LOAD" },
 

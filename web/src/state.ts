@@ -44,7 +44,8 @@ export type Action =
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
-  | { type: "TOGGLE_EXPAND_FILE"; fileId: string };
+  | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
+  | { type: "MARK_FILE_REVIEWED"; fileId: string };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
   switch (action.type) {
@@ -142,6 +143,27 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "TOGGLE_EXPAND_FILE":
       return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
+    case "MARK_FILE_REVIEWED": {
+      const cs = state.changesets.find((c) => c.id === state.cursor.changesetId);
+      if (!cs) return state;
+      const file = cs.files.find((f) => f.id === action.fileId);
+      if (!file) return state;
+
+      // Toggle: if the file is already fully covered, clear its marks;
+      // otherwise mark every line of every hunk as reviewed.
+      const isFullyReviewed = fileCoverage(file, state.reviewedLines) >= 1;
+      const next: Record<string, Set<number>> = { ...state.reviewedLines };
+      for (const h of file.hunks) {
+        if (isFullyReviewed) {
+          next[h.id] = new Set();
+        } else {
+          const set = new Set(next[h.id] ?? []);
+          for (let i = 0; i < h.lines.length; i++) set.add(i);
+          next[h.id] = set;
+        }
+      }
+      return { ...state, reviewedLines: next };
+    }
   }
 }
 
