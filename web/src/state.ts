@@ -2,12 +2,13 @@ import type { Cursor, ChangeSet, Reply, ReviewState } from "./types";
 import { noteKey } from "./types";
 import { SEED_REPLIES } from "./fixtures";
 
-export function initialState(changesets: ChangeSet[]): ReviewState {
-  const cs = changesets[0];
+export function initialState(seed: ChangeSet[]): ReviewState {
+  const cs = seed[0];
   const file = cs.files[0];
   const hunk = file.hunks[0];
   return {
     cursor: { changesetId: cs.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
+    changesets: seed,
     reviewedLines: markLine({}, hunk.id, 0),
     dismissedGuides: new Set(),
     activeSkills: new Set(),
@@ -35,6 +36,7 @@ export type Action =
   | { type: "MOVE_FILE"; delta: number }
   | { type: "SET_CURSOR"; cursor: Cursor }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
+  | { type: "LOAD_CHANGESET"; changeset: ChangeSet }
   | { type: "TOGGLE_SKILL"; skillId: string }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
@@ -42,73 +44,93 @@ export type Action =
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string };
 
-export function reducer(changesets: ChangeSet[]) {
-  return function (state: ReviewState, action: Action): ReviewState {
-    switch (action.type) {
-      case "MOVE_LINE":
-        return moveLine(state, changesets, action.delta);
-      case "MOVE_HUNK":
-        return moveHunk(state, changesets, action.delta);
-      case "MOVE_FILE":
-        return moveFile(state, changesets, action.delta);
-      case "SET_CURSOR":
-        return applyCursor(state, action.cursor);
-      case "SWITCH_CHANGESET": {
-        const cs = changesets.find((c) => c.id === action.changesetId);
-        if (!cs) return state;
-        const file = cs.files[0];
-        const hunk = file.hunks[0];
-        const cursor = {
+export function reducer(state: ReviewState, action: Action): ReviewState {
+  switch (action.type) {
+    case "MOVE_LINE":
+      return moveLine(state, action.delta);
+    case "MOVE_HUNK":
+      return moveHunk(state, action.delta);
+    case "MOVE_FILE":
+      return moveFile(state, action.delta);
+    case "SET_CURSOR":
+      return applyCursor(state, action.cursor);
+    case "SWITCH_CHANGESET": {
+      const cs = state.changesets.find((c) => c.id === action.changesetId);
+      if (!cs) return state;
+      const file = cs.files[0];
+      const hunk = file.hunks[0];
+      const cursor = {
+        changesetId: cs.id,
+        fileId: file.id,
+        hunkId: hunk.id,
+        lineIdx: 0,
+      };
+      return {
+        ...state,
+        cursor,
+        reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
+      };
+    }
+    case "LOAD_CHANGESET": {
+      const cs = action.changeset;
+      const file = cs.files[0];
+      const hunk = file?.hunks[0];
+      if (!file || !hunk) return state;
+      const existingIdx = state.changesets.findIndex((c) => c.id === cs.id);
+      const nextList =
+        existingIdx >= 0
+          ? state.changesets.map((c, i) => (i === existingIdx ? cs : c))
+          : [...state.changesets, cs];
+      return {
+        ...state,
+        changesets: nextList,
+        cursor: {
           changesetId: cs.id,
           fileId: file.id,
           hunkId: hunk.id,
           lineIdx: 0,
-        };
-        return {
-          ...state,
-          cursor,
-          reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
-        };
-      }
-      case "TOGGLE_SKILL": {
-        const next = new Set(state.activeSkills);
-        if (next.has(action.skillId)) next.delete(action.skillId);
-        else next.add(action.skillId);
-        return { ...state, activeSkills: next };
-      }
-      case "DISMISS_GUIDE": {
-        const next = new Set(state.dismissedGuides);
-        next.add(action.guideId);
-        return { ...state, dismissedGuides: next };
-      }
-      case "TOGGLE_ACK": {
-        const key = noteKey(action.hunkId, action.lineIdx);
-        const next = new Set(state.ackedNotes);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        return { ...state, ackedNotes: next };
-      }
-      case "ADD_REPLY": {
-        const existing = state.replies[action.targetKey] ?? [];
-        return {
-          ...state,
-          replies: {
-            ...state.replies,
-            [action.targetKey]: [...existing, action.reply],
-          },
-        };
-      }
-      case "SET_EXPAND_LEVEL": {
-        const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
-        return {
-          ...state,
-          [field]: { ...state[field], [action.hunkId]: Math.max(0, action.level) },
-        };
-      }
-      case "TOGGLE_EXPAND_FILE":
-        return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
+        },
+        reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
+      };
     }
-  };
+    case "TOGGLE_SKILL": {
+      const next = new Set(state.activeSkills);
+      if (next.has(action.skillId)) next.delete(action.skillId);
+      else next.add(action.skillId);
+      return { ...state, activeSkills: next };
+    }
+    case "DISMISS_GUIDE": {
+      const next = new Set(state.dismissedGuides);
+      next.add(action.guideId);
+      return { ...state, dismissedGuides: next };
+    }
+    case "TOGGLE_ACK": {
+      const key = noteKey(action.hunkId, action.lineIdx);
+      const next = new Set(state.ackedNotes);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return { ...state, ackedNotes: next };
+    }
+    case "ADD_REPLY": {
+      const existing = state.replies[action.targetKey] ?? [];
+      return {
+        ...state,
+        replies: {
+          ...state.replies,
+          [action.targetKey]: [...existing, action.reply],
+        },
+      };
+    }
+    case "SET_EXPAND_LEVEL": {
+      const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
+      return {
+        ...state,
+        [field]: { ...state[field], [action.hunkId]: Math.max(0, action.level) },
+      };
+    }
+    case "TOGGLE_EXPAND_FILE":
+      return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
+  }
 }
 
 function togglein(set: Set<string>, key: string): Set<string> {
@@ -118,8 +140,8 @@ function togglein(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-function moveLine(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
-  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+function moveLine(state: ReviewState, delta: number): ReviewState {
+  const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
   const hunk = file.hunks[hunkIdx];
@@ -142,8 +164,8 @@ function moveLine(state: ReviewState, changesets: ChangeSet[], delta: number): R
   return applyCursor(state, { ...state.cursor, lineIdx: nextLineIdx });
 }
 
-function moveHunk(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
-  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+function moveHunk(state: ReviewState, delta: number): ReviewState {
+  const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
   const next = Math.max(0, Math.min(file.hunks.length - 1, hunkIdx + delta));
@@ -155,8 +177,8 @@ function moveHunk(state: ReviewState, changesets: ChangeSet[], delta: number): R
   });
 }
 
-function moveFile(state: ReviewState, changesets: ChangeSet[], delta: number): ReviewState {
-  const cs = changesets.find((c) => c.id === state.cursor.changesetId)!;
+function moveFile(state: ReviewState, delta: number): ReviewState {
+  const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const fileIdx = cs.files.findIndex((f) => f.id === state.cursor.fileId);
   const next = Math.max(0, Math.min(cs.files.length - 1, fileIdx + delta));
   if (next === fileIdx) return state;

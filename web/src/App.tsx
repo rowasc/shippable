@@ -9,13 +9,13 @@ import { StatusBar } from "./components/StatusBar";
 import { GuidePrompt } from "./components/GuidePrompt";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Inspector } from "./components/Inspector";
+import { LoadModal } from "./components/LoadModal";
 import { buildSymbolIndex } from "./symbols";
 import type { Cursor } from "./types";
 import { lineNoteReplyKey, userCommentKey } from "./types";
 
 export default function App() {
-  const red = useMemo(() => reducer(CHANGESETS), []);
-  const [state, dispatch] = useReducer(red, CHANGESETS, (changesets) => {
+  const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
     // ?cs=<id> loads a specific sample changeset (not-very-visible testing affordance).
     const initial = initialState(changesets);
     const params = new URLSearchParams(window.location.search);
@@ -32,9 +32,10 @@ export default function App() {
   });
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
+  const [showLoad, setShowLoad] = useState(false);
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
 
-  const cs = CHANGESETS.find((c) => c.id === state.cursor.changesetId)!;
+  const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
@@ -148,21 +149,25 @@ export default function App() {
           e.preventDefault();
           dispatch({
             type: "SWITCH_CHANGESET",
-            changesetId: prevChangeset(state.cursor.changesetId),
+            changesetId: cycleChangeset(state.changesets, state.cursor.changesetId, -1),
           });
           break;
         case "]":
           e.preventDefault();
           dispatch({
             type: "SWITCH_CHANGESET",
-            changesetId: nextChangeset(state.cursor.changesetId),
+            changesetId: cycleChangeset(state.changesets, state.cursor.changesetId, 1),
           });
+          break;
+        case "L":
+          e.preventDefault();
+          setShowLoad(true);
           break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, state.cursor]);
+  }, [showHelp, state.cursor, state.changesets]);
 
   const coverage = changesetCoverage(cs, state.reviewedLines);
 
@@ -179,6 +184,13 @@ export default function App() {
         </span>
         <span className="topbar__spacer" />
         <span className="topbar__author">@{cs.author}</span>
+        <button
+          className="topbar__btn"
+          onClick={() => setShowLoad(true)}
+          title="load a changeset from URL, file, or paste (shift+L)"
+        >
+          + load
+        </button>
       </header>
 
       <div className={`main ${showInspector ? "main--with-inspector" : ""}`}>
@@ -257,6 +269,15 @@ export default function App() {
         />
       )}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+      {showLoad && (
+        <LoadModal
+          onClose={() => setShowLoad(false)}
+          onLoad={(newCs) => {
+            dispatch({ type: "LOAD_CHANGESET", changeset: newCs });
+            setShowLoad(false);
+          }}
+        />
+      )}
       <StatusBar
         file={file}
         hunk={hunk}
@@ -268,11 +289,13 @@ export default function App() {
   );
 }
 
-function nextChangeset(id: string): string {
-  const i = CHANGESETS.findIndex((c) => c.id === id);
-  return CHANGESETS[(i + 1) % CHANGESETS.length].id;
-}
-function prevChangeset(id: string): string {
-  const i = CHANGESETS.findIndex((c) => c.id === id);
-  return CHANGESETS[(i - 1 + CHANGESETS.length) % CHANGESETS.length].id;
+function cycleChangeset(
+  list: { id: string }[],
+  currentId: string,
+  delta: number,
+): string {
+  if (list.length <= 1) return currentId;
+  const i = list.findIndex((c) => c.id === currentId);
+  const n = list.length;
+  return list[(i + delta + n) % n].id;
 }

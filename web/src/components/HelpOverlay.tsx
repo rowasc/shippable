@@ -16,6 +16,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
             <tr><td><kbd>Enter</kbd>/<kbd>y</kbd></td><td>accept guide</td></tr>
             <tr><td><kbd>Esc</kbd>/<kbd>n</kbd></td><td>dismiss guide / close help</td></tr>
             <tr><td><kbd>?</kbd></td><td>toggle this help</td></tr>
+            <tr><td><kbd>⇧L</kbd></td><td>load a changeset (URL / file / paste)</td></tr>
           </tbody>
         </table>
         <div className="help__title help__title--sub">testing</div>

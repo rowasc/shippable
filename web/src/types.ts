@@ -89,6 +89,7 @@ export interface Reply {
 
 export interface ReviewState {
   cursor: Cursor;
+  changesets: ChangeSet[];
   reviewedLines: Record<string, Set<number>>;
   dismissedGuides: Set<string>;
   activeSkills: Set<string>;
