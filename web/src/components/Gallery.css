@@ -1,0 +1,120 @@
+.gallery {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+.gallery__nav {
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.gallery__brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.gallery__brand-name {
+  color: var(--magenta);
+  font-weight: 600;
+}
+.gallery__brand-sep {
+  color: var(--fg-mute);
+}
+.gallery__brand-label {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+.gallery__list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+.gallery__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.gallery__item:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+.gallery__item--active {
+  background: var(--bg-3);
+  color: var(--fg);
+  border-left-color: var(--accent);
+}
+.gallery__item-name {
+  color: var(--yellow);
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+.gallery__item--active .gallery__item-name {
+  color: var(--accent);
+}
+.gallery__item-desc {
+  color: var(--fg-mute);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+}
+.gallery__main {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-width: 0;
+  min-height: 0;
+}
+.gallery__topbar {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  font-size: 12px;
+}
+.gallery__topbar-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+.gallery__topbar-sep {
+  color: var(--fg-mute);
+}
+.gallery__topbar-desc {
+  color: var(--fg-dim);
+}
+.gallery__topbar-nav {
+  margin-left: auto;
+  color: var(--accent);
+  font-size: 12px;
+}
+.gallery__stage {
+  overflow: auto;
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+.gallery__stage-inner {
+  width: 100%;
+  max-width: 820px;
+  min-width: 0;
+}

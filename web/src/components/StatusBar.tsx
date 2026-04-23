@@ -1,29 +1,18 @@
-import type { ChangeSet, Cursor, DiffFile, Hunk } from "../types";
+import "./StatusBar.css";
+import type { StatusBarViewModel } from "../view";
 
 interface Props {
-  cs: ChangeSet;
-  file: DiffFile;
-  hunk: Hunk;
-  cursor: Cursor;
-  coverage: number;
+  viewModel: StatusBarViewModel;
 }
 
-export function StatusBar({ cs, file, hunk, cursor, coverage }: Props) {
-  const fileIdx = cs.files.findIndex((f) => f.id === file.id);
-  const hunkIdx = file.hunks.findIndex((h) => h.id === hunk.id);
+export function StatusBar({ viewModel }: Props) {
   return (
     <footer className="statusbar">
-      <span className="statusbar__cell">
-        line {cursor.lineIdx + 1}/{hunk.lines.length}
-      </span>
-      <span className="statusbar__cell">
-        hunk {hunkIdx + 1}/{file.hunks.length}
-      </span>
-      <span className="statusbar__cell">
-        file {fileIdx + 1}/{cs.files.length}
-      </span>
+      <span className="statusbar__cell">{viewModel.lineDisplay}</span>
+      <span className="statusbar__cell">{viewModel.hunkDisplay}</span>
+      <span className="statusbar__cell">{viewModel.fileDisplay}</span>
       <span className="statusbar__cell statusbar__cell--cov">
-        reviewed {Math.round(coverage * 100)}%
+        {viewModel.coverageDisplay}
       </span>
       <span className="statusbar__spacer" />
       <span className="statusbar__hint">

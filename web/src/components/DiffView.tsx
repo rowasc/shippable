@@ -1,73 +1,57 @@
+import "./DiffView.css";
 import { useEffect, useRef } from "react";
-import type { DiffFile, DiffLine, Hunk, Reply } from "../types";
-import { noteKey, userCommentKey } from "../types";
-import { hunkCoverage } from "../state";
+import type { DiffLine } from "../types";
+import type {
+  DiffViewModel,
+  DiffLineViewModel,
+  ExpandBarViewModel,
+  FullFileLineViewModel,
+  HunkViewModel,
+} from "../view";
 
 interface Props {
-  file: DiffFile;
-  currentHunkId: string;
-  cursorLineIdx: number;
-  reviewed: Record<string, Set<number>>;
-  acked: Set<string>;
-  replies: Record<string, Reply[]>;
-  expandLevelAbove: Record<string, number>;
-  expandLevelBelow: Record<string, number>;
-  fileFullyExpanded: boolean;
+  viewModel: DiffViewModel;
   onSetExpandLevel: (hunkId: string, dir: "above" | "below", level: number) => void;
   onToggleExpandFile: (fileId: string) => void;
 }
 
-export function DiffView({
-  file,
-  currentHunkId,
-  cursorLineIdx,
-  reviewed,
-  acked,
-  replies,
-  expandLevelAbove,
-  expandLevelBelow,
-  fileFullyExpanded,
-  onSetExpandLevel,
-  onToggleExpandFile,
-}: Props) {
+export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
 
+  // Derive the current hunk id and cursor line idx from the view model for the
+  // scroll effect — we need to know when the cursor moves.
+  const currentHunk = viewModel.hunks.find((h) => h.isCurrent);
+  const cursorLineIdx = currentHunk?.lines.findIndex((l) => l.isCursor) ?? -1;
+
   useEffect(() => {
-    if (!fileFullyExpanded) cursorRef.current?.scrollIntoView({ block: "nearest" });
-  }, [currentHunkId, cursorLineIdx, file.id, fileFullyExpanded]);
+    if (!viewModel.fileFullyExpanded)
+      cursorRef.current?.scrollIntoView({ block: "nearest" });
+  }, [currentHunk?.id, cursorLineIdx, viewModel.fileId, viewModel.fileFullyExpanded]);
 
   return (
     <main className="diff">
       <header className="diff__path">
-        <span className="diff__path-icon">▚</span> {file.path}
-        <span className="diff__path-status">[{file.status}]</span>
+        <span className="diff__path-icon">▚</span> {viewModel.path}
+        <span className="diff__path-status">[{viewModel.status}]</span>
         <span className="diff__spacer" />
-        {file.fullContent && (
+        {viewModel.canExpandFile && (
           <button
-            className={`diff__expand-file ${fileFullyExpanded ? "diff__expand-file--on" : ""}`}
-            onClick={() => onToggleExpandFile(file.id)}
+            className={`diff__expand-file ${viewModel.fileFullyExpanded ? "diff__expand-file--on" : ""}`}
+            onClick={() => onToggleExpandFile(viewModel.fileId)}
             title="expand / collapse entire file"
           >
-            {fileFullyExpanded ? "↙ collapse to hunks" : "↗ expand entire file"}
+            {viewModel.fileFullyExpanded ? "↙ collapse to hunks" : "↗ expand entire file"}
           </button>
         )}
       </header>
 
-      {fileFullyExpanded && file.fullContent ? (
-        <FullFileView file={file} />
+      {viewModel.fileFullyExpanded ? (
+        <FullFileView path={viewModel.path} lines={viewModel.fullFileLines} />
       ) : (
-        file.hunks.map((h) => (
+        viewModel.hunks.map((h) => (
           <HunkBlock
             key={h.id}
             hunk={h}
-            isCurrent={h.id === currentHunkId}
-            cursorLineIdx={h.id === currentHunkId ? cursorLineIdx : -1}
-            reviewed={reviewed[h.id] ?? new Set()}
-            acked={acked}
-            replies={replies}
-            coverage={hunkCoverage(h, reviewed)}
-            levelAbove={expandLevelAbove[h.id] ?? 0}
-            levelBelow={expandLevelBelow[h.id] ?? 0}
             onSetExpandLevel={(dir, level) => onSetExpandLevel(h.id, dir, level)}
             cursorRef={cursorRef}
           />
@@ -79,49 +63,17 @@ export function DiffView({
 
 function HunkBlock({
   hunk,
-  isCurrent,
-  cursorLineIdx,
-  reviewed,
-  acked,
-  replies,
-  coverage,
-  levelAbove,
-  levelBelow,
   onSetExpandLevel,
   cursorRef,
 }: {
-  hunk: Hunk;
-  isCurrent: boolean;
-  cursorLineIdx: number;
-  reviewed: Set<number>;
-  acked: Set<string>;
-  replies: Record<string, Reply[]>;
-  coverage: number;
-  levelAbove: number;
-  levelBelow: number;
+  hunk: HunkViewModel;
   onSetExpandLevel: (dir: "above" | "below", level: number) => void;
   cursorRef: React.RefObject<HTMLDivElement | null>;
 }) {
-  const aboveBlocks = hunk.expandAbove ?? [];
-  const belowBlocks = hunk.expandBelow ?? [];
-
-  // When rendering above the hunk, we need blocks in reverse index order:
-  // the farthest-revealed block appears at the top, nearest immediately above
-  // the hunk body. levelAbove is count of revealed blocks starting at index 0.
-  const revealedAbove = aboveBlocks
-    .slice(0, levelAbove)
-    .map((b, i) => ({ block: b, idx: i }))
-    .reverse();
-  const revealedBelow = belowBlocks.slice(0, levelBelow);
-
-  const nextAboveSize =
-    levelAbove < aboveBlocks.length ? aboveBlocks[levelAbove].length : 0;
-  const nextBelowSize =
-    levelBelow < belowBlocks.length ? belowBlocks[levelBelow].length : 0;
   return (
-    <section className={`hunk ${isCurrent ? "hunk--current" : ""}`}>
+    <section className={`hunk ${hunk.isCurrent ? "hunk--current" : ""}`}>
       <header className="hunk__h">
-        <span className="hunk__meter">{Math.round(coverage * 100)}%</span>
+        <span className="hunk__meter">{Math.round(hunk.coverage * 100)}%</span>
         <span className="hunk__header-text">{hunk.header}</span>
         <span className="hunk__badges">
           {hunk.aiReviewed && <Badge kind="ai">AI ✓</Badge>}
@@ -130,35 +82,32 @@ function HunkBlock({
               kind={hunk.teammateReview.verdict === "approve" ? "approve" : "comment"}
               title={hunk.teammateReview.note}
             >
-              @{hunk.teammateReview.user} {hunk.teammateReview.verdict === "approve" ? "✓" : "💬"}
+              @{hunk.teammateReview.user}{" "}
+              {hunk.teammateReview.verdict === "approve" ? "✓" : "💬"}
             </Badge>
           )}
-          {hunk.definesSymbols?.map((s) => (
+          {hunk.definesSymbols.map((s) => (
             <Badge key={s} kind="symbol">def {s}</Badge>
           ))}
-          {hunk.referencesSymbols?.map((s) => (
+          {hunk.referencesSymbols.map((s) => (
             <Badge key={s} kind="ref">ref {s}</Badge>
           ))}
         </span>
       </header>
 
-      {aboveBlocks.length > 0 && (
+      {hunk.expandAbove && (
         <ExpandBar
           dir="above"
-          level={levelAbove}
-          maxLevel={aboveBlocks.length}
-          nextSize={nextAboveSize}
-          onExpand={() => onSetExpandLevel("above", levelAbove + 1)}
+          bar={hunk.expandAbove}
+          onExpand={() => onSetExpandLevel("above", hunk.expandAbove!.level + 1)}
           onCollapse={() => onSetExpandLevel("above", 0)}
         />
       )}
-      {revealedAbove.length > 0 && (
+      {hunk.contextAbove.length > 0 && (
         <div className="hunk__body hunk__body--context">
-          {revealedAbove.map(({ block, idx }) =>
-            block.map((l, i) => (
-              <ContextLine key={`ea-${idx}-${i}`} line={l} />
-            )),
-          )}
+          {hunk.contextAbove.map((l, i) => (
+            <ContextLine key={`ea-${i}`} line={l} />
+          ))}
         </div>
       )}
 
@@ -167,31 +116,23 @@ function HunkBlock({
           <Line
             key={i}
             line={line}
-            isCursor={isCurrent && i === cursorLineIdx}
-            isReviewed={reviewed.has(i)}
-            isAcked={acked.has(noteKey(hunk.id, i))}
-            hasUserComment={(replies[userCommentKey(hunk.id, i)]?.length ?? 0) > 0}
-            cursorRef={isCurrent && i === cursorLineIdx ? cursorRef : undefined}
+            cursorRef={line.isCursor ? cursorRef : undefined}
           />
         ))}
       </div>
 
-      {revealedBelow.length > 0 && (
+      {hunk.contextBelow.length > 0 && (
         <div className="hunk__body hunk__body--context">
-          {revealedBelow.map((block, bi) =>
-            block.map((l, i) => (
-              <ContextLine key={`eb-${bi}-${i}`} line={l} />
-            )),
-          )}
+          {hunk.contextBelow.map((l, i) => (
+            <ContextLine key={`eb-${i}`} line={l} />
+          ))}
         </div>
       )}
-      {belowBlocks.length > 0 && (
+      {hunk.expandBelow && (
         <ExpandBar
           dir="below"
-          level={levelBelow}
-          maxLevel={belowBlocks.length}
-          nextSize={nextBelowSize}
-          onExpand={() => onSetExpandLevel("below", levelBelow + 1)}
+          bar={hunk.expandBelow}
+          onExpand={() => onSetExpandLevel("below", hunk.expandBelow!.level + 1)}
           onCollapse={() => onSetExpandLevel("below", 0)}
         />
       )}
@@ -201,39 +142,35 @@ function HunkBlock({
 
 function ExpandBar({
   dir,
-  level,
-  maxLevel,
-  nextSize,
+  bar,
   onExpand,
   onCollapse,
 }: {
   dir: "above" | "below";
-  level: number;
-  maxLevel: number;
-  nextSize: number;
+  bar: ExpandBarViewModel;
   onExpand: () => void;
   onCollapse: () => void;
 }) {
   const arrow = dir === "above" ? "↑" : "↓";
-  const hasMore = level < maxLevel;
+  const hasMore = bar.level < bar.maxLevel;
   return (
     <div className="expandbar">
       {hasMore ? (
         <button className="expandbar__main" onClick={onExpand}>
           <span className="expandbar__arrow">{arrow}</span>{" "}
-          expand {nextSize} line{nextSize === 1 ? "" : "s"} {dir} (to next block{" "}
+          expand {bar.nextSize} line{bar.nextSize === 1 ? "" : "s"} {dir} (to next block{" "}
           <span className="expandbar__lvl">
-            {level + 1}/{maxLevel}
+            {bar.level + 1}/{bar.maxLevel}
           </span>
           )
         </button>
       ) : (
         <span className="expandbar__main expandbar__main--done">
-          <span className="expandbar__arrow">{arrow}</span> all {maxLevel} block
-          {maxLevel === 1 ? "" : "s"} {dir} revealed
+          <span className="expandbar__arrow">{arrow}</span> all {bar.maxLevel} block
+          {bar.maxLevel === 1 ? "" : "s"} {dir} revealed
         </span>
       )}
-      {level > 0 && (
+      {bar.level > 0 && (
         <button className="expandbar__collapse" onClick={onCollapse} title="collapse all">
           × collapse
         </button>
@@ -254,14 +191,20 @@ function ContextLine({ line }: { line: DiffLine }) {
   );
 }
 
-function FullFileView({ file }: { file: DiffFile }) {
+function FullFileView({
+  path,
+  lines,
+}: {
+  path: string;
+  lines: FullFileLineViewModel[];
+}) {
   return (
     <section className="hunk hunk--full">
       <header className="hunk__h">
-        <span className="hunk__header-text">entire file · {file.path}</span>
+        <span className="hunk__header-text">entire file · {path}</span>
       </header>
       <div className="hunk__body">
-        {file.fullContent!.map((line, i) => (
+        {lines.map((line, i) => (
           <div
             key={i}
             className={`line line--${line.kind} ${
@@ -271,9 +214,7 @@ function FullFileView({ file }: { file: DiffFile }) {
             <span className="line__old">{line.oldNo ?? ""}</span>
             <span className="line__new">{line.newNo ?? ""}</span>
             <span className="line__ai" aria-hidden="true">{" "}</span>
-            <span className="line__sign">
-              {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-            </span>
+            <span className="line__sign">{line.sign}</span>
             <span className="line__text">{line.text || " "}</span>
           </div>
         ))}
@@ -284,46 +225,27 @@ function FullFileView({ file }: { file: DiffFile }) {
 
 function Line({
   line,
-  isCursor,
-  isReviewed,
-  isAcked,
-  hasUserComment,
   cursorRef,
 }: {
-  line: DiffLine;
-  isCursor: boolean;
-  isReviewed: boolean;
-  isAcked: boolean;
-  hasUserComment: boolean;
+  line: DiffLineViewModel;
   cursorRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const sign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
   const sev = line.aiNote?.severity;
-  const aiGlyph = isAcked
-    ? "✓"
-    : sev === "warning"
-      ? "!"
-      : sev === "question"
-        ? "?"
-        : sev
-          ? "✦"
-          : hasUserComment
-            ? "“"
-            : " ";
   return (
     <div
       ref={cursorRef}
-      className={`line line--${line.kind} ${isCursor ? "line--cursor" : ""} ${
-        isReviewed ? "line--reviewed" : ""
-      } ${sev ? `line--ai-${sev}` : ""} ${isAcked ? "line--ai-acked" : ""} ${
-        hasUserComment ? "line--has-comment" : ""
+      className={`line line--${line.kind} ${line.isCursor ? "line--cursor" : ""} ${
+        line.isReviewed ? "line--reviewed" : ""
+      } ${sev ? `line--ai-${sev}` : ""} ${line.isAcked ? "line--ai-acked" : ""} ${
+        line.hasUserComment ? "line--has-comment" : ""
       }`}
-      title={line.aiNote?.summary ?? (hasUserComment ? "user comment" : undefined)}
+      title={line.aiNote?.summary ?? (line.hasUserComment ? "user comment" : undefined)}
     >
       <span className="line__old">{line.oldNo ?? ""}</span>
       <span className="line__new">{line.newNo ?? ""}</span>
       <span className="line__ai" aria-hidden="true">
-        {aiGlyph}
+        {line.aiGlyph}
       </span>
       <span className="line__sign">{sign}</span>
       <span className="line__text">{line.text || " "}</span>

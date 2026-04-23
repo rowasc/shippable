@@ -1,3 +1,4 @@
+import "./LoadModal.css";
 import { useRef, useState } from "react";
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";

@@ -12,7 +12,15 @@ import { Inspector } from "./components/Inspector";
 import { LoadModal } from "./components/LoadModal";
 import { buildSymbolIndex } from "./symbols";
 import type { Cursor } from "./types";
-import { lineNoteReplyKey, userCommentKey } from "./types";
+import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
+import { KEYMAP } from "./keymap";
+import {
+  buildDiffViewModel,
+  buildSidebarViewModel,
+  buildStatusBarViewModel,
+  buildGuidePromptViewModel,
+  buildInspectorViewModel,
+} from "./view";
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
@@ -64,112 +72,134 @@ export default function App() {
         return;
       }
 
-      if (suggestionRef.current && (e.key === "Enter" || e.key === "y")) {
-        const s = suggestionRef.current;
-        e.preventDefault();
-        dispatch({
-          type: "SET_CURSOR",
-          cursor: {
-            changesetId: state.cursor.changesetId,
-            fileId: s.toFileId,
-            hunkId: s.toHunkId,
-            lineIdx: s.toLineIdx,
-          },
-        });
-        return;
-      }
-      if (suggestionRef.current && (e.key === "Escape" || e.key === "n")) {
-        e.preventDefault();
-        dispatch({ type: "DISMISS_GUIDE", guideId: suggestionRef.current.id });
-        return;
-      }
+      // Evaluate runtime predicates once so keymap entries can reference them.
+      const currentLine = hunk.lines[state.cursor.lineIdx];
+      const predicates: Record<string, boolean> = {
+        hasSuggestion: !!suggestionRef.current,
+        lineHasAiNote: !!currentLine?.aiNote,
+        hasSelection: !!state.selection,
+      };
 
-      switch (e.key) {
-        case "j":
-        case "ArrowDown":
-          e.preventDefault();
+      // Find the matching keymap entry (key + optional shift requirement +
+      // optional context predicate).
+      const entry = KEYMAP.find(
+        (km) =>
+          km.key === e.key &&
+          (km.shift === undefined ? true : km.shift === e.shiftKey) &&
+          (km.when === undefined ? true : predicates[km.when]),
+      );
+
+      if (!entry) return;
+
+      e.preventDefault();
+
+      switch (entry.action) {
+        case "MOVE_LINE_DOWN":
           dispatch({ type: "MOVE_LINE", delta: 1 });
           break;
-        case "k":
-        case "ArrowUp":
-          e.preventDefault();
+        case "MOVE_LINE_UP":
           dispatch({ type: "MOVE_LINE", delta: -1 });
           break;
-        case "J":
-          e.preventDefault();
+        case "MOVE_LINE_DOWN_EXTEND":
+          dispatch({ type: "MOVE_LINE", delta: 1, extend: true });
+          break;
+        case "MOVE_LINE_UP_EXTEND":
+          dispatch({ type: "MOVE_LINE", delta: -1, extend: true });
+          break;
+        case "COLLAPSE_SELECTION":
+          dispatch({ type: "COLLAPSE_SELECTION" });
+          break;
+        case "MOVE_HUNK_DOWN":
           dispatch({ type: "MOVE_HUNK", delta: 1 });
           break;
-        case "K":
-          e.preventDefault();
+        case "MOVE_HUNK_UP":
           dispatch({ type: "MOVE_HUNK", delta: -1 });
           break;
-        case "Tab":
-          e.preventDefault();
-          dispatch({ type: "MOVE_FILE", delta: e.shiftKey ? -1 : 1 });
+        case "MOVE_FILE_NEXT":
+          dispatch({ type: "MOVE_FILE", delta: 1 });
           break;
-        case "?":
-          e.preventDefault();
+        case "MOVE_FILE_PREV":
+          dispatch({ type: "MOVE_FILE", delta: -1 });
+          break;
+        case "TOGGLE_HELP":
           setShowHelp((v) => !v);
           break;
-        case "i":
-          e.preventDefault();
+        case "TOGGLE_INSPECTOR":
           setShowInspector((v) => !v);
           break;
-        case "a":
-          e.preventDefault();
+        case "TOGGLE_ACK":
           dispatch({
             type: "TOGGLE_ACK",
             hunkId: state.cursor.hunkId,
             lineIdx: state.cursor.lineIdx,
           });
           break;
-        case "r": {
-          // open the reply composer for the current line's note if any
-          const cline = hunk.lines[state.cursor.lineIdx];
-          if (cline?.aiNote) {
-            e.preventDefault();
-            setDraftingKey(
-              lineNoteReplyKey(state.cursor.hunkId, state.cursor.lineIdx),
-            );
-            setShowInspector(true);
-          }
-          break;
-        }
-        case "c":
-          e.preventDefault();
+        case "START_REPLY":
           setDraftingKey(
-            userCommentKey(state.cursor.hunkId, state.cursor.lineIdx),
+            lineNoteReplyKey(state.cursor.hunkId, state.cursor.lineIdx),
           );
           setShowInspector(true);
           break;
-        case "Escape":
+        case "START_COMMENT": {
+          const sel = state.selection;
+          const key =
+            sel && sel.hunkId === state.cursor.hunkId
+              ? blockCommentKey(
+                  sel.hunkId,
+                  Math.min(sel.anchor, sel.head),
+                  Math.max(sel.anchor, sel.head),
+                )
+              : userCommentKey(state.cursor.hunkId, state.cursor.lineIdx);
+          setDraftingKey(key);
+          setShowInspector(true);
+          break;
+        }
+        case "ACCEPT_GUIDE": {
+          const s = suggestionRef.current!;
+          dispatch({
+            type: "SET_CURSOR",
+            cursor: {
+              changesetId: state.cursor.changesetId,
+              fileId: s.toFileId,
+              hunkId: s.toHunkId,
+              lineIdx: s.toLineIdx,
+            },
+          });
+          break;
+        }
+        case "DISMISS_GUIDE":
+          dispatch({ type: "DISMISS_GUIDE", guideId: suggestionRef.current!.id });
+          break;
+        case "CLOSE_HELP":
           if (showHelp) setShowHelp(false);
           break;
-        case "[":
-          e.preventDefault();
+        case "OPEN_LOAD":
+          setShowLoad(true);
+          break;
+        case "PREV_CHANGESET":
           dispatch({
             type: "SWITCH_CHANGESET",
             changesetId: cycleChangeset(state.changesets, state.cursor.changesetId, -1),
           });
           break;
-        case "]":
-          e.preventDefault();
+        case "NEXT_CHANGESET":
           dispatch({
             type: "SWITCH_CHANGESET",
             changesetId: cycleChangeset(state.changesets, state.cursor.changesetId, 1),
           });
           break;
-        case "L":
-          e.preventDefault();
-          setShowLoad(true);
-          break;
       }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, state.cursor, state.changesets]);
+  }, [showHelp, state.cursor, state.changesets, state.selection]);
 
   const coverage = changesetCoverage(cs, state.reviewedLines);
+  const fileIdx = cs.files.findIndex((f) => f.id === file.id);
+  const hunkIdx = file.hunks.findIndex((h) => h.id === hunk.id);
+  const guideViewModel = suggestion
+    ? buildGuidePromptViewModel(suggestion, symbolIndex, cs.id)
+    : null;
 
   return (
     <div className="app">
@@ -195,8 +225,13 @@ export default function App() {
 
       <div className={`main ${showInspector ? "main--with-inspector" : ""}`}>
         <Sidebar
-          cs={cs}
-          state={state}
+          viewModel={buildSidebarViewModel({
+            files: cs.files,
+            skills: cs.skills,
+            currentFileId: state.cursor.fileId,
+            reviewedLines: state.reviewedLines,
+            activeSkills: state.activeSkills,
+          })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId)!;
             dispatch({
@@ -212,15 +247,18 @@ export default function App() {
           onToggleSkill={(id) => dispatch({ type: "TOGGLE_SKILL", skillId: id })}
         />
         <DiffView
-          file={file}
-          currentHunkId={hunk.id}
-          cursorLineIdx={state.cursor.lineIdx}
-          reviewed={state.reviewedLines}
-          acked={state.ackedNotes}
-          replies={state.replies}
-          expandLevelAbove={state.expandLevelAbove}
-          expandLevelBelow={state.expandLevelBelow}
-          fileFullyExpanded={state.fullExpandedFiles.has(file.id)}
+          viewModel={buildDiffViewModel({
+            file,
+            currentHunkId: hunk.id,
+            cursorLineIdx: state.cursor.lineIdx,
+            reviewed: state.reviewedLines,
+            acked: state.ackedNotes,
+            replies: state.replies,
+            expandLevelAbove: state.expandLevelAbove,
+            expandLevelBelow: state.expandLevelBelow,
+            fileFullyExpanded: state.fullExpandedFiles.has(file.id),
+            selection: state.selection,
+          })}
           onSetExpandLevel={(hunkId, dir, level) =>
             dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
           }
@@ -230,14 +268,17 @@ export default function App() {
         />
         {showInspector && (
           <Inspector
-            file={file}
-            hunk={hunk}
-            line={line}
-            cursor={state.cursor}
+            viewModel={buildInspectorViewModel({
+              file,
+              hunk,
+              line,
+              cursor: state.cursor,
+              symbols: symbolIndex,
+              acked: state.ackedNotes,
+              replies: state.replies,
+              draftingKey,
+            })}
             symbols={symbolIndex}
-            acked={state.ackedNotes}
-            replies={state.replies}
-            draftingKey={draftingKey}
             onJump={jumpTo}
             onToggleAck={(hunkId, lineIdx) =>
               dispatch({ type: "TOGGLE_ACK", hunkId, lineIdx })
@@ -261,10 +302,9 @@ export default function App() {
         )}
       </div>
 
-      {suggestion && (
+      {guideViewModel && (
         <GuidePrompt
-          suggestion={suggestion}
-          symbols={symbolIndex}
+          viewModel={guideViewModel}
           onJump={jumpTo}
         />
       )}
@@ -279,11 +319,15 @@ export default function App() {
         />
       )}
       <StatusBar
-        file={file}
-        hunk={hunk}
-        cs={cs}
-        cursor={state.cursor}
-        coverage={coverage}
+        viewModel={buildStatusBarViewModel({
+          totalFiles: cs.files.length,
+          fileIdx,
+          totalHunks: file.hunks.length,
+          hunkIdx,
+          totalLines: hunk.lines.length,
+          lineIdx: state.cursor.lineIdx,
+          coverage,
+        })}
       />
     </div>
   );

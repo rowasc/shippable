@@ -1,3 +1,4 @@
+import "./ReplyThread.css";
 import { useEffect, useRef, useState } from "react";
 import type { Cursor, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";

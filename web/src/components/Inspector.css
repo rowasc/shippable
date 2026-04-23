@@ -1,0 +1,210 @@
+.inspector {
+  border-left: 1px solid var(--border);
+  background: var(--bg-2);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.inspector__h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+}
+.inspector__h-hint {
+  color: var(--fg-mute);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.inspector__sec {
+  padding: 10px 12px;
+  border-bottom: 1px dashed var(--border);
+}
+.inspector__sec:last-child {
+  border-bottom: none;
+}
+.inspector__sec-h {
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.inspector__loc {
+  color: var(--blue);
+  margin-bottom: 4px;
+  font-size: 11px;
+  word-break: break-all;
+}
+.inspector__code {
+  background: var(--bg);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--fg);
+}
+.inspector__code--add {
+  border-left: 3px solid var(--green);
+}
+.inspector__code--del {
+  border-left: 3px solid var(--red);
+}
+.inspector__code-sign {
+  color: var(--fg-mute);
+  margin-right: 6px;
+}
+.inspector__summary {
+  color: var(--fg);
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.inspector__empty {
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.inspector__sec-count {
+  color: var(--fg-mute);
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 6px;
+  font-size: 10.5px;
+}
+
+.notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ainote {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  padding: 6px 10px;
+  background: var(--bg);
+  position: relative;
+}
+.ainote--info { border-left-color: var(--accent); }
+.ainote--question { border-left-color: var(--yellow); }
+.ainote--warning { border-left-color: var(--red); }
+.ainote--current {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+.ainote--current::before {
+  content: "▸";
+  position: absolute;
+  left: -10px;
+  top: 4px;
+  color: var(--accent);
+}
+.ainote--acked {
+  opacity: 0.55;
+  border-left-color: var(--fg-mute);
+}
+.ainote--user {
+  border-left-color: var(--blue);
+}
+.ainote--clickable {
+  cursor: pointer;
+}
+.ainote--clickable:hover {
+  background: var(--bg-3);
+}
+.ainote__summary--muted {
+  color: var(--fg-dim);
+  font-weight: normal;
+}
+.ainote--acked .ainote__sev {
+  color: var(--fg-mute);
+}
+.ainote__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+.ainote__lineno {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  padding: 0 5px;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.ainote__lineno:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ainote__ack {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ainote__ack:hover {
+  border-color: var(--fg-dim);
+  color: var(--fg);
+}
+.ainote__ack--on {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(166, 227, 161, 0.08);
+}
+.ainote__ack--on:hover {
+  color: var(--green);
+  border-color: var(--green);
+}
+.ainote__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+.ainote__sev {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ainote--info .ainote__sev { color: var(--accent); }
+.ainote--question .ainote__sev { color: var(--yellow); }
+.ainote--warning .ainote__sev { color: var(--red); }
+.ainote__summary {
+  color: var(--fg);
+  font-weight: 500;
+}
+.ainote__detail {
+  color: var(--fg-dim);
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}

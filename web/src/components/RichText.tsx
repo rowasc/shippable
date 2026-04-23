@@ -1,3 +1,4 @@
+import "./RichText.css";
 import type { Cursor } from "../types";
 import type { SymbolIndex } from "../symbols";
 

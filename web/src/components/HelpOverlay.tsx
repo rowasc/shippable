@@ -1,32 +1,95 @@
+import "./HelpOverlay.css";
+import { KEYMAP, type KeyGroup } from "../keymap";
+
+/** Render a key name as a human-friendly label for <kbd>. */
+function keyLabel(key: string): string {
+  switch (key) {
+    case "ArrowDown": return "↓";
+    case "ArrowUp":   return "↑";
+    case "Escape":    return "Esc";
+    case "Enter":     return "Enter";
+    case "Tab":       return "Tab";
+    default:          return key;
+  }
+}
+
+/** Build a display string for a single KeyEntry's key chord. */
+function chordLabel(key: string, shift?: boolean): string {
+  if (shift) {
+    // For letter keys the uppercase already implies shift; avoid "⇧L".
+    const isLetter = key.length === 1 && key !== key.toLowerCase();
+    return isLetter ? key : `⇧${key}`;
+  }
+  if (key === "Tab") return "Tab";
+  return keyLabel(key);
+}
+
+/** Collect unique display rows per action within a group. */
+function groupRows(group: KeyGroup): { chord: string; label: string }[] {
+  const seen = new Map<string, string[]>();
+  for (const entry of KEYMAP) {
+    if (entry.group !== group) continue;
+    // Group by (action, label) so aliased keys merge into one row.
+    const rowKey = `${entry.action}|${entry.label}`;
+    if (!seen.has(rowKey)) seen.set(rowKey, []);
+    seen.get(rowKey)!.push(chordLabel(entry.key, entry.shift));
+  }
+  return Array.from(seen.entries()).map(([rowKey, chords]) => ({
+    chord: chords.join("/"),
+    label: rowKey.split("|")[1],
+  }));
+}
+
+const MAIN_GROUPS: KeyGroup[] = ["navigation", "review", "guide", "ui"];
+
 export function HelpOverlay({ onClose }: { onClose: () => void }) {
+  const mainRows = MAIN_GROUPS.flatMap((g) => groupRows(g));
+  const testingRows = groupRows("testing");
+
   return (
     <div className="help" onClick={onClose}>
       <div className="help__box" onClick={(e) => e.stopPropagation()}>
         <div className="help__title">keybindings</div>
         <table className="help__table">
           <tbody>
-            <tr><td><kbd>j</kbd>/<kbd>k</kbd></td><td>next / previous line</td></tr>
-            <tr><td><kbd>↓</kbd>/<kbd>↑</kbd></td><td>(same)</td></tr>
-            <tr><td><kbd>J</kbd>/<kbd>K</kbd></td><td>next / previous hunk</td></tr>
-            <tr><td><kbd>Tab</kbd>/<kbd>⇧Tab</kbd></td><td>next / previous file</td></tr>
-            <tr><td><kbd>i</kbd></td><td>toggle AI inspector</td></tr>
-            <tr><td><kbd>a</kbd></td><td>ack / un-ack AI note on current line</td></tr>
-            <tr><td><kbd>r</kbd></td><td>reply to AI note on current line</td></tr>
-            <tr><td><kbd>c</kbd></td><td>start a new comment on current line</td></tr>
-            <tr><td><kbd>Enter</kbd>/<kbd>y</kbd></td><td>accept guide</td></tr>
-            <tr><td><kbd>Esc</kbd>/<kbd>n</kbd></td><td>dismiss guide / close help</td></tr>
-            <tr><td><kbd>?</kbd></td><td>toggle this help</td></tr>
-            <tr><td><kbd>⇧L</kbd></td><td>load a changeset (URL / file / paste)</td></tr>
+            {mainRows.map(({ chord, label }) => (
+              <tr key={chord + label}>
+                <td>
+                  {chord.split("/").map((part, i) => (
+                    <span key={part}>
+                      {i > 0 && "/"}
+                      <kbd>{part}</kbd>
+                    </span>
+                  ))}
+                </td>
+                <td>{label}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
         <div className="help__title help__title--sub">testing</div>
         <table className="help__table">
           <tbody>
-            <tr><td><kbd>[</kbd>/<kbd>]</kbd></td><td>cycle sample changeset</td></tr>
-            <tr><td><code>?cs=&lt;id&gt;</code></td><td>load a specific sample on boot</td></tr>
+            {testingRows.map(({ chord, label }) => (
+              <tr key={chord + label}>
+                <td>
+                  {chord.split("/").map((part, i) => (
+                    <span key={part}>
+                      {i > 0 && "/"}
+                      <kbd>{part}</kbd>
+                    </span>
+                  ))}
+                </td>
+                <td>{label}</td>
+              </tr>
+            ))}
+            <tr>
+              <td><code>?cs=&lt;id&gt;</code></td>
+              <td>load a specific sample on boot</td>
+            </tr>
           </tbody>
         </table>
-        <div className="help__hint">Lines you've visited are marked as reviewed.</div>
+        <div className="help__hint">Lines you&apos;ve visited are marked as reviewed.</div>
       </div>
     </div>
   );

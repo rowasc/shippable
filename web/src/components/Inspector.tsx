@@ -1,12 +1,11 @@
-import type { Cursor, DiffFile, Hunk, DiffLine, Reply } from "../types";
-import {
-  noteKey,
-  lineNoteReplyKey,
-  hunkSummaryReplyKey,
-  teammateReplyKey,
-  userCommentKey,
-} from "../types";
+import "./Inspector.css";
+import type { Cursor, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
+import type {
+  InspectorViewModel,
+  AiNoteRowItem,
+  UserCommentRowItem,
+} from "../view";
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
 import type { MouseEvent } from "react";
@@ -27,14 +26,8 @@ function cardClick(jump: () => void) {
 }
 
 interface Props {
-  file: DiffFile;
-  hunk: Hunk;
-  line: DiffLine;
-  cursor: Cursor;
+  viewModel: InspectorViewModel;
   symbols: SymbolIndex;
-  acked: Set<string>;
-  replies: Record<string, Reply[]>;
-  draftingKey: string | null;
   onJump: (c: Cursor) => void;
   onToggleAck: (hunkId: string, lineIdx: number) => void;
   onStartDraft: (key: string) => void;
@@ -43,23 +36,15 @@ interface Props {
 }
 
 export function Inspector({
-  file,
-  hunk,
-  line,
-  cursor,
+  viewModel,
   symbols,
-  acked,
-  replies,
-  draftingKey,
   onJump,
   onToggleAck,
   onStartDraft,
   onCancelDraft,
   onSubmitReply,
 }: Props) {
-  const notes = hunk.lines
-    .map((l, i) => ({ line: l, idx: i }))
-    .filter(({ line }) => line.aiNote);
+  const vm = viewModel;
 
   return (
     <aside className="inspector">
@@ -71,202 +56,142 @@ export function Inspector({
       </header>
 
       <section className="inspector__sec">
-        <div className="inspector__loc">
-          {file.path}
-          {line.newNo ? `:${line.newNo}` : line.oldNo ? `:${line.oldNo}` : ""}
-        </div>
-        <div className={`inspector__code inspector__code--${line.kind}`}>
-          <span className="inspector__code-sign">
-            {line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}
-          </span>
-          {line.text || " "}
+        <div className="inspector__loc">{vm.locationLabel}</div>
+        <div className={`inspector__code inspector__code--${vm.lineKind}`}>
+          <span className="inspector__code-sign">{vm.lineSign}</span>
+          {vm.lineText || " "}
         </div>
       </section>
 
       <section className="inspector__sec">
         <div className="inspector__sec-h">
           AI concerns in this hunk
-          <span className="inspector__sec-count">
-            {notes.length === 0
-              ? "none"
-              : `${countAcked(notes, hunk.id, acked)}/${notes.length} acked`}
-          </span>
+          <span className="inspector__sec-count">{vm.aiNoteCountLabel}</span>
         </div>
-        {notes.length === 0 ? (
+        {!vm.hasAiNotes ? (
           <div className="inspector__empty">No AI notes on this hunk.</div>
         ) : (
           <ul className="notes">
-            {notes.map(({ line: l, idx }) => {
-              const rkey = lineNoteReplyKey(hunk.id, idx);
-              return (
-                <NoteCard
-                  key={idx}
-                  line={l}
-                  lineIdx={idx}
-                  isCurrent={idx === cursor.lineIdx}
-                  isAcked={acked.has(noteKey(hunk.id, idx))}
-                  replyKey={rkey}
-                  replies={replies[rkey] ?? []}
-                  isDrafting={draftingKey === rkey}
-                  onClickLineNo={() =>
-                    onJump({ ...cursor, hunkId: hunk.id, lineIdx: idx })
-                  }
-                  onAck={() => onToggleAck(hunk.id, idx)}
-                  onStartDraft={() => onStartDraft(rkey)}
-                  onCancelDraft={onCancelDraft}
-                  onSubmitReply={(body) => onSubmitReply(rkey, body)}
-                  symbols={symbols}
-                  onJump={onJump}
-                />
-              );
-            })}
+            {vm.aiNoteRows.map((row) => (
+              <NoteCard
+                key={row.lineIdx}
+                row={row}
+                symbols={symbols}
+                onJump={onJump}
+                onAck={() => {
+                  // Extract hunkId from the replyKey ("note:hunkId:lineIdx")
+                  // by using the jumpTarget which carries hunkId directly.
+                  onToggleAck(row.jumpTarget.hunkId, row.lineIdx);
+                }}
+                onClickLineNo={() => onJump(row.jumpTarget)}
+                onStartDraft={() => onStartDraft(row.replyKey)}
+                onCancelDraft={onCancelDraft}
+                onSubmitReply={(body) => onSubmitReply(row.replyKey, body)}
+              />
+            ))}
           </ul>
         )}
       </section>
 
-      {hunk.aiSummary && (
+      {vm.aiSummary !== null && vm.aiSummaryReplyKey !== null && (
         <HunkSummarySection
-          hunk={hunk}
-          replies={replies[hunkSummaryReplyKey(hunk.id)] ?? []}
-          replyKey={hunkSummaryReplyKey(hunk.id)}
-          isDrafting={draftingKey === hunkSummaryReplyKey(hunk.id)}
-          onStartDraft={() => onStartDraft(hunkSummaryReplyKey(hunk.id))}
-          onCancelDraft={onCancelDraft}
-          onSubmitReply={(body) =>
-            onSubmitReply(hunkSummaryReplyKey(hunk.id), body)
-          }
-          onJumpToHunk={() =>
-            onJump({ ...cursor, hunkId: hunk.id, lineIdx: 0 })
-          }
+          summary={vm.aiSummary}
+          replies={vm.aiSummaryReplies}
+          replyKey={vm.aiSummaryReplyKey}
+          isDrafting={vm.aiSummaryIsDrafting}
+          jumpTarget={vm.aiSummaryJumpTarget!}
           symbols={symbols}
           onJump={onJump}
+          onStartDraft={() => onStartDraft(vm.aiSummaryReplyKey!)}
+          onCancelDraft={onCancelDraft}
+          onSubmitReply={(body) => onSubmitReply(vm.aiSummaryReplyKey!, body)}
         />
       )}
 
-      {hunk.teammateReview && (
+      {vm.teammate !== null && (
         <TeammateSection
-          hunk={hunk}
-          replies={replies[teammateReplyKey(hunk.id)] ?? []}
-          replyKey={teammateReplyKey(hunk.id)}
-          isDrafting={draftingKey === teammateReplyKey(hunk.id)}
-          onStartDraft={() => onStartDraft(teammateReplyKey(hunk.id))}
-          onCancelDraft={onCancelDraft}
-          onSubmitReply={(body) =>
-            onSubmitReply(teammateReplyKey(hunk.id), body)
-          }
-          onJumpToHunk={() =>
-            onJump({ ...cursor, hunkId: hunk.id, lineIdx: 0 })
-          }
+          teammate={vm.teammate}
           symbols={symbols}
           onJump={onJump}
+          onStartDraft={() => onStartDraft(vm.teammate!.replyKey)}
+          onCancelDraft={onCancelDraft}
+          onSubmitReply={(body) => onSubmitReply(vm.teammate!.replyKey, body)}
         />
       )}
 
       <UserCommentsSection
-        hunk={hunk}
-        cursor={cursor}
-        replies={replies}
-        draftingKey={draftingKey}
+        vm={vm}
+        symbols={symbols}
         onJump={onJump}
         onStartDraft={onStartDraft}
         onCancelDraft={onCancelDraft}
         onSubmitReply={onSubmitReply}
-        symbols={symbols}
       />
     </aside>
   );
 }
 
 function UserCommentsSection({
-  hunk,
-  cursor,
-  replies,
-  draftingKey,
+  vm,
+  symbols,
   onJump,
   onStartDraft,
   onCancelDraft,
   onSubmitReply,
-  symbols,
 }: {
-  hunk: Hunk;
-  cursor: Cursor;
-  replies: Record<string, Reply[]>;
-  draftingKey: string | null;
+  vm: InspectorViewModel;
+  symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
   onStartDraft: (key: string) => void;
   onCancelDraft: () => void;
   onSubmitReply: (key: string, body: string) => void;
-  symbols: SymbolIndex;
 }) {
-  const threads = hunk.lines
-    .map((l, i) => ({ line: l, idx: i, key: userCommentKey(hunk.id, i) }))
-    .filter(
-      ({ key }) => (replies[key]?.length ?? 0) > 0 || draftingKey === key,
-    );
-
-  const curKey = userCommentKey(hunk.id, cursor.lineIdx);
-  const curLine = hunk.lines[cursor.lineIdx];
-  const curLineNo = curLine?.newNo ?? curLine?.oldNo ?? cursor.lineIdx + 1;
-  const curHasThread = threads.some((t) => t.key === curKey);
-
   return (
     <section className="inspector__sec">
       <div className="inspector__sec-h">
         Your comments
-        <span className="inspector__sec-count">
-          {threads.length === 0 ? "none" : `${threads.length} thread${threads.length > 1 ? "s" : ""}`}
-        </span>
+        <span className="inspector__sec-count">{vm.userCommentCountLabel}</span>
       </div>
 
-      {!curHasThread && draftingKey !== curKey && (
+      {vm.showNewCommentCta && (
         <button
           className="thread__start thread__start--cta"
-          onClick={() => onStartDraft(curKey)}
+          onClick={() => onStartDraft(vm.currentLineCommentKey)}
         >
-          + comment on L{curLineNo} <span className="thread__start-hint">press <kbd>c</kbd></span>
+          + comment on L{vm.currentLineNo}{" "}
+          <span className="thread__start-hint">
+            press <kbd>c</kbd>
+          </span>
         </button>
       )}
 
-      {threads.length === 0 && draftingKey !== curKey ? (
+      {vm.userCommentRows.length === 0 && !vm.showDraftStub ? (
         <div className="inspector__empty">No user comments on this hunk yet.</div>
       ) : (
         <ul className="notes">
-          {/* if drafting on current line and no thread exists yet, show a stub card */}
-          {!curHasThread && draftingKey === curKey && (
+          {vm.draftStubRow && (
             <UserThreadCard
-              lineIdx={cursor.lineIdx}
-              line={curLine}
-              threadKey={curKey}
-              replies={[]}
-              isDrafting
-              isCurrent
-              onClickLineNo={() =>
-                onJump({ ...cursor, hunkId: hunk.id, lineIdx: cursor.lineIdx })
-              }
-              onStartDraft={() => onStartDraft(curKey)}
-              onCancelDraft={onCancelDraft}
-              onSubmitReply={(body) => onSubmitReply(curKey, body)}
+              row={vm.draftStubRow}
               symbols={symbols}
               onJump={onJump}
+              onClickLineNo={() => onJump(vm.draftStubRow!.jumpTarget)}
+              onStartDraft={() => onStartDraft(vm.draftStubRow!.threadKey)}
+              onCancelDraft={onCancelDraft}
+              onSubmitReply={(body) =>
+                onSubmitReply(vm.draftStubRow!.threadKey, body)
+              }
             />
           )}
-          {threads.map(({ line: l, idx, key }) => (
+          {vm.userCommentRows.map((row) => (
             <UserThreadCard
-              key={idx}
-              lineIdx={idx}
-              line={l}
-              threadKey={key}
-              replies={replies[key] ?? []}
-              isDrafting={draftingKey === key}
-              isCurrent={idx === cursor.lineIdx}
-              onClickLineNo={() =>
-                onJump({ ...cursor, hunkId: hunk.id, lineIdx: idx })
-              }
-              onStartDraft={() => onStartDraft(key)}
-              onCancelDraft={onCancelDraft}
-              onSubmitReply={(body) => onSubmitReply(key, body)}
+              key={row.lineIdx}
+              row={row}
               symbols={symbols}
               onJump={onJump}
+              onClickLineNo={() => onJump(row.jumpTarget)}
+              onStartDraft={() => onStartDraft(row.threadKey)}
+              onCancelDraft={onCancelDraft}
+              onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
             />
           ))}
         </ul>
@@ -276,36 +201,26 @@ function UserCommentsSection({
 }
 
 function UserThreadCard({
-  lineIdx,
-  line,
-  replies,
-  isDrafting,
-  isCurrent,
+  row,
+  symbols,
+  onJump,
   onClickLineNo,
   onStartDraft,
   onCancelDraft,
   onSubmitReply,
-  symbols,
-  onJump,
 }: {
-  lineIdx: number;
-  line: DiffLine;
-  threadKey: string;
-  replies: Reply[];
-  isDrafting: boolean;
-  isCurrent: boolean;
+  row: UserCommentRowItem;
+  symbols: SymbolIndex;
+  onJump: (c: Cursor) => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
   onCancelDraft: () => void;
   onSubmitReply: (body: string) => void;
-  symbols: SymbolIndex;
-  onJump: (c: Cursor) => void;
 }) {
-  const lineNo = line?.newNo ?? line?.oldNo ?? lineIdx + 1;
   return (
     <li
       className={`ainote ainote--user ainote--clickable ${
-        isCurrent ? "ainote--current" : ""
+        row.isCurrent ? "ainote--current" : ""
       }`}
       onClick={cardClick(onClickLineNo)}
       title="click to jump to this line"
@@ -316,17 +231,17 @@ function UserThreadCard({
           onClick={onClickLineNo}
           title="jump to this line"
         >
-          L{lineNo}
+          L{row.lineNo}
         </button>
         <span className="ainote__summary ainote__summary--muted">
-          {replies.length === 0
+          {row.replies.length === 0
             ? "new thread"
-            : `${replies.length} message${replies.length > 1 ? "s" : ""}`}
+            : `${row.replies.length} message${row.replies.length > 1 ? "s" : ""}`}
         </span>
       </div>
       <ReplyThread
-        replies={replies}
-        isDrafting={isDrafting}
+        replies={row.replies}
+        isDrafting={row.isDrafting}
         onStartDraft={onStartDraft}
         onCancelDraft={onCancelDraft}
         onSubmitReply={onSubmitReply}
@@ -337,40 +252,30 @@ function UserThreadCard({
   );
 }
 
-interface CardCommon {
-  replies: Reply[];
-  replyKey: string;
-  isDrafting: boolean;
+function NoteCard({
+  row,
+  symbols,
+  onJump,
+  onAck,
+  onClickLineNo,
+  onStartDraft,
+  onCancelDraft,
+  onSubmitReply,
+}: {
+  row: AiNoteRowItem;
+  symbols: SymbolIndex;
+  onJump: (c: Cursor) => void;
+  onAck: () => void;
+  onClickLineNo: () => void;
   onStartDraft: () => void;
   onCancelDraft: () => void;
   onSubmitReply: (body: string) => void;
-  symbols: SymbolIndex;
-  onJump: (c: Cursor) => void;
-}
-
-function NoteCard({
-  line,
-  lineIdx,
-  isCurrent,
-  isAcked,
-  onClickLineNo,
-  onAck,
-  ...rest
-}: CardCommon & {
-  line: DiffLine;
-  lineIdx: number;
-  isCurrent: boolean;
-  isAcked: boolean;
-  onClickLineNo: () => void;
-  onAck: () => void;
 }) {
-  const note = line.aiNote!;
-  const lineNo = line.newNo ?? line.oldNo ?? lineIdx + 1;
   return (
     <li
-      className={`ainote ainote--${note.severity} ainote--clickable ${
-        isCurrent ? "ainote--current" : ""
-      } ${isAcked ? "ainote--acked" : ""}`}
+      className={`ainote ainote--${row.severity} ainote--clickable ${
+        row.isCurrent ? "ainote--current" : ""
+      } ${row.isAcked ? "ainote--acked" : ""}`}
       onClick={cardClick(onClickLineNo)}
       title="click to jump to this line"
     >
@@ -380,75 +285,84 @@ function NoteCard({
           onClick={onClickLineNo}
           title="jump to this line"
         >
-          L{lineNo}
+          L{row.lineNo}
         </button>
-        <span className="ainote__sev">{sevGlyph(note.severity)}</span>
+        <span className="ainote__sev">{row.sevGlyph}</span>
         <span className="ainote__summary">
-          <RichText text={note.summary} symbols={rest.symbols} onJump={rest.onJump} />
+          <RichText text={row.summary} symbols={symbols} onJump={onJump} />
         </span>
         <span className="ainote__actions">
-          <button
-            className="ainote__ack"
-            onClick={rest.onStartDraft}
-            title="reply"
-          >
+          <button className="ainote__ack" onClick={onStartDraft} title="reply">
             reply
           </button>
           <button
-            className={`ainote__ack ${isAcked ? "ainote__ack--on" : ""}`}
+            className={`ainote__ack ${row.isAcked ? "ainote__ack--on" : ""}`}
             onClick={onAck}
-            title={isAcked ? "un-ack" : "acknowledge"}
+            title={row.isAcked ? "un-ack" : "acknowledge"}
           >
-            {isAcked ? "✓ acked" : "ack"}
+            {row.isAcked ? "✓ acked" : "ack"}
           </button>
         </span>
       </div>
-      {note.detail && (
+      {row.detail && (
         <p className="ainote__detail">
-          <RichText text={note.detail} symbols={rest.symbols} onJump={rest.onJump} />
+          <RichText text={row.detail} symbols={symbols} onJump={onJump} />
         </p>
       )}
       <ReplyThread
-        replies={rest.replies}
-        isDrafting={rest.isDrafting}
-        onStartDraft={rest.onStartDraft}
-        onCancelDraft={rest.onCancelDraft}
-        onSubmitReply={rest.onSubmitReply}
-        symbols={rest.symbols}
-        onJump={rest.onJump}
+        replies={row.replies}
+        isDrafting={row.isDrafting}
+        onStartDraft={onStartDraft}
+        onCancelDraft={onCancelDraft}
+        onSubmitReply={onSubmitReply}
+        symbols={symbols}
+        onJump={onJump}
       />
     </li>
   );
 }
 
 function HunkSummarySection({
-  hunk,
-  onJumpToHunk,
-  ...rest
-}: CardCommon & { hunk: Hunk; onJumpToHunk: () => void }) {
+  summary,
+  replies,
+  isDrafting,
+  jumpTarget,
+  symbols,
+  onJump,
+  onStartDraft,
+  onCancelDraft,
+  onSubmitReply,
+}: {
+  summary: string;
+  replies: Reply[];
+  replyKey: string;
+  isDrafting: boolean;
+  jumpTarget: Cursor;
+  symbols: SymbolIndex;
+  onJump: (c: Cursor) => void;
+  onStartDraft: () => void;
+  onCancelDraft: () => void;
+  onSubmitReply: (body: string) => void;
+}) {
   return (
     <section className="inspector__sec">
       <div className="inspector__sec-h">AI on this hunk (summary)</div>
       <div
         className="ainote ainote--info ainote--clickable"
-        onClick={cardClick(onJumpToHunk)}
+        onClick={cardClick(() => onJump(jumpTarget))}
         title="click to jump to the top of this hunk"
       >
         <p className="inspector__summary">
-          <RichText
-            text={hunk.aiSummary!}
-            symbols={rest.symbols}
-            onJump={rest.onJump}
-          />
+          <RichText text={summary} symbols={symbols} onJump={onJump} />
         </p>
         <ReplyThread
-          replies={rest.replies}
-          isDrafting={rest.isDrafting}
-          onStartDraft={rest.onStartDraft}
-          onCancelDraft={rest.onCancelDraft}
-          onSubmitReply={rest.onSubmitReply}
-          symbols={rest.symbols}
-          onJump={rest.onJump}
+          replies={replies}
+          isDrafting={isDrafting}
+          onStartDraft={onStartDraft}
+          onCancelDraft={onCancelDraft}
+          onSubmitReply={onSubmitReply}
+          symbols={symbols}
+          onJump={onJump}
         />
       </div>
     </section>
@@ -456,63 +370,48 @@ function HunkSummarySection({
 }
 
 function TeammateSection({
-  hunk,
-  onJumpToHunk,
-  ...rest
-}: CardCommon & { hunk: Hunk; onJumpToHunk: () => void }) {
-  const t = hunk.teammateReview!;
+  teammate,
+  symbols,
+  onJump,
+  onStartDraft,
+  onCancelDraft,
+  onSubmitReply,
+}: {
+  teammate: NonNullable<InspectorViewModel["teammate"]>;
+  symbols: SymbolIndex;
+  onJump: (c: Cursor) => void;
+  onStartDraft: () => void;
+  onCancelDraft: () => void;
+  onSubmitReply: (body: string) => void;
+}) {
   return (
     <section className="inspector__sec">
       <div className="inspector__sec-h">Teammate</div>
       <div
-        className={`ainote ainote--clickable ainote--${t.verdict === "approve" ? "info" : "question"}`}
-        onClick={cardClick(onJumpToHunk)}
+        className={`ainote ainote--clickable ainote--${teammate.verdictClass}`}
+        onClick={cardClick(() => onJump(teammate.jumpTarget))}
         title="click to jump to the top of this hunk"
       >
         <div className="ainote__head">
           <span className="ainote__sev">
-            @{t.user} {t.verdict === "approve" ? "✓" : "💬"}
+            @{teammate.user} {teammate.verdictGlyph}
           </span>
         </div>
-        {t.note && (
+        {teammate.note && (
           <p className="ainote__detail">
-            <RichText text={t.note} symbols={rest.symbols} onJump={rest.onJump} />
+            <RichText text={teammate.note} symbols={symbols} onJump={onJump} />
           </p>
         )}
         <ReplyThread
-          replies={rest.replies}
-          isDrafting={rest.isDrafting}
-          onStartDraft={rest.onStartDraft}
-          onCancelDraft={rest.onCancelDraft}
-          onSubmitReply={rest.onSubmitReply}
-          symbols={rest.symbols}
-          onJump={rest.onJump}
+          replies={teammate.replies}
+          isDrafting={teammate.isDrafting}
+          onStartDraft={onStartDraft}
+          onCancelDraft={onCancelDraft}
+          onSubmitReply={onSubmitReply}
+          symbols={symbols}
+          onJump={onJump}
         />
       </div>
     </section>
   );
-}
-
-function countAcked(
-  notes: { idx: number }[],
-  hunkId: string,
-  acked: Set<string>,
-): number {
-  let n = 0;
-  for (const { idx } of notes) {
-    if (acked.has(noteKey(hunkId, idx))) n++;
-  }
-  return n;
-}
-
-function sevGlyph(s: "info" | "question" | "warning"): string {
-  switch (s) {
-    case "warning":
-      return "!";
-    case "question":
-      return "?";
-    case "info":
-    default:
-      return "i";
-  }
 }

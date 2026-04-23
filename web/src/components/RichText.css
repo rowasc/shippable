@@ -1,0 +1,37 @@
+.sym,
+.sym--code {
+  display: inline;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--border-active);
+  text-underline-offset: 2px;
+}
+.sym:hover {
+  color: var(--blue);
+  text-decoration-color: var(--blue);
+  text-decoration-style: solid;
+}
+.sym--code {
+  background: var(--bg-3);
+  padding: 0 3px;
+  border-radius: 2px;
+  color: var(--accent);
+}
+.sym--code:hover {
+  background: var(--border);
+  color: var(--blue);
+}
+.rt-code {
+  background: var(--bg-3);
+  padding: 0 3px;
+  border-radius: 2px;
+  color: var(--fg);
+  font: inherit;
+}

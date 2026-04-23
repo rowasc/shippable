@@ -1,0 +1,762 @@
+/**
+ * view.ts — pure functions from ReviewState slices + domain objects to
+ * pre-computed view models. No DOM, no React, no dispatch.
+ *
+ * Components below this layer are pure presenters: they receive a view model
+ * and render it without computing anything.
+ */
+
+import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
+import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey } from "./types";
+import { hunkCoverage, fileCoverage } from "./state";
+import type { GuideSuggestion } from "./guide";
+import type { SymbolIndex } from "./symbols";
+
+// ─── Line-level view model ────────────────────────────────────────────────────
+
+export interface DiffLineViewModel {
+  /** Original kind — drives CSS class and sign glyph. */
+  kind: LineKind;
+  text: string;
+  oldNo?: number;
+  newNo?: number;
+  /** True when this is the cursor position. */
+  isCursor: boolean;
+  /** True when this line has been visited/reviewed. */
+  isReviewed: boolean;
+  /** True when this line falls inside the active shift-extended selection. */
+  isSelected: boolean;
+  /** The AI note attached to this line, or undefined. */
+  aiNote?: AiNote;
+  /** True when the AI note has been acknowledged. */
+  isAcked: boolean;
+  /** True when the user has started a comment thread on this line. */
+  hasUserComment: boolean;
+  /**
+   * Pre-computed glyph for the AI/comment column.
+   * "✓" | "!" | "?" | "✦" | """ | " "
+   */
+  aiGlyph: string;
+}
+
+// ─── Expand-bar state ─────────────────────────────────────────────────────────
+
+export interface ExpandBarViewModel {
+  /** Number of context-expansion blocks currently revealed. */
+  level: number;
+  /** Total number of blocks available. */
+  maxLevel: number;
+  /** Line count in the next block (shown on the expand button). */
+  nextSize: number;
+}
+
+// ─── Hunk-level view model ────────────────────────────────────────────────────
+
+export interface HunkViewModel {
+  id: string;
+  header: string;
+  /** 0–1 fraction of lines visited. */
+  coverage: number;
+  /** True when this hunk is the focused hunk (cursor is inside it). */
+  isCurrent: boolean;
+
+  // Metadata badges
+  aiReviewed: boolean;
+  aiSummary?: string;
+  teammateReview?: {
+    user: string;
+    verdict: "approve" | "comment";
+    note?: string;
+  };
+  definesSymbols: string[];
+  referencesSymbols: string[];
+
+  // Expand-context bars (undefined when no expand blocks exist for that direction)
+  expandAbove?: ExpandBarViewModel;
+  expandBelow?: ExpandBarViewModel;
+
+  /**
+   * Context lines to render *above* the hunk body (already ordered
+   * top-to-bottom: farthest block first, nearest block last).
+   */
+  contextAbove: DiffLine[];
+
+  /**
+   * Context lines to render *below* the hunk body.
+   */
+  contextBelow: DiffLine[];
+
+  /** The hunk's own lines with all per-line state pre-computed. */
+  lines: DiffLineViewModel[];
+}
+
+// ─── File-level view model ────────────────────────────────────────────────────
+
+export interface FullFileLineViewModel {
+  kind: LineKind;
+  text: string;
+  oldNo?: number;
+  newNo?: number;
+  /** Pre-computed sign glyph ("+" | "-" | " "). */
+  sign: string;
+}
+
+export interface DiffViewModel {
+  /** File path for the header. */
+  path: string;
+  /** File status badge text. */
+  status: string;
+  /** File ID (needed for toggle-expand-file callback). */
+  fileId: string;
+  /** True when a full-file expand is available for this file. */
+  canExpandFile: boolean;
+  /** True when the file is currently in full-expand mode. */
+  fileFullyExpanded: boolean;
+  /**
+   * When fileFullyExpanded is true, this contains the full file lines
+   * pre-rendered with sign glyphs. Empty array otherwise.
+   */
+  fullFileLines: FullFileLineViewModel[];
+  /** Per-hunk view models (empty when fileFullyExpanded is true). */
+  hunks: HunkViewModel[];
+}
+
+// ─── Builder ─────────────────────────────────────────────────────────────────
+
+export interface BuildDiffViewModelArgs {
+  file: DiffFile;
+  currentHunkId: string;
+  cursorLineIdx: number;
+  reviewed: Record<string, Set<number>>;
+  acked: Set<string>;
+  replies: Record<string, string[]> | Record<string, unknown[]>;
+  expandLevelAbove: Record<string, number>;
+  expandLevelBelow: Record<string, number>;
+  fileFullyExpanded: boolean;
+  /** Active shift-extended selection, or null. */
+  selection?: LineSelection | null;
+}
+
+export function buildDiffViewModel({
+  file,
+  currentHunkId,
+  cursorLineIdx,
+  reviewed,
+  acked,
+  replies,
+  expandLevelAbove,
+  expandLevelBelow,
+  fileFullyExpanded,
+  selection,
+}: BuildDiffViewModelArgs): DiffViewModel {
+  const canExpandFile = !!file.fullContent;
+
+  // Pre-compute full-file lines only when needed.
+  const fullFileLines: FullFileLineViewModel[] =
+    fileFullyExpanded && file.fullContent
+      ? file.fullContent.map((line) => ({
+          kind: line.kind,
+          text: line.text,
+          oldNo: line.oldNo,
+          newNo: line.newNo,
+          sign:
+            line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ",
+        }))
+      : [];
+
+  // Build hunk view models.
+  const hunks: HunkViewModel[] = fileFullyExpanded
+    ? []
+    : file.hunks.map((hunk) => {
+        const isCurrent = hunk.id === currentHunkId;
+        const reviewedForHunk = reviewed[hunk.id] ?? new Set<number>();
+        const coverage = hunkCoverage(hunk, reviewed);
+
+        // Expand-above: blocks ordered farthest-first for top-to-bottom rendering.
+        const aboveBlocks = hunk.expandAbove ?? [];
+        const belowBlocks = hunk.expandBelow ?? [];
+        const levelAbove = expandLevelAbove[hunk.id] ?? 0;
+        const levelBelow = expandLevelBelow[hunk.id] ?? 0;
+
+        // Flatten revealed above blocks (slice(0, levelAbove) then reverse so
+        // farthest appears at the top of the rendered output).
+        const contextAbove: DiffLine[] = aboveBlocks
+          .slice(0, levelAbove)
+          .reduceRight<DiffLine[]>((acc, block) => acc.concat(block), []);
+
+        const contextBelow: DiffLine[] = belowBlocks
+          .slice(0, levelBelow)
+          .reduce<DiffLine[]>((acc, block) => acc.concat(block), []);
+
+        const expandAbove: ExpandBarViewModel | undefined =
+          aboveBlocks.length > 0
+            ? {
+                level: levelAbove,
+                maxLevel: aboveBlocks.length,
+                nextSize:
+                  levelAbove < aboveBlocks.length
+                    ? aboveBlocks[levelAbove].length
+                    : 0,
+              }
+            : undefined;
+
+        const expandBelow: ExpandBarViewModel | undefined =
+          belowBlocks.length > 0
+            ? {
+                level: levelBelow,
+                maxLevel: belowBlocks.length,
+                nextSize:
+                  levelBelow < belowBlocks.length
+                    ? belowBlocks[levelBelow].length
+                    : 0,
+              }
+            : undefined;
+
+        // Selection range — only applies when it targets this hunk.
+        const selForHunk =
+          selection && selection.hunkId === hunk.id ? selection : null;
+        const selLo = selForHunk
+          ? Math.min(selForHunk.anchor, selForHunk.head)
+          : -1;
+        const selHi = selForHunk
+          ? Math.max(selForHunk.anchor, selForHunk.head)
+          : -1;
+
+        // Build per-line view models.
+        const lines: DiffLineViewModel[] = hunk.lines.map((line, i) => {
+          const isAcked = acked.has(noteKey(hunk.id, i));
+          const hasUserComment =
+            (replies[userCommentKey(hunk.id, i)]?.length ?? 0) > 0;
+          const sev = line.aiNote?.severity;
+
+          const aiGlyph = isAcked
+            ? "✓"
+            : sev === "warning"
+              ? "!"
+              : sev === "question"
+                ? "?"
+                : sev
+                  ? "✦"
+                  : hasUserComment
+                    ? "“"
+                    : " ";
+
+          return {
+            kind: line.kind,
+            text: line.text,
+            oldNo: line.oldNo,
+            newNo: line.newNo,
+            isCursor: isCurrent && i === cursorLineIdx,
+            isReviewed: reviewedForHunk.has(i),
+            isSelected: selForHunk !== null && i >= selLo && i <= selHi,
+            aiNote: line.aiNote,
+            isAcked,
+            hasUserComment,
+            aiGlyph,
+          };
+        });
+
+        return {
+          id: hunk.id,
+          header: hunk.header,
+          coverage,
+          isCurrent,
+          aiReviewed: hunk.aiReviewed ?? false,
+          aiSummary: hunk.aiSummary,
+          teammateReview: hunk.teammateReview,
+          definesSymbols: hunk.definesSymbols ?? [],
+          referencesSymbols: hunk.referencesSymbols ?? [],
+          expandAbove,
+          expandBelow,
+          contextAbove,
+          contextBelow,
+          lines,
+        };
+      });
+
+  return {
+    path: file.path,
+    status: file.status,
+    fileId: file.id,
+    canExpandFile,
+    fileFullyExpanded,
+    fullFileLines,
+    hunks,
+  };
+}
+
+// ─── Sidebar view model ───────────────────────────────────────────────────────
+
+export interface SidebarFileItem {
+  fileId: string;
+  path: string;
+  status: FileStatus;
+  /** Pre-computed status character: "A" | "M" | "D" | "R" | "?". */
+  statusChar: string;
+  /** 0–1 fraction of lines visited. */
+  coverage: number;
+  /** Pre-computed coverage percentage string, e.g. "42". */
+  coveragePct: number;
+  /** Pre-computed meter bar string, e.g. "██░░". */
+  meterBar: string;
+  /** True when this is the file the cursor is currently in. */
+  isCurrent: boolean;
+}
+
+export interface SidebarSkillItem {
+  id: string;
+  label: string;
+  reason: string;
+  active: boolean;
+}
+
+export interface SidebarViewModel {
+  files: SidebarFileItem[];
+  skills: SidebarSkillItem[];
+}
+
+function fileStatusChar(s: string): string {
+  switch (s) {
+    case "added":    return "A";
+    case "modified": return "M";
+    case "deleted":  return "D";
+    case "renamed":  return "R";
+    default:         return "?";
+  }
+}
+
+export interface BuildSidebarViewModelArgs {
+  files: Array<{ id: string; path: string; status: FileStatus; hunks: { id: string; lines: unknown[] }[] }>;
+  skills: Array<{ id: string; label: string; reason: string }>;
+  currentFileId: string;
+  reviewedLines: Record<string, Set<number>>;
+  activeSkills: Set<string>;
+}
+
+export function buildSidebarViewModel({
+  files,
+  skills,
+  currentFileId,
+  reviewedLines,
+  activeSkills,
+}: BuildSidebarViewModelArgs): SidebarViewModel {
+  const fileItems: SidebarFileItem[] = files.map((f) => {
+    const coverage = fileCoverage(f, reviewedLines);
+    const coveragePct = Math.round(coverage * 100);
+    const blocks = Math.round(coverage * 4);
+    const meterBar = "█".repeat(blocks) + "░".repeat(4 - blocks);
+    return {
+      fileId: f.id,
+      path: f.path,
+      status: f.status,
+      statusChar: fileStatusChar(f.status),
+      coverage,
+      coveragePct,
+      meterBar,
+      isCurrent: f.id === currentFileId,
+    };
+  });
+
+  const skillItems: SidebarSkillItem[] = skills.map((s) => ({
+    id: s.id,
+    label: s.label,
+    reason: s.reason,
+    active: activeSkills.has(s.id),
+  }));
+
+  return { files: fileItems, skills: skillItems };
+}
+
+// ─── StatusBar view model ─────────────────────────────────────────────────────
+
+export interface StatusBarViewModel {
+  /** 1-based current line number. */
+  lineDisplay: string;
+  /** 1-based current hunk number / total hunks. */
+  hunkDisplay: string;
+  /** 1-based current file number / total files. */
+  fileDisplay: string;
+  /** Coverage percentage rounded to nearest integer. */
+  coverageDisplay: string;
+}
+
+export interface BuildStatusBarViewModelArgs {
+  /** Total number of files in the changeset. */
+  totalFiles: number;
+  /** 0-based index of the current file in the changeset files array. */
+  fileIdx: number;
+  /** Total number of hunks in the current file. */
+  totalHunks: number;
+  /** 0-based index of the current hunk in the current file. */
+  hunkIdx: number;
+  /** Total number of lines in the current hunk. */
+  totalLines: number;
+  /** 0-based cursor line index within the current hunk. */
+  lineIdx: number;
+  /** 0–1 overall changeset coverage fraction. */
+  coverage: number;
+}
+
+export function buildStatusBarViewModel({
+  totalFiles,
+  fileIdx,
+  totalHunks,
+  hunkIdx,
+  totalLines,
+  lineIdx,
+  coverage,
+}: BuildStatusBarViewModelArgs): StatusBarViewModel {
+  return {
+    lineDisplay: `line ${lineIdx + 1}/${totalLines}`,
+    hunkDisplay: `hunk ${hunkIdx + 1}/${totalHunks}`,
+    fileDisplay: `file ${fileIdx + 1}/${totalFiles}`,
+    coverageDisplay: `reviewed ${Math.round(coverage * 100)}%`,
+  };
+}
+
+// ─── GuidePrompt view model ───────────────────────────────────────────────────
+
+/**
+ * A pre-tokenized segment of the guide suggestion reason text.
+ * Plain text, inline-code, and symbol link segments map directly to the
+ * same rendered output that RichText would produce — without needing the
+ * live SymbolIndex at render time.
+ */
+export type RichSegment =
+  | { kind: "text"; text: string }
+  | { kind: "code"; text: string }
+  | { kind: "symbol"; text: string; target: Cursor }
+  | { kind: "code-symbol"; text: string; target: Cursor };
+
+export interface GuidePromptViewModel {
+  id: string;
+  /** Pre-tokenized reason text for rendering without SymbolIndex. */
+  segments: RichSegment[];
+  /** Pre-resolved jump target for the primary suggestion action. */
+  targetCursor: Cursor;
+}
+
+// Mirrors the tokenization in RichText.tsx so the presenter produces the
+// same output without needing the live SymbolIndex.
+const TICK_RE = /`([^`]+)`/g;
+const IDENT_RE = /([A-Za-z_$][A-Za-z0-9_$]*)/g;
+
+function scanPlainSegments(text: string, symbols: SymbolIndex): RichSegment[] {
+  const out: RichSegment[] = [];
+  let lastEnd = 0;
+  for (const m of text.matchAll(IDENT_RE)) {
+    const start = m.index ?? 0;
+    const name = m[1];
+    const target = symbols.get(name);
+    if (!target) continue;
+    if (start > lastEnd) {
+      out.push({ kind: "text", text: text.slice(lastEnd, start) });
+    }
+    out.push({ kind: "symbol", text: name, target });
+    lastEnd = start + name.length;
+  }
+  if (lastEnd < text.length) {
+    out.push({ kind: "text", text: text.slice(lastEnd) });
+  }
+  return out;
+}
+
+function tokenizeReason(text: string, symbols: SymbolIndex): RichSegment[] {
+  const parts: RichSegment[] = [];
+  let lastEnd = 0;
+  for (const m of text.matchAll(TICK_RE)) {
+    const start = m.index ?? 0;
+    if (start > lastEnd) {
+      parts.push(...scanPlainSegments(text.slice(lastEnd, start), symbols));
+    }
+    const inner = m[1];
+    const target = symbols.get(inner.trim());
+    if (target) {
+      parts.push({ kind: "code-symbol", text: inner, target });
+    } else {
+      parts.push({ kind: "code", text: inner });
+    }
+    lastEnd = start + m[0].length;
+  }
+  if (lastEnd < text.length) {
+    parts.push(...scanPlainSegments(text.slice(lastEnd), symbols));
+  }
+  return parts;
+}
+
+export function buildGuidePromptViewModel(
+  suggestion: GuideSuggestion,
+  symbolIndex: SymbolIndex,
+  currentChangeSetId: string,
+): GuidePromptViewModel | null {
+  if (!suggestion) return null;
+
+  const segments = tokenizeReason(suggestion.reason, symbolIndex);
+  const targetCursor: Cursor = {
+    changesetId: currentChangeSetId,
+    fileId: suggestion.toFileId,
+    hunkId: suggestion.toHunkId,
+    lineIdx: suggestion.toLineIdx,
+  };
+
+  return {
+    id: suggestion.id,
+    segments,
+    targetCursor,
+  };
+}
+
+// ─── Inspector view model ─────────────────────────────────────────────────────
+
+/** A single AI note row in the Inspector's "AI concerns" panel. */
+export interface AiNoteRowItem {
+  /** 0-based line index within the hunk — used as key and for jump callbacks. */
+  lineIdx: number;
+  /** 1-based display line number (prefers newNo over oldNo, falls back to lineIdx+1). */
+  lineNo: number;
+  severity: AiNoteSeverity;
+  /** Pre-computed severity glyph: "!" | "?" | "i". */
+  sevGlyph: string;
+  summary: string;
+  detail?: string;
+  isAcked: boolean;
+  /** True when this line is the cursor position. */
+  isCurrent: boolean;
+  /** Reply-thread key for this note (passed to onStartDraft / onSubmitReply). */
+  replyKey: string;
+  /** Existing replies on this note's thread. */
+  replies: Reply[];
+  /** True when the draft composer is open for this note. */
+  isDrafting: boolean;
+  /** Jump target that lands on this note's line. */
+  jumpTarget: Cursor;
+}
+
+/** A single user-started comment thread row. */
+export interface UserCommentRowItem {
+  lineIdx: number;
+  lineNo: number;
+  /** Reply-thread key for this user comment. */
+  threadKey: string;
+  replies: Reply[];
+  isDrafting: boolean;
+  isCurrent: boolean;
+  jumpTarget: Cursor;
+}
+
+export interface InspectorViewModel {
+  // ── Location section ───────────────────────────────────────────────────
+  /** Display string: "path/file.ts:42" or just "path/file.ts". */
+  locationLabel: string;
+  lineKind: LineKind;
+  lineText: string;
+  lineSign: string;
+
+  // ── AI concerns panel ──────────────────────────────────────────────────
+  /** Whether any AI notes exist on this hunk. */
+  hasAiNotes: boolean;
+  /** "none" or "N/M acked". */
+  aiNoteCountLabel: string;
+  aiNoteRows: AiNoteRowItem[];
+
+  // ── AI hunk summary panel (absent when hunk has no aiSummary) ──────────
+  aiSummary: string | null;
+  /** Reply key for the hunk summary thread. */
+  aiSummaryReplyKey: string | null;
+  aiSummaryReplies: Reply[];
+  aiSummaryIsDrafting: boolean;
+  /** Jump target for "click to jump to the top of this hunk". */
+  aiSummaryJumpTarget: Cursor | null;
+
+  // ── Teammate review panel (absent when hunk has no teammateReview) ─────
+  teammate: {
+    user: string;
+    verdict: "approve" | "comment";
+    verdictGlyph: string;
+    note?: string;
+    verdictClass: string;
+    replyKey: string;
+    replies: Reply[];
+    isDrafting: boolean;
+    jumpTarget: Cursor;
+  } | null;
+
+  // ── User comments panel ────────────────────────────────────────────────
+  /** "none" or "N thread(s)". */
+  userCommentCountLabel: string;
+  userCommentRows: UserCommentRowItem[];
+  /** Whether a new-thread button should be shown for the current line. */
+  showNewCommentCta: boolean;
+  /** Key and display info for the current-line new-comment CTA. */
+  currentLineCommentKey: string;
+  currentLineNo: number;
+  /** True when a draft is open on the current line but no thread exists yet. */
+  showDraftStub: boolean;
+  draftStubRow: UserCommentRowItem | null;
+}
+
+export interface BuildInspectorViewModelArgs {
+  /** The file the cursor is in. */
+  file: DiffFile;
+  /** The hunk the cursor is in. */
+  hunk: { id: string; lines: DiffLine[]; aiSummary?: string; teammateReview?: { user: string; verdict: "approve" | "comment"; note?: string } };
+  /** The line at the cursor position. */
+  line: DiffLine;
+  /** Full cursor (needed to build jump targets). */
+  cursor: Cursor;
+  /** Symbol index for this changeset (passed through to ReplyThread unchanged). */
+  symbols: SymbolIndex;
+  /** Set of acked note keys (format: `${hunkId}:${lineIdx}`). */
+  acked: Set<string>;
+  /** All reply threads keyed by reply-target key. */
+  replies: Record<string, Reply[]>;
+  /** The reply key currently being drafted, or null. */
+  draftingKey: string | null;
+}
+
+export function buildInspectorViewModel({
+  file,
+  hunk,
+  line,
+  cursor,
+  acked,
+  replies,
+  draftingKey,
+}: BuildInspectorViewModelArgs): InspectorViewModel {
+  // ── Location ────────────────────────────────────────────────────────────
+  const lineNo = line.newNo ?? line.oldNo;
+  const locationLabel = lineNo ? `${file.path}:${lineNo}` : file.path;
+  const lineSign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
+
+  // ── AI note rows ────────────────────────────────────────────────────────
+  const noteLinesWithIdx = hunk.lines
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => !!l.aiNote);
+
+  const aiNoteRows: AiNoteRowItem[] = noteLinesWithIdx.map(({ l, i }) => {
+    const note = l.aiNote!;
+    const rkey = lineNoteReplyKey(hunk.id, i);
+    const noteLine = l;
+    const noteLineNo = noteLine.newNo ?? noteLine.oldNo ?? i + 1;
+    const isAcked = acked.has(noteKey(hunk.id, i));
+    const glyph =
+      note.severity === "warning" ? "!" :
+      note.severity === "question" ? "?" : "i";
+    return {
+      lineIdx: i,
+      lineNo: noteLineNo,
+      severity: note.severity,
+      sevGlyph: glyph,
+      summary: note.summary,
+      detail: note.detail,
+      isAcked,
+      isCurrent: i === cursor.lineIdx,
+      replyKey: rkey,
+      replies: replies[rkey] ?? [],
+      isDrafting: draftingKey === rkey,
+      jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: i },
+    };
+  });
+
+  const ackedCount = aiNoteRows.filter((r) => r.isAcked).length;
+  const aiNoteCountLabel =
+    aiNoteRows.length === 0
+      ? "none"
+      : `${ackedCount}/${aiNoteRows.length} acked`;
+
+  // ── AI hunk summary ─────────────────────────────────────────────────────
+  const summaryReplyKey = hunkSummaryReplyKey(hunk.id);
+  const aiSummary = hunk.aiSummary ?? null;
+  const aiSummaryJumpTarget: Cursor | null = aiSummary
+    ? { ...cursor, hunkId: hunk.id, lineIdx: 0 }
+    : null;
+
+  // ── Teammate ────────────────────────────────────────────────────────────
+  const trKey = teammateReplyKey(hunk.id);
+  const teammate: InspectorViewModel["teammate"] = hunk.teammateReview
+    ? {
+        user: hunk.teammateReview.user,
+        verdict: hunk.teammateReview.verdict,
+        verdictGlyph: hunk.teammateReview.verdict === "approve" ? "✓" : "💬",
+        note: hunk.teammateReview.note,
+        verdictClass:
+          hunk.teammateReview.verdict === "approve" ? "info" : "question",
+        replyKey: trKey,
+        replies: replies[trKey] ?? [],
+        isDrafting: draftingKey === trKey,
+        jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: 0 },
+      }
+    : null;
+
+  // ── User comment threads ────────────────────────────────────────────────
+  const curKey = userCommentKey(hunk.id, cursor.lineIdx);
+  const curHunkLine = hunk.lines[cursor.lineIdx];
+  const currentLineNo =
+    curHunkLine?.newNo ?? curHunkLine?.oldNo ?? cursor.lineIdx + 1;
+
+  // All threads that have messages or are currently being drafted
+  const allUserThreads = hunk.lines
+    .map((l, i) => ({ l, i, key: userCommentKey(hunk.id, i) }))
+    .filter(({ key }) => (replies[key]?.length ?? 0) > 0 || draftingKey === key);
+
+  const userCommentRows: UserCommentRowItem[] = allUserThreads.map(({ l, i, key }) => {
+    const ucLineNo = l?.newNo ?? l?.oldNo ?? i + 1;
+    return {
+      lineIdx: i,
+      lineNo: ucLineNo,
+      threadKey: key,
+      replies: replies[key] ?? [],
+      isDrafting: draftingKey === key,
+      isCurrent: i === cursor.lineIdx,
+      jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: i },
+    };
+  });
+
+  const curHasThread = userCommentRows.some((r) => r.threadKey === curKey);
+  const showNewCommentCta = !curHasThread && draftingKey !== curKey;
+  const showDraftStub = !curHasThread && draftingKey === curKey;
+
+  const draftStubRow: UserCommentRowItem | null = showDraftStub
+    ? {
+        lineIdx: cursor.lineIdx,
+        lineNo: currentLineNo,
+        threadKey: curKey,
+        replies: [],
+        isDrafting: true,
+        isCurrent: true,
+        jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: cursor.lineIdx },
+      }
+    : null;
+
+  const userCommentCountLabel =
+    userCommentRows.length === 0
+      ? "none"
+      : `${userCommentRows.length} thread${userCommentRows.length > 1 ? "s" : ""}`;
+
+  return {
+    locationLabel,
+    lineKind: line.kind,
+    lineText: line.text,
+    lineSign,
+
+    hasAiNotes: aiNoteRows.length > 0,
+    aiNoteCountLabel,
+    aiNoteRows,
+
+    aiSummary,
+    aiSummaryReplyKey: aiSummary ? summaryReplyKey : null,
+    aiSummaryReplies: aiSummary ? (replies[summaryReplyKey] ?? []) : [],
+    aiSummaryIsDrafting: draftingKey === summaryReplyKey,
+    aiSummaryJumpTarget,
+
+    teammate,
+
+    userCommentCountLabel,
+    userCommentRows,
+    showNewCommentCta,
+    currentLineCommentKey: curKey,
+    currentLineNo,
+    showDraftStub,
+    draftStubRow,
+  };
+}

@@ -87,6 +87,19 @@ export interface Reply {
   createdAt: string;
 }
 
+/**
+ * A contiguous line range within a single hunk, produced by shift-extending
+ * the cursor. `anchor` is where the selection started; `head` is its current
+ * end (kept in sync with `cursor.lineIdx`). The effective range is
+ * min(anchor, head)..max(anchor, head) inclusive. Selection collapses to null
+ * on any non-extending move, hunk/file change, or Escape.
+ */
+export interface LineSelection {
+  hunkId: string;
+  anchor: number;
+  head: number;
+}
+
 export interface ReviewState {
   cursor: Cursor;
   changesets: ChangeSet[];
@@ -101,6 +114,62 @@ export interface ReviewState {
   expandLevelAbove: Record<string, number>;
   expandLevelBelow: Record<string, number>;
   fullExpandedFiles: Set<string>;
+  /** Active shift-extended selection; null when the cursor is a single line. */
+  selection: LineSelection | null;
+}
+
+// ── Review plan (the "where to begin" primitive) ──────────────────────────
+// Every surface that makes a claim about the ChangeSet must carry evidence
+// back to the diff. EvidenceRef is the pointer; Claim bundles text + refs.
+// UI must refuse to render a claim whose `evidence` array is empty.
+
+export type EvidenceRef =
+  | { kind: "description" }
+  | { kind: "file"; path: string }
+  | { kind: "hunk"; hunkId: string }
+  | { kind: "symbol"; name: string; definedIn: string };
+
+export interface Claim {
+  text: string;
+  evidence: EvidenceRef[];
+}
+
+export interface StructureMapFile {
+  fileId: string;
+  path: string;
+  status: FileStatus;
+  added: number;
+  removed: number;
+  isTest: boolean;
+}
+
+export interface StructureMapSymbol {
+  name: string;
+  /** File path where the symbol is defined. */
+  definedIn: string;
+  /** File paths (within this ChangeSet) that reference it. */
+  referencedIn: string[];
+}
+
+export interface StructureMap {
+  files: StructureMapFile[];
+  symbols: StructureMapSymbol[];
+}
+
+export interface EntryPoint {
+  fileId: string;
+  hunkId?: string;
+  reason: Claim;
+}
+
+export interface ReviewPlan {
+  /** Verbatim from ChangeSet.title. */
+  headline: string;
+  /** Rule-based or AI-generated; each claim carries evidence. */
+  intent: Claim[];
+  map: StructureMap;
+  /** Max 3; may be fewer if the diff doesn't warrant more. */
+  entryPoints: EntryPoint[];
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {
@@ -118,4 +187,12 @@ export function teammateReplyKey(hunkId: string): string {
 /** Fresh user-started comment on a line (not a reply to AI/teammate). */
 export function userCommentKey(hunkId: string, lineIdx: number): string {
   return `user:${hunkId}:${lineIdx}`;
+}
+/**
+ * Reply-key for a user-started comment on a line range. `lo` and `hi` are
+ * inclusive; callers must pass them pre-sorted (lo <= hi) so a key uniquely
+ * identifies its range.
+ */
+export function blockCommentKey(hunkId: string, lo: number, hi: number): string {
+  return `block:${hunkId}:${lo}-${hi}`;
 }

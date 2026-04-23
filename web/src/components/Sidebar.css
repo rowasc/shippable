@@ -1,0 +1,92 @@
+.sidebar {
+  border-right: 1px solid var(--border);
+  background: var(--bg-2);
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.panel {
+  padding: 4px 0 8px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.panel:last-child {
+  border-bottom: none;
+}
+.panel__h {
+  padding: 4px 12px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.panel__sub {
+  color: var(--fg-mute);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 4px;
+}
+.panel__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 12px;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.row:hover {
+  background: var(--bg-3);
+}
+.row--active {
+  background: var(--cursor-bg);
+  color: var(--yellow);
+}
+.row--active::before {
+  content: "▸";
+  color: var(--yellow);
+  margin-right: 2px;
+  margin-left: -10px;
+}
+.row--skill-on {
+  color: var(--green);
+}
+.row__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.row__checkbox {
+  color: var(--fg-dim);
+}
+.row--skill-on .row__checkbox {
+  color: var(--green);
+}
+.row__status {
+  width: 14px;
+  text-align: center;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.row__status--added { color: var(--green); }
+.row__status--modified { color: var(--yellow); }
+.row__status--deleted { color: var(--red); }
+.row__status--renamed { color: var(--blue); }
+
+.meter {
+  color: var(--fg-mute);
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+.meter--full {
+  color: var(--green);
+}

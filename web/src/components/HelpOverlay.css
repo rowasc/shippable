@@ -1,0 +1,43 @@
+.help {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+.help__box {
+  background: var(--bg-2);
+  border: 1px solid var(--border-active);
+  padding: 16px 20px;
+  min-width: 340px;
+}
+.help__title {
+  color: var(--accent);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 10px;
+}
+.help__title--sub {
+  color: var(--fg-mute);
+  margin-top: 14px;
+}
+.help__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.help__table td {
+  padding: 3px 12px 3px 0;
+  vertical-align: top;
+  color: var(--fg);
+}
+.help__table td:first-child {
+  color: var(--fg-dim);
+  white-space: nowrap;
+}
+.help__hint {
+  color: var(--fg-dim);
+  margin-top: 12px;
+  font-size: 11px;
+}
