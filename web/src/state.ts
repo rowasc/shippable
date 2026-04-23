@@ -1,4 +1,4 @@
-import type { Cursor, ChangeSet, Reply, ReviewState } from "./types";
+import type { Cursor, ChangeSet, LineSelection, Reply, ReviewState } from "./types";
 import { noteKey } from "./types";
 import { SEED_REPLIES } from "./fixtures";
 
@@ -17,6 +17,7 @@ export function initialState(seed: ChangeSet[]): ReviewState {
     expandLevelAbove: {},
     expandLevelBelow: {},
     fullExpandedFiles: new Set(),
+    selection: null,
   };
 }
 
@@ -31,10 +32,11 @@ function markLine(
 }
 
 export type Action =
-  | { type: "MOVE_LINE"; delta: number }
+  | { type: "MOVE_LINE"; delta: number; extend?: boolean }
   | { type: "MOVE_HUNK"; delta: number }
   | { type: "MOVE_FILE"; delta: number }
-  | { type: "SET_CURSOR"; cursor: Cursor }
+  | { type: "SET_CURSOR"; cursor: Cursor; selection?: LineSelection | null }
+  | { type: "COLLAPSE_SELECTION" }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
   | { type: "LOAD_CHANGESET"; changeset: ChangeSet }
   | { type: "TOGGLE_SKILL"; skillId: string }
@@ -47,13 +49,21 @@ export type Action =
 export function reducer(state: ReviewState, action: Action): ReviewState {
   switch (action.type) {
     case "MOVE_LINE":
-      return moveLine(state, action.delta);
+      return moveLine(state, action.delta, action.extend ?? false);
+    case "COLLAPSE_SELECTION":
+      return state.selection === null ? state : { ...state, selection: null };
     case "MOVE_HUNK":
       return moveHunk(state, action.delta);
     case "MOVE_FILE":
       return moveFile(state, action.delta);
-    case "SET_CURSOR":
-      return applyCursor(state, action.cursor);
+    case "SET_CURSOR": {
+      // applyCursor always collapses; if the caller wants to restore a
+      // selection (e.g. clicking a block comment should re-select its range),
+      // overlay it after.
+      const applied = applyCursor(state, action.cursor, false);
+      if (action.selection === undefined) return applied;
+      return { ...applied, selection: action.selection };
+    }
     case "SWITCH_CHANGESET": {
       const cs = state.changesets.find((c) => c.id === action.changesetId);
       if (!cs) return state;
@@ -68,6 +78,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       return {
         ...state,
         cursor,
+        selection: null,
         reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
       };
     }
@@ -90,6 +101,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
           hunkId: hunk.id,
           lineIdx: 0,
         },
+        selection: null,
         reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
       };
     }
@@ -140,7 +152,11 @@ function togglein(set: Set<string>, key: string): Set<string> {
   return next;
 }
 
-function moveLine(state: ReviewState, delta: number): ReviewState {
+function moveLine(
+  state: ReviewState,
+  delta: number,
+  extend: boolean,
+): ReviewState {
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
@@ -148,20 +164,27 @@ function moveLine(state: ReviewState, delta: number): ReviewState {
   const nextLineIdx = state.cursor.lineIdx + delta;
 
   if (nextLineIdx < 0) {
-    if (hunkIdx === 0) return applyCursor(state, state.cursor);
+    if (hunkIdx === 0) return applyCursor(state, state.cursor, extend);
+    // Crossing a hunk boundary while extending would leave an orphan
+    // selection; we collapse instead and let the cursor move normally.
     const prev = file.hunks[hunkIdx - 1];
-    return applyCursor(state, {
-      ...state.cursor,
-      hunkId: prev.id,
-      lineIdx: prev.lines.length - 1,
-    });
+    return applyCursor(
+      state,
+      { ...state.cursor, hunkId: prev.id, lineIdx: prev.lines.length - 1 },
+      false,
+    );
   }
   if (nextLineIdx >= hunk.lines.length) {
-    if (hunkIdx === file.hunks.length - 1) return applyCursor(state, state.cursor);
+    if (hunkIdx === file.hunks.length - 1)
+      return applyCursor(state, state.cursor, extend);
     const next = file.hunks[hunkIdx + 1];
-    return applyCursor(state, { ...state.cursor, hunkId: next.id, lineIdx: 0 });
+    return applyCursor(
+      state,
+      { ...state.cursor, hunkId: next.id, lineIdx: 0 },
+      false,
+    );
   }
-  return applyCursor(state, { ...state.cursor, lineIdx: nextLineIdx });
+  return applyCursor(state, { ...state.cursor, lineIdx: nextLineIdx }, extend);
 }
 
 function moveHunk(state: ReviewState, delta: number): ReviewState {
@@ -170,11 +193,11 @@ function moveHunk(state: ReviewState, delta: number): ReviewState {
   const hunkIdx = file.hunks.findIndex((h) => h.id === state.cursor.hunkId);
   const next = Math.max(0, Math.min(file.hunks.length - 1, hunkIdx + delta));
   if (next === hunkIdx) return state;
-  return applyCursor(state, {
-    ...state.cursor,
-    hunkId: file.hunks[next].id,
-    lineIdx: 0,
-  });
+  return applyCursor(
+    state,
+    { ...state.cursor, hunkId: file.hunks[next].id, lineIdx: 0 },
+    false,
+  );
 }
 
 function moveFile(state: ReviewState, delta: number): ReviewState {
@@ -183,18 +206,45 @@ function moveFile(state: ReviewState, delta: number): ReviewState {
   const next = Math.max(0, Math.min(cs.files.length - 1, fileIdx + delta));
   if (next === fileIdx) return state;
   const nextFile = cs.files[next];
-  return applyCursor(state, {
-    ...state.cursor,
-    fileId: nextFile.id,
-    hunkId: nextFile.hunks[0].id,
-    lineIdx: 0,
-  });
+  return applyCursor(
+    state,
+    {
+      ...state.cursor,
+      fileId: nextFile.id,
+      hunkId: nextFile.hunks[0].id,
+      lineIdx: 0,
+    },
+    false,
+  );
 }
 
-function applyCursor(state: ReviewState, cursor: Cursor): ReviewState {
+/**
+ * Apply a new cursor. When `extend` is true and the new cursor stays within
+ * the same hunk, the selection's head moves with it (anchor is set to the
+ * previous cursor if no selection existed). Any other case collapses the
+ * selection to null — crossing hunks while extending would produce an
+ * orphaned selection, and plain moves should clear a stale selection.
+ */
+function applyCursor(
+  state: ReviewState,
+  cursor: Cursor,
+  extend: boolean,
+): ReviewState {
+  const sameHunk = cursor.hunkId === state.cursor.hunkId;
+  let selection = state.selection;
+  if (extend && sameHunk) {
+    const anchor =
+      selection && selection.hunkId === cursor.hunkId
+        ? selection.anchor
+        : state.cursor.lineIdx;
+    selection = { hunkId: cursor.hunkId, anchor, head: cursor.lineIdx };
+  } else {
+    selection = null;
+  }
   return {
     ...state,
     cursor,
+    selection,
     reviewedLines: markLine(state.reviewedLines, cursor.hunkId, cursor.lineIdx),
   };
 }

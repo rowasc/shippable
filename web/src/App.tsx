@@ -280,6 +280,9 @@ export default function App() {
             })}
             symbols={symbolIndex}
             onJump={jumpTo}
+            onJumpToBlock={(cursor, selection) =>
+              dispatch({ type: "SET_CURSOR", cursor, selection })
+            }
             onToggleAck={(hunkId, lineIdx) =>
               dispatch({ type: "TOGGLE_ACK", hunkId, lineIdx })
             }

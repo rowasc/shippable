@@ -253,6 +253,24 @@
 .line--reviewed .line__text {
   opacity: 0.7;
 }
+.line--selected {
+  background: var(--cursor-bg);
+}
+.line--selected.line--add {
+  background: color-mix(in srgb, var(--cursor-bg) 70%, var(--green-bg));
+}
+.line--selected.line--del {
+  background: color-mix(in srgb, var(--cursor-bg) 70%, var(--red-bg));
+}
+.line--selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+}
 .line--cursor {
   background: var(--cursor-bg) !important;
   outline: 1px solid var(--border-active);

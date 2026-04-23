@@ -1,5 +1,5 @@
 import "./Inspector.css";
-import type { Cursor, Reply } from "../types";
+import type { Cursor, LineSelection, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
 import type {
   InspectorViewModel,
@@ -29,6 +29,12 @@ interface Props {
   viewModel: InspectorViewModel;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
+  /**
+   * Clicking a block-scoped comment should re-select its range so the user
+   * sees what they're replying to. Plain line threads use onJump and leave
+   * selection collapsed.
+   */
+  onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onToggleAck: (hunkId: string, lineIdx: number) => void;
   onStartDraft: (key: string) => void;
   onCancelDraft: () => void;
@@ -39,6 +45,7 @@ export function Inspector({
   viewModel,
   symbols,
   onJump,
+  onJumpToBlock,
   onToggleAck,
   onStartDraft,
   onCancelDraft,
@@ -123,6 +130,7 @@ export function Inspector({
         vm={vm}
         symbols={symbols}
         onJump={onJump}
+        onJumpToBlock={onJumpToBlock}
         onStartDraft={onStartDraft}
         onCancelDraft={onCancelDraft}
         onSubmitReply={onSubmitReply}
@@ -135,6 +143,7 @@ function UserCommentsSection({
   vm,
   symbols,
   onJump,
+  onJumpToBlock,
   onStartDraft,
   onCancelDraft,
   onSubmitReply,
@@ -142,6 +151,7 @@ function UserCommentsSection({
   vm: InspectorViewModel;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
+  onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onStartDraft: (key: string) => void;
   onCancelDraft: () => void;
   onSubmitReply: (key: string, body: string) => void;
@@ -184,11 +194,21 @@ function UserCommentsSection({
           )}
           {vm.userCommentRows.map((row) => (
             <UserThreadCard
-              key={row.lineIdx}
+              key={row.threadKey}
               row={row}
               symbols={symbols}
               onJump={onJump}
-              onClickLineNo={() => onJump(row.jumpTarget)}
+              onClickLineNo={() => {
+                if (row.rangeHiLineIdx !== undefined && onJumpToBlock) {
+                  onJumpToBlock(row.jumpTarget, {
+                    hunkId: row.jumpTarget.hunkId,
+                    anchor: row.lineIdx,
+                    head: row.rangeHiLineIdx,
+                  });
+                } else {
+                  onJump(row.jumpTarget);
+                }
+              }}
               onStartDraft={() => onStartDraft(row.threadKey)}
               onCancelDraft={onCancelDraft}
               onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
@@ -229,9 +249,15 @@ function UserThreadCard({
         <button
           className="ainote__lineno"
           onClick={onClickLineNo}
-          title="jump to this line"
+          title={
+            row.rangeHiLineNo
+              ? `jump to lines L${row.lineNo}–L${row.rangeHiLineNo}`
+              : "jump to this line"
+          }
         >
-          L{row.lineNo}
+          {row.rangeHiLineNo
+            ? `L${row.lineNo}–L${row.rangeHiLineNo}`
+            : `L${row.lineNo}`}
         </button>
         <span className="ainote__summary ainote__summary--muted">
           {row.replies.length === 0

@@ -1,0 +1,29 @@
+/* Reference primitive — used anywhere evidence is cited. Non-clickable by
+   default; the `--clickable` variant adds hover/focus affordances. */
+.ref {
+  display: inline-block;
+  padding: 1px 6px;
+  margin: 0;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  white-space: nowrap;
+  line-height: 1.5;
+  text-align: left;
+  vertical-align: baseline;
+}
+.ref--clickable {
+  color: var(--accent);
+  cursor: pointer;
+}
+.ref--clickable:hover {
+  border-color: var(--border-active);
+  background: var(--cursor-bg);
+}
+.ref--clickable:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}

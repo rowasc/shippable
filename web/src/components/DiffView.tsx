@@ -237,9 +237,9 @@ function Line({
       ref={cursorRef}
       className={`line line--${line.kind} ${line.isCursor ? "line--cursor" : ""} ${
         line.isReviewed ? "line--reviewed" : ""
-      } ${sev ? `line--ai-${sev}` : ""} ${line.isAcked ? "line--ai-acked" : ""} ${
-        line.hasUserComment ? "line--has-comment" : ""
-      }`}
+      } ${line.isSelected ? "line--selected" : ""} ${sev ? `line--ai-${sev}` : ""} ${
+        line.isAcked ? "line--ai-acked" : ""
+      } ${line.hasUserComment ? "line--has-comment" : ""}`}
       title={line.aiNote?.summary ?? (line.hasUserComment ? "user comment" : undefined)}
     >
       <span className="line__old">{line.oldNo ?? ""}</span>

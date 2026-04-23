@@ -1,5 +1,5 @@
 import type { AiNote, DiffLine, ReviewPlan, ReviewState } from "./types";
-import { noteKey, lineNoteReplyKey, teammateReplyKey } from "./types";
+import { blockCommentKey, noteKey, lineNoteReplyKey, teammateReplyKey } from "./types";
 import { CHANGESETS, SEED_REPLIES } from "./fixtures";
 import { initialState } from "./state";
 import { planReview } from "./plan";
@@ -229,7 +229,50 @@ export const fixtureTeammateEndorsed: GalleryFixture = {
   cursorLineIdx: 1,
 };
 
-// ── 5. plan (rule-based) ───────────────────────────────────────────────────
+// ── 5. block-selection ─────────────────────────────────────────────────────
+// cs-42 storage.ts#h2 — cursor on the try/catch region with shift-extended
+// selection covering the full `try { … } catch` block (lines 6..11). Includes
+// one block thread on that range to show the Inspector header label.
+
+const blockHunkId = storageH2.id; // "cs-42/src/utils/storage.ts#h2"
+const BLOCK_LO = 6;
+const BLOCK_HI = 11;
+const blockKey = blockCommentKey(blockHunkId, BLOCK_LO, BLOCK_HI);
+const blockSelectionBase = initialState([cs42]);
+
+export const fixtureBlockSelection: ReviewState = {
+  ...blockSelectionBase,
+  cursor: {
+    changesetId: cs42.id,
+    fileId: storageFile.id,
+    hunkId: blockHunkId,
+    lineIdx: BLOCK_HI,
+  },
+  selection: { hunkId: blockHunkId, anchor: BLOCK_LO, head: BLOCK_HI },
+  replies: {
+    [blockKey]: [
+      {
+        id: "b-r1",
+        author: "dan",
+        body: "The whole try/catch would be cleaner as a single parse-and-validate helper.",
+        createdAt: "2026-04-23T10:00:00Z",
+      },
+    ],
+  },
+};
+
+export const fixtureBlockSelectionGallery: GalleryFixture = {
+  kind: "diff",
+  name: "block-selection",
+  description:
+    "Cursor inside storage.ts#h2 with a shift-extended selection across the try/catch; one block comment thread attached.",
+  state: fixtureBlockSelection,
+  fileId: storageFile.id,
+  hunkId: blockHunkId,
+  cursorLineIdx: BLOCK_HI,
+};
+
+// ── 6. plan (rule-based) ───────────────────────────────────────────────────
 // The "where to begin" screen for cs-42, computed deterministically from the
 // parsed ChangeSet (no AI). Shows the intent/map/entry-points layout with
 // every claim citing a source.
@@ -248,6 +291,7 @@ export const ALL_FIXTURES: GalleryFixture[] = [
   fixturePlanRule,
   fixtureEmpty,
   fixtureMidReview,
+  fixtureBlockSelectionGallery,
   fixtureAiSaturated,
   fixtureTeammateEndorsed,
 ];

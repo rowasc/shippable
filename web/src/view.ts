@@ -7,7 +7,7 @@
  */
 
 import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
-import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey } from "./types";
+import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey, blockCommentKey } from "./types";
 import { hunkCoverage, fileCoverage } from "./state";
 import type { GuideSuggestion } from "./guide";
 import type { SymbolIndex } from "./symbols";
@@ -534,12 +534,20 @@ export interface AiNoteRowItem {
 
 /** A single user-started comment thread row. */
 export interface UserCommentRowItem {
+  /** Anchor line (start of the range for block threads). */
   lineIdx: number;
   lineNo: number;
+  /**
+   * When present, this thread spans lineIdx..rangeHiLineIdx inclusive — a
+   * block comment. UI should render the label as "L{lineNo}–L{rangeHiLineNo}".
+   */
+  rangeHiLineIdx?: number;
+  rangeHiLineNo?: number;
   /** Reply-thread key for this user comment. */
   threadKey: string;
   replies: Reply[];
   isDrafting: boolean;
+  /** True when the cursor is on (or within, for block threads) this row. */
   isCurrent: boolean;
   jumpTarget: Cursor;
 }
@@ -711,6 +719,39 @@ export function buildInspectorViewModel({
       jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: i },
     };
   });
+
+  // Block comments — any `block:${hunk.id}:lo-hi` keys in replies, plus an
+  // in-progress draft on such a key.
+  const blockPrefix = blockCommentKey(hunk.id, 0, 0).replace(/0-0$/, "");
+  const blockKeys = new Set<string>();
+  for (const k of Object.keys(replies)) {
+    if (k.startsWith(blockPrefix) && (replies[k]?.length ?? 0) > 0)
+      blockKeys.add(k);
+  }
+  if (draftingKey && draftingKey.startsWith(blockPrefix)) {
+    blockKeys.add(draftingKey);
+  }
+  for (const key of blockKeys) {
+    const tail = key.slice(blockPrefix.length);
+    const [loStr, hiStr] = tail.split("-");
+    const lo = parseInt(loStr, 10);
+    const hi = parseInt(hiStr, 10);
+    if (Number.isNaN(lo) || Number.isNaN(hi)) continue;
+    const loLine = hunk.lines[lo];
+    const hiLine = hunk.lines[hi];
+    userCommentRows.push({
+      lineIdx: lo,
+      lineNo: loLine?.newNo ?? loLine?.oldNo ?? lo + 1,
+      rangeHiLineIdx: hi,
+      rangeHiLineNo: hiLine?.newNo ?? hiLine?.oldNo ?? hi + 1,
+      threadKey: key,
+      replies: replies[key] ?? [],
+      isDrafting: draftingKey === key,
+      isCurrent: cursor.lineIdx >= lo && cursor.lineIdx <= hi,
+      jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: lo },
+    });
+  }
+  userCommentRows.sort((a, b) => a.lineIdx - b.lineIdx);
 
   const curHasThread = userCommentRows.some((r) => r.threadKey === curKey);
   const showNewCommentCta = !curHasThread && draftingKey !== curKey;
