@@ -13,6 +13,9 @@ export function initialState(prs: PullRequest[]): ReviewState {
     activeSkills: new Set(),
     ackedNotes: new Set(),
     replies: { ...SEED_REPLIES },
+    expandLevelAbove: {},
+    expandLevelBelow: {},
+    fullExpandedFiles: new Set(),
   };
 }
 
@@ -35,7 +38,9 @@ export type Action =
   | { type: "TOGGLE_SKILL"; skillId: string }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
-  | { type: "ADD_REPLY"; targetKey: string; reply: Reply };
+  | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
+  | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
+  | { type: "TOGGLE_EXPAND_FILE"; fileId: string };
 
 export function reducer(prs: PullRequest[]) {
   return function (state: ReviewState, action: Action): ReviewState {
@@ -88,8 +93,24 @@ export function reducer(prs: PullRequest[]) {
           },
         };
       }
+      case "SET_EXPAND_LEVEL": {
+        const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
+        return {
+          ...state,
+          [field]: { ...state[field], [action.hunkId]: Math.max(0, action.level) },
+        };
+      }
+      case "TOGGLE_EXPAND_FILE":
+        return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
     }
   };
+}
+
+function togglein(set: Set<string>, key: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
 }
 
 function moveLine(state: ReviewState, prs: PullRequest[], delta: number): ReviewState {

@@ -43,6 +43,24 @@ export const PRS: PullRequest[] = [
             newStart: 4,
             newCount: 14,
             definesSymbols: ["Preferences"],
+            expandAbove: [
+              // nearest: blank separator above User interface
+              [{ kind: "context", text: "", oldNo: 3, newNo: 3 }],
+              // next: imports at the top of the file
+              [
+                { kind: "context", text: "// shared user-facing types", oldNo: 1, newNo: 1 },
+                { kind: "context", text: "import type { Locale } from \"../i18n\";", oldNo: 2, newNo: 2 },
+              ],
+            ],
+            expandBelow: [
+              // nearest: blank + first declaration below Preferences
+              [
+                { kind: "context", text: "", oldNo: 11, newNo: 16 },
+                { kind: "context", text: "export type UserId = User[\"id\"];", oldNo: 12, newNo: 17 },
+              ],
+              // further: second declaration
+              [{ kind: "context", text: "export type LocaleCode = Locale[\"code\"];", oldNo: 13, newNo: 18 }],
+            ],
             lines: [
               { kind: "context", text: "export interface User {", oldNo: 4, newNo: 4 },
               { kind: "context", text: "  id: string;", oldNo: 5, newNo: 5 },
@@ -58,6 +76,26 @@ export const PRS: PullRequest[] = [
               { kind: "add", text: "}", newNo: 15 },
             ],
           },
+        ],
+        fullContent: [
+          { kind: "context", text: "// shared user-facing types", newNo: 1 },
+          { kind: "context", text: "import type { Locale } from \"../i18n\";", newNo: 2 },
+          { kind: "context", text: "", newNo: 3 },
+          { kind: "context", text: "export interface User {", newNo: 4 },
+          { kind: "context", text: "  id: string;", newNo: 5 },
+          { kind: "context", text: "  email: string;", newNo: 6 },
+          { kind: "context", text: "  name: string;", newNo: 7 },
+          { kind: "add", text: "  preferences?: Preferences;", newNo: 8 },
+          { kind: "context", text: "}", newNo: 9 },
+          { kind: "context", text: "", newNo: 10 },
+          { kind: "add", text: "export interface Preferences {", newNo: 11 },
+          { kind: "add", text: "  theme: \"light\" | \"dark\" | \"system\";", newNo: 12 },
+          { kind: "add", text: "  compactMode: boolean;", newNo: 13 },
+          { kind: "add", text: "  notifyOnMention: boolean;", newNo: 14 },
+          { kind: "add", text: "}", newNo: 15 },
+          { kind: "context", text: "", newNo: 16 },
+          { kind: "context", text: "export type UserId = User[\"id\"];", newNo: 17 },
+          { kind: "context", text: "export type LocaleCode = Locale[\"code\"];", newNo: 18 },
         ],
       },
       {
@@ -92,6 +130,26 @@ export const PRS: PullRequest[] = [
             aiReviewed: true,
             aiSummary:
               "Straightforward localStorage wrapper. Two worth-a-look items: the try/catch in loadPrefs swallows parse errors silently, and savePrefs has no quota-exceeded handling.",
+            expandAbove: [
+              // block 1 (nearest): remaining body of saveUser above the hunk
+              [{ kind: "context", text: "  u = normalize(u);", oldNo: 19, newNo: 21 }],
+              // block 2: saveUser's signature + its leading comment
+              [
+                { kind: "context", text: "// called on every auth transition", oldNo: 17, newNo: 19 },
+                { kind: "context", text: "export function saveUser(u: User): void {", oldNo: 18, newNo: 20 },
+              ],
+              // block 3: file-top constants and imports
+              [
+                { kind: "context", text: "import type { User } from \"../types/user\";", oldNo: 1, newNo: 1 },
+                { kind: "context", text: "", oldNo: 2, newNo: 3 },
+                { kind: "context", text: "const USER_KEY = \"critica:user\";", oldNo: 3, newNo: 4 },
+                { kind: "context", text: "", oldNo: 4, newNo: 6 },
+              ],
+            ],
+            expandBelow: [
+              [{ kind: "context", text: "", oldNo: 24, newNo: 39 }],
+              [{ kind: "context", text: "// EOF", oldNo: 25, newNo: 40 }],
+            ],
             lines: [
               { kind: "context", text: "  localStorage.setItem(USER_KEY, JSON.stringify(u));", oldNo: 20, newNo: 22 },
               { kind: "context", text: "}", oldNo: 21, newNo: 23 },
@@ -364,6 +422,35 @@ export const PRS: PullRequest[] = [
             aiReviewed: true,
             aiSummary:
               "Memoizes a readiness promise and polls hydrate state. Concern: no timeout or cancel path — if hydrate never resolves the promise (and thus every awaiting request) hangs forever.",
+            expandAbove: [
+              // block 1 (nearest): the end of hydrate() + blank
+              [
+                { kind: "context", text: "}", oldNo: 22, newNo: 24 },
+                { kind: "context", text: "", oldNo: 23, newNo: 25 },
+              ],
+              // block 2: hydrate()'s body and signature
+              [
+                { kind: "context", text: "export function hydrate(session: Session) {", oldNo: 20, newNo: 22 },
+                { kind: "context", text: "  state = { status: \"ready\", session };", oldNo: 21, newNo: 23 },
+              ],
+              // block 3: top-of-file imports and shared state declaration
+              [
+                { kind: "context", text: "import { readStore } from \"./store\";", oldNo: 3, newNo: 3 },
+                { kind: "context", text: "import type { Session } from \"../shared/types\";", oldNo: 4, newNo: 4 },
+                { kind: "context", text: "", oldNo: 5, newNo: 6 },
+              ],
+            ],
+            expandBelow: [
+              [
+                { kind: "context", text: "export function getSession(_req: unknown): Session | null {", oldNo: 22, newNo: 40 },
+                { kind: "context", text: "  return state.status === \"ready\" ? state.session : null;", oldNo: 23, newNo: 41 },
+                { kind: "context", text: "}", oldNo: 24, newNo: 42 },
+              ],
+              [
+                { kind: "context", text: "", oldNo: 25, newNo: 43 },
+                { kind: "context", text: "// EOF", oldNo: 26, newNo: 44 },
+              ],
+            ],
             lines: [
               { kind: "add", text: "export function ensureSessionReady(): Promise<void> {", newNo: 26 },
               {

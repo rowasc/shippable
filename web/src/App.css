@@ -202,6 +202,103 @@ body,
   color: var(--fg-dim);
   margin-left: 8px;
 }
+.diff__spacer {
+  flex: 1;
+}
+.diff__path {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.diff__expand-file {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.diff__expand-file:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.diff__expand-file--on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* context-expand bar + lines --------------------------------------------- */
+.expandbar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-2);
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  font-size: 11px;
+}
+.expandbar__main {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 14px;
+  cursor: pointer;
+}
+.expandbar__main:hover {
+  color: var(--accent);
+  background: var(--bg-3);
+}
+.expandbar__main--done {
+  cursor: default;
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.expandbar__main--done:hover {
+  background: transparent;
+  color: var(--fg-mute);
+}
+.expandbar__arrow {
+  color: var(--fg-dim);
+  margin-right: 4px;
+}
+.expandbar__lvl {
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
+}
+.expandbar__collapse {
+  background: transparent;
+  border: none;
+  border-left: 1px dashed var(--border);
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.expandbar__collapse:hover {
+  color: var(--red);
+  background: var(--bg-3);
+}
+.hunk__body--context .line {
+  background: var(--bg-2);
+}
+.line--ctx-expand .line__text {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+.line--ctx-expand .line__old,
+.line--ctx-expand .line__new {
+  color: var(--fg-mute);
+}
+
+.hunk--full {
+  border-color: var(--border-active);
+}
 
 .hunk {
   margin: 10px 14px;

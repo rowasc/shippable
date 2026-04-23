@@ -33,6 +33,14 @@ export interface Hunk {
     verdict: "approve" | "comment";
     note?: string;
   };
+  /**
+   * Ordered from nearest to farthest: the first element is the block
+   * immediately enclosing the hunk; each subsequent element is one
+   * scope further out (nearest enclosing function → module scope →
+   * file top, for example).
+   */
+  expandAbove?: DiffLine[][];
+  expandBelow?: DiffLine[][];
 }
 
 export type FileStatus = "modified" | "added" | "deleted" | "renamed";
@@ -43,6 +51,8 @@ export interface DiffFile {
   language: string;
   status: FileStatus;
   hunks: Hunk[];
+  /** Full file contents for the "expand entire file" view. */
+  fullContent?: DiffLine[];
 }
 
 export interface Skill {
@@ -86,6 +96,10 @@ export interface ReviewState {
   ackedNotes: Set<string>;
   /** keys are reply-target keys; see replyKey helpers */
   replies: Record<string, Reply[]>;
+  /** Per-hunk count of blocks revealed above; 0 = nothing extra. */
+  expandLevelAbove: Record<string, number>;
+  expandLevelBelow: Record<string, number>;
+  fullExpandedFiles: Set<string>;
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {

@@ -200,6 +200,15 @@ export default function App() {
           reviewed={state.reviewedLines}
           acked={state.ackedNotes}
           replies={state.replies}
+          expandLevelAbove={state.expandLevelAbove}
+          expandLevelBelow={state.expandLevelBelow}
+          fileFullyExpanded={state.fullExpandedFiles.has(file.id)}
+          onSetExpandLevel={(hunkId, dir, level) =>
+            dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
+          }
+          onToggleExpandFile={(fileId) =>
+            dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
+          }
         />
         {showInspector && (
           <Inspector
