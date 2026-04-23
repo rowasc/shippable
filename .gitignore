@@ -2,3 +2,10 @@
 *.log
 
 .claude/*.local.json
+
+# Playwright MCP browser profile + screenshot output dir.
+# Screenshots taken via browser_take_screenshot should be written under
+# screenshots/ (pass filename like "screenshots/foo.png") so the whole
+# directory is untracked.
+.playwright-mcp/
+screenshots/
