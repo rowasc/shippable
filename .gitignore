@@ -16,3 +16,17 @@ screenshots/
 
 # Internal thinking / process docs. Not for public consumption; keep local.
 .meta/
+
+CLAUDE.local.md
+
+# Env files — no secrets today, but cheap insurance against future leaks.
+.env
+.env.local
+.env.*.local
+
+# Editor configs (web/.gitignore covers these inside web/, this catches root).
+.vscode/
+.idea/
+
+# In case a root package.json ever appears.
+node_modules/
