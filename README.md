@@ -10,6 +10,8 @@ Everything lives in `web/`. There's no root `package.json` yet.
 
 ```
 cd web
+nvm use           # picks up Node from .nvmrc (22). fnm/asdf read it too.
+npm install
 npm run dev       # Vite dev server
 npm run build     # tsc -b && vite build — the canonical "did I break typing" check
 npm run lint      # eslint
