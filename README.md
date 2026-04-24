@@ -1,6 +1,6 @@
 # shippable
 
-Shippable is an early **prototype** of an AI-assisted code review tool that accompanies you as you work through a diff. Shippable helps you figure out where to start, how things relate to each other, and what you've already reviewed.
+Shippable is an early **prototype** of an AI-assisted code review tool that accompanies you as you work through a diff. Shippable helps you figure out where to start, highlights how things relate to each other, and keeps track of you've already reviewed.
 
 The code itself is a throwaway at this point, meant to explore a concept. Please don't use this in any kind of production setting. 
 

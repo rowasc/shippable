@@ -4,6 +4,7 @@ Working with Claude and other AI agents it's incredibly easy to generate dozens 
 
 Finding out that you have 10 new PRs to review and not knowing where to start can be tiring and slow. On the other hand, having to review your own work from long coding sessions with Claude can also be exhausting, it's like reviewing someone else's solution to a problem you have already thought about, which means you have familiarity with the idea and the domain but may not know much about the code itself. 
 
+Finally, these days I spend most of my time tweaking specs and then reviewing rather than writing code manually. I'm curious about what a tool that begins with review in mind (rather than editing) can look like.
 
 # What's out there
 
