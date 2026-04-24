@@ -2,6 +2,8 @@
 
 Shippable is an early **prototype** of an AI-assisted code review tool that accompanies you as you work through a diff. Shippable helps you figure out where to start, highlights how things relate to each other, and keeps track of you've already reviewed.
 
+![shippable demo](docs/demo.gif)
+
 The code itself is a throwaway at this point, meant to explore a concept. Please don't use this in any kind of production setting. 
 
 ## Running it
@@ -25,3 +27,11 @@ Three entry points:
 - `/` is the live app.
 - `/gallery.html` is a screen catalog that renders every UI state against canned fixtures. This is the intended surface for design work — way faster than driving the live app with the keyboard to reach an edge case.
 - `?cs=<id>` on the main app jumps straight to a specific sample ChangeSet, which is handy if you need to reproduce a fixture state manually.
+
+## Regenerating the README GIF
+
+```
+npm run demo
+```
+
+Starts a headless Vite instance on port 5199, drives the app with Playwright against the `cs-42` fixture, and writes a fresh `docs/demo.gif`. Requires `ffmpeg` on `PATH` and a local Chrome install (`playwright-core` uses the system browser). The whole run takes ~15s. See `web/scripts/generate-demo.mjs` to tweak the flow, timings, or output size.
