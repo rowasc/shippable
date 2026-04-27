@@ -40,6 +40,32 @@ export const press = (key, opts = {}) => ({
 
 export const shot = (label, hold) => ({ type: "shot", label, hold });
 
+// Click an element matched by CSS selector.
+export const click = (selector, opts = {}) => ({
+  type: "click",
+  selector,
+  hold: opts.hold ?? 0,
+});
+
+// Type into an input/textarea matched by CSS selector. The implementation
+// uses Playwright's `fill` (replace) by default — pass `{ append: true }`
+// to keep existing text and append.
+export const type = (selector, text, opts = {}) => ({
+  type: "type",
+  selector,
+  text,
+  append: !!opts.append,
+  hold: opts.hold ?? 0,
+});
+
+// Replace a DOM element's text content and select it (used to seed a known
+// snippet of code into a diff line for the CodeRunner storyboard).
+export const setSelection = (selector, text) => ({
+  type: "setSelection",
+  selector,
+  text,
+});
+
 // ── storyboard factory ─────────────────────────────────────────────────────
 
 export function storyboard(def) {
@@ -85,6 +111,38 @@ async function executeSteps(page, steps, framesDir) {
         }
         if (step.hold) await page.waitForTimeout(step.hold);
         else if (step.interval) await page.waitForTimeout(step.interval);
+        break;
+      }
+      case "click": {
+        await page.click(step.selector);
+        if (step.hold) await page.waitForTimeout(step.hold);
+        break;
+      }
+      case "type": {
+        if (step.append) {
+          await page.focus(step.selector);
+          await page.keyboard.type(step.text);
+        } else {
+          await page.fill(step.selector, step.text);
+        }
+        if (step.hold) await page.waitForTimeout(step.hold);
+        break;
+      }
+      case "setSelection": {
+        await page.evaluate(
+          ({ selector, text }) => {
+            const node = document.querySelector(selector);
+            if (!node) throw new Error(`setSelection: no node for '${selector}'`);
+            node.textContent = text;
+            const sel = window.getSelection();
+            if (!sel) return;
+            sel.removeAllRanges();
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            sel.addRange(range);
+          },
+          { selector: step.selector, text: step.text },
+        );
         break;
       }
       case "shot": {
