@@ -30,3 +30,7 @@ CLAUDE.local.md
 
 # In case a root package.json ever appears.
 node_modules/
+
+# Claude Code workspace metadata + worktrees. Local to each contributor;
+# `settings.local.json` may capture command allowlists worth not sharing.
+.claude/
