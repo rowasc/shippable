@@ -184,3 +184,21 @@
   font-size: 11px;
   font-style: italic;
 }
+
+.coderunner__vars {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+.coderunner__var {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.coderunner__var-name { color: var(--magenta); }
+.coderunner__var-eq { color: var(--fg-mute); }
+.coderunner__var-val {
+  color: var(--fg);
+  word-break: break-word;
+}

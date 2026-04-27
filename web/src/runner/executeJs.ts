@@ -12,6 +12,8 @@ export interface RunResult {
   logs: string[];
   result?: string;
   error?: string;
+  /** Final values of any bound input slots (free shape). */
+  vars?: Record<string, string>;
 }
 
 const TIMEOUT_MS = 2000;
@@ -42,7 +44,18 @@ function buildProgram(parsed: ParsedSelection, inputs: Record<string, string>): 
       const decls = shape.vars
         .map((v) => `let ${v} = ${inputs[v] ?? "undefined"};`)
         .join("\n");
-      return `${decls}\n${src}`;
+      // Direct `eval` runs in our function's lexical scope, so it sees the
+      // declarations above and its completion value (the value of the last
+      // expression statement, e.g. `a * 2`) becomes the captured result.
+      // After it runs we snapshot every bound input slot — users may have
+      // mutated them.
+      const slots = JSON.stringify(shape.vars);
+      return [
+        decls,
+        `__result = eval(${JSON.stringify(src)});`,
+        `__vars = {};`,
+        `for (const __k of ${slots}) { try { __vars[__k] = eval(__k); } catch {} }`,
+      ].join("\n");
     }
   }
 }
@@ -87,7 +100,14 @@ function runInSandbox(program: string): Promise<RunResult> {
     };
 
     function onMessage(ev: MessageEvent) {
-      const data = ev.data as { __runner?: string; ok?: boolean; logs?: string[]; result?: string; error?: string };
+      const data = ev.data as {
+        __runner?: string;
+        ok?: boolean;
+        logs?: string[];
+        result?: string;
+        error?: string;
+        vars?: Record<string, string>;
+      };
       if (!data || !data.__runner) return;
       if (data.__runner === "ready") {
         iframe.contentWindow?.postMessage({ __runner: token, code: program }, "*");
@@ -99,6 +119,7 @@ function runInSandbox(program: string): Promise<RunResult> {
         logs: data.logs ?? [],
         result: data.result,
         error: data.error,
+        vars: data.vars,
       });
     }
 

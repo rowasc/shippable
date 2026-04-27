@@ -204,6 +204,21 @@ export function CodeRunner({ currentFilePath }: Props) {
                   <span className="coderunner__label">return</span> {result.result}
                 </pre>
               )}
+              {result.vars && Object.keys(result.vars).length > 0 && (
+                <div className="coderunner__vars">
+                  <span className="coderunner__label">vars</span>
+                  {Object.entries(result.vars).map(([k, v]) => (
+                    <div key={k} className="coderunner__var">
+                      <span className="coderunner__var-name">
+                        {parsed.lang === "php" ? "$" : ""}
+                        {k}
+                      </span>
+                      <span className="coderunner__var-eq">=</span>
+                      <span className="coderunner__var-val">{v}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {result.error && (
                 <pre className="coderunner__err">
                   <span className="coderunner__label">error</span> {result.error}
@@ -211,7 +226,8 @@ export function CodeRunner({ currentFilePath }: Props) {
               )}
               {result.ok &&
                 result.logs.length === 0 &&
-                result.result === undefined && (
+                result.result === undefined &&
+                (!result.vars || Object.keys(result.vars).length === 0) && (
                   <span className="coderunner__empty">(no output)</span>
                 )}
             </div>

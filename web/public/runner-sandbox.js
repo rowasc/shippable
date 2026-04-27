@@ -34,14 +34,33 @@
     logs = [];
     (async function () {
       try {
-        var fn = new Function("return (async () => { " + code + "\nreturn typeof __result !== 'undefined' ? __result : undefined; })();");
-        var out = await fn();
+        // The user's program may set __result (the captured value) and/or
+        // __vars (a map of bound input vars to their final values). Both are
+        // declared here so plain assignments without `var` work in strict-ish
+        // contexts and so undefined survives the round-trip.
+        var fn = new Function(
+          "return (async () => { var __result, __vars; " +
+            code +
+            "\nreturn { __result: __result, __vars: __vars };" +
+            " })();"
+        );
+        var ret = await fn();
+        var serializedVars;
+        if (ret.__vars && typeof ret.__vars === "object") {
+          serializedVars = {};
+          for (var k in ret.__vars) {
+            if (Object.prototype.hasOwnProperty.call(ret.__vars, k)) {
+              serializedVars[k] = origin(ret.__vars[k]);
+            }
+          }
+        }
         parent.postMessage(
           {
             __runner: token,
             ok: true,
             logs: logs,
-            result: out === undefined ? undefined : origin(out),
+            result: ret.__result === undefined ? undefined : origin(ret.__result),
+            vars: serializedVars,
           },
           "*",
         );
