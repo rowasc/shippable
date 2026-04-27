@@ -85,8 +85,8 @@ function runInSandbox(program: string): Promise<RunResult> {
     iframe.style.display = "none";
     // Loaded from same-origin (so the page CSP allows it as a frame), then
     // sandboxed without allow-same-origin so it runs at a null origin with no
-    // DOM access to the host page. The sandbox HTML's own inline <script> is
-    // forbidden by the parent CSP, which is why this lives in a separate file.
+    // DOM access to the host page. The sandbox HTML carries its own CSP
+    // (default-src 'none', no connect/img/etc.) to block exfiltration.
     iframe.src = "/runner-sandbox.html";
 
     let settled = false;
@@ -100,6 +100,9 @@ function runInSandbox(program: string): Promise<RunResult> {
     };
 
     function onMessage(ev: MessageEvent) {
+      // Reject messages that didn't come from our sandbox iframe — defense
+      // in depth in case any other frame on the page guesses the token.
+      if (ev.source !== iframe.contentWindow) return;
       const data = ev.data as {
         __runner?: string;
         ok?: boolean;
