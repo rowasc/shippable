@@ -131,10 +131,19 @@ function buildScript(parsed: ParsedSelection, inputs: Record<string, string>): s
   // For function-shaped selections, append a call. A marker brackets the
   // return value so we can split it from the function's own stdout.
   if (parsed.shape.kind !== "free") {
-    const callee =
-      parsed.shape.kind === "named-fn" ? parsed.shape.name : "$__rs_anon";
     const argList = parsed.shape.params.map((p) => "$" + p).join(", ");
-    lines.push(`$__rs_ret = is_callable(${callee}) ? ${callee}(${argList}) : null;`);
+    if (parsed.shape.kind === "named-fn") {
+      // The function name is a bareword in PHP — needs quoting for the
+      // is_callable check, otherwise PHP reads it as an undefined constant.
+      const quoted = `'${parsed.shape.name.replace(/'/g, "\\'")}'`;
+      lines.push(
+        `$__rs_ret = function_exists(${quoted}) ? ${parsed.shape.name}(${argList}) : null;`,
+      );
+    } else {
+      lines.push(
+        `$__rs_ret = is_callable($__rs_anon) ? $__rs_anon(${argList}) : null;`,
+      );
+    }
     lines.push(emitResultMarker("$__rs_ret"));
   }
 

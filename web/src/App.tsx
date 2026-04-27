@@ -28,12 +28,15 @@ import {
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
-    // ?cs=<id> loads a specific sample changeset (not-very-visible testing affordance).
+    // ?cs=<id> (or the short `?c=<n>`) loads a specific sample changeset.
+    // Accepts the full id ("cs-09") or the numeric tail ("09" / "9").
     const initial = initialState(changesets);
     const params = new URLSearchParams(window.location.search);
-    const wanted = params.get("cs");
+    const wanted = params.get("cs") ?? params.get("c");
     if (!wanted) return initial;
-    const target = changesets.find((c) => c.id === wanted);
+    const target = changesets.find(
+      (c) => c.id === wanted || c.id === `cs-${wanted}` || c.id.replace(/^cs-/, "") === wanted,
+    );
     if (!target) return initial;
     const file = target.files[0];
     const hunk = file.hunks[0];
