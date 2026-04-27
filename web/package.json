@@ -15,6 +15,7 @@
     "demo": "node scripts/generate-demo.mjs"
   },
   "dependencies": {
+    "@php-wasm/web": "^3.1.21",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"
   },

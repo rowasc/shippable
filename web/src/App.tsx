@@ -12,6 +12,7 @@ import { HelpOverlay } from "./components/HelpOverlay";
 import { Inspector } from "./components/Inspector";
 import { LoadModal } from "./components/LoadModal";
 import { ReviewPlanView } from "./components/ReviewPlanView";
+import { CodeRunner } from "./components/CodeRunner";
 import { buildSymbolIndex } from "./symbols";
 import type { SymbolIndex } from "./symbols";
 import type { ChangeSet, Cursor, EvidenceRef } from "./types";
@@ -369,6 +370,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <CodeRunner currentFilePath={file.path} />
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showLoad && (
         <LoadModal
