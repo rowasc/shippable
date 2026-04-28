@@ -104,6 +104,8 @@ export interface FullFileLineViewModel {
 export interface DiffViewModel {
   /** File path for the header. */
   path: string;
+  /** Language hint for syntax highlighting. */
+  language: string;
   /** File status badge text. */
   status: string;
   /** File ID (needed for toggle-expand-file callback). */
@@ -276,6 +278,7 @@ export function buildDiffViewModel({
 
   return {
     path: file.path,
+    language: file.language,
     status: file.status,
     fileId: file.id,
     canExpandFile,
