@@ -34,7 +34,11 @@ function parseArgs(argv) {
 
 async function loadStoryboards() {
   const entries = await readdir(STORYBOARDS_DIR);
-  const files = entries.filter((f) => f.endsWith(".mjs")).sort();
+  // Files prefixed with `_` are shared modules (fixtures, helpers), not
+  // storyboards. Skip them.
+  const files = entries
+    .filter((f) => f.endsWith(".mjs") && !f.startsWith("_"))
+    .sort();
   const loaded = [];
   for (const f of files) {
     const mod = await import(pathToFileURL(resolve(STORYBOARDS_DIR, f)).href);

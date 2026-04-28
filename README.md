@@ -2,15 +2,9 @@
 
 Shippable is an early **prototype** of an AI-assisted code review tool that accompanies you as you work through a diff. Shippable helps you figure out where to start, highlights how things relate to each other, and keeps track of you've already reviewed.
 
-![shippable demo](docs/demo.gif)
+![shippable demo](docs/all.gif)
 
-The code itself is a throwaway at this point, meant to explore a concept. Please don't use this in any kind of production setting. 
-
-## AI plan flow
-
-When you open a diff, Shippable asks Claude to read it and explain what's going on — what each file contributes, where to start reading, and how the hunks connect. The plan stays available throughout the review.
-
-![ai plan flow](docs/ai-plan.gif)
+The code itself is a throwaway at this point, meant to explore a concept. Please don't use this in any kind of production setting.
 
 ## Running it
 
