@@ -45,8 +45,21 @@ security add-generic-password -a "$USER" -s anthropic-key-shippable -w
 
 ```
 export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)
-npm run dev        # tsx watch on http://localhost:3001
+npm run dev        # tsx watch on http://127.0.0.1:3001
 npm run typecheck  # tsc --noEmit
+```
+
+The backend now binds to `127.0.0.1` only and does not allow browser
+cross-origin access by default. That is intentional: the normal dev path is
+the Vite proxy in `web/`, so the browser should talk to `/api` on the frontend
+origin and let Vite forward requests to the backend.
+
+If you deliberately want the browser to call the backend directly from another
+local origin during development, set a comma-separated allowlist before starting
+the server:
+
+```
+export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
 The single endpoint is `POST /api/plan` — accepts `{ changeset: ChangeSet }`, returns `{ plan: ReviewPlan }`. The model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
