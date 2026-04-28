@@ -69,8 +69,9 @@ async function main() {
     await withChrome(async (browser) => {
       for (const sb of storyboards) {
         console.log(`[demo] running '${sb.name}' -> ${sb.output}`);
-        const { frames, output } = await runStoryboard(sb, { browser, repoRoot: REPO_ROOT });
+        const { frames, output, mp4 } = await runStoryboard(sb, { browser, repoRoot: REPO_ROOT });
         console.log(`[demo]   ${frames} frames -> ${output}`);
+        if (mp4) console.log(`[demo]   ${frames} frames -> ${mp4}`);
       }
     });
   });

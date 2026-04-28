@@ -38,7 +38,15 @@ export const press = (key, opts = {}) => ({
   hold: opts.hold ?? 0,
 });
 
-export const shot = (label, hold) => ({ type: "shot", label, hold });
+// `caption` paints a subtitle strip at the bottom of the viewport before the
+// screenshot is taken. Pass `null` to clear an existing caption; omit it to
+// inherit the previous shot's caption.
+export const shot = (label, hold, opts = {}) => ({
+  type: "shot",
+  label,
+  hold,
+  caption: "caption" in opts ? opts.caption : undefined,
+});
 
 // Click an element matched by CSS selector.
 export const click = (selector, opts = {}) => ({
@@ -87,9 +95,49 @@ export function storyboard(def) {
 
 // ── executor ───────────────────────────────────────────────────────────────
 
+// Inject a fixed-position subtitle strip at the bottom of the viewport. The
+// strip lives in the page itself so it shows up in screenshots without any
+// post-processing. It overlaps the bottom ~56px of the app, which is fine for
+// our flows (overlays render higher up).
+async function injectCaptionBar(page) {
+  await page.evaluate(() => {
+    if (document.getElementById("__demo_caption__")) return;
+    const bar = document.createElement("div");
+    bar.id = "__demo_caption__";
+    bar.style.cssText = [
+      "position:fixed",
+      "left:0",
+      "right:0",
+      "bottom:0",
+      "padding:14px 24px",
+      "background:rgba(12,14,20,0.92)",
+      "color:#f5f7fa",
+      "font:600 18px/1.35 -apple-system,system-ui,'Segoe UI',sans-serif",
+      "letter-spacing:0.01em",
+      "text-align:center",
+      "border-top:1px solid rgba(255,255,255,0.08)",
+      "z-index:2147483647",
+      "pointer-events:none",
+      "opacity:0",
+      "transition:opacity 120ms ease",
+    ].join(";");
+    document.body.appendChild(bar);
+  });
+}
+
+async function setCaption(page, text) {
+  await page.evaluate((t) => {
+    const bar = document.getElementById("__demo_caption__");
+    if (!bar) return;
+    bar.textContent = t || "";
+    bar.style.opacity = t ? "1" : "0";
+  }, text);
+}
+
 async function executeSteps(page, steps, framesDir) {
   const frames = [];
   const usedLabels = new Set();
+  let currentCaption = "";
   for (const step of steps) {
     switch (step.type) {
       case "wait":
@@ -150,6 +198,10 @@ async function executeSteps(page, steps, framesDir) {
           throw new Error(`duplicate shot label: ${step.label}`);
         }
         usedLabels.add(step.label);
+        if (step.caption !== undefined) {
+          currentCaption = step.caption ?? "";
+          await setCaption(page, currentCaption);
+        }
         const idx = String(frames.length).padStart(3, "0");
         const file = join(framesDir, `${idx}_${step.label}.png`);
         await page.screenshot({ path: file, fullPage: false });
@@ -167,7 +219,7 @@ async function executeSteps(page, steps, framesDir) {
 // be written as `'\''` (close, escaped quote, reopen).
 const concatQuote = (s) => `'${s.replace(/'/g, "'\\''")}'`;
 
-async function buildGif(frames, outPath, gifWidth, framesDir) {
+async function writeFrameList(frames, framesDir) {
   const listPath = join(framesDir, "frames.txt");
   const lines = [];
   for (const f of frames) {
@@ -178,7 +230,10 @@ async function buildGif(frames, outPath, gifWidth, framesDir) {
   // it holds for the intended time.
   lines.push(`file ${concatQuote(frames.at(-1).file)}`);
   await writeFile(listPath, lines.join("\n") + "\n");
+  return listPath;
+}
 
+async function buildGif(listPath, outPath, gifWidth, framesDir) {
   const palette = join(framesDir, "palette.png");
   await runCmd("ffmpeg", [
     "-y", "-f", "concat", "-safe", "0", "-i", listPath,
@@ -196,6 +251,29 @@ async function buildGif(frames, outPath, gifWidth, framesDir) {
     "-loop", "0",
     outPath,
   ]);
+}
+
+// MP4 output for embedding where bandwidth or color quality matters. Uses
+// libx264 with yuv420p for universal browser support and `+faststart` so the
+// moov atom lands at the front (lets browsers begin playback before download
+// finishes). Width matches the GIF; height is rounded to even via `-2` because
+// yuv420p requires even dimensions.
+async function buildMp4(listPath, outPath, width) {
+  await mkdir(dirname(outPath), { recursive: true });
+  await runCmd("ffmpeg", [
+    "-y", "-f", "concat", "-safe", "0", "-i", listPath,
+    "-vf", `scale=${width}:-2:flags=lanczos,format=yuv420p`,
+    "-c:v", "libx264",
+    "-preset", "slow",
+    "-crf", "22",
+    "-movflags", "+faststart",
+    "-r", "30",
+    outPath,
+  ]);
+}
+
+function swapExt(p, ext) {
+  return p.replace(/\.[^./]+$/, ext);
 }
 
 export async function runStoryboard(sb, { browser, repoRoot }) {
@@ -218,13 +296,17 @@ export async function runStoryboard(sb, { browser, repoRoot }) {
       }
     }
     await page.goto(sb.url, { waitUntil: "networkidle" });
+    await injectCaptionBar(page);
     const frames = await executeSteps(page, sb.steps, framesDir);
     if (frames.length === 0) {
       throw new Error(`storyboard '${sb.name}' produced no shots`);
     }
     const outPath = join(repoRoot, sb.output);
-    await buildGif(frames, outPath, sb.gifWidth, framesDir);
-    return { frames: frames.length, output: outPath };
+    const mp4Path = swapExt(outPath, ".mp4");
+    const listPath = await writeFrameList(frames, framesDir);
+    await buildGif(listPath, outPath, sb.gifWidth, framesDir);
+    await buildMp4(listPath, mp4Path, sb.gifWidth);
+    return { frames: frames.length, output: outPath, mp4: mp4Path };
   } finally {
     await ctx.close();
   }
