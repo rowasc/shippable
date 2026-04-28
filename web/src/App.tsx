@@ -48,6 +48,7 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
+  const [freeRunnerOpen, setFreeRunnerOpen] = useState(false);
   // Start with the plan visible so first-time reviewers see the "where to
   // start" view before the diff. They press Enter/click an entry point (or
   // Escape) to dismiss and can press `p` to reopen.
@@ -202,6 +203,9 @@ export default function App() {
         case "OPEN_LOAD":
           setShowLoad(true);
           break;
+        case "OPEN_RUNNER":
+          setFreeRunnerOpen(true);
+          break;
         case "PREV_CHANGESET":
           dispatch({
             type: "SWITCH_CHANGESET",
@@ -240,6 +244,13 @@ export default function App() {
         </span>
         <span className="topbar__spacer" />
         <span className="topbar__author">@{cs.author}</span>
+        <button
+          className="topbar__btn"
+          onClick={() => setFreeRunnerOpen(true)}
+          title="open a free code runner — type or paste a snippet (shift+R)"
+        >
+          ▷ run
+        </button>
         <button
           className="topbar__btn"
           onClick={() => setShowLoad(true)}
@@ -373,7 +384,11 @@ export default function App() {
           </div>
         </div>
       )}
-      <CodeRunner currentFilePath={file.path} />
+      <CodeRunner
+        currentFilePath={file.path}
+        freeOpen={freeRunnerOpen}
+        onFreeClose={() => setFreeRunnerOpen(false)}
+      />
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showLoad && (
         <LoadModal

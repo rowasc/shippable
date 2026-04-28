@@ -33,7 +33,8 @@ export type ActionId =
   | "CLOSE_HELP"
   | "PREV_CHANGESET"
   | "NEXT_CHANGESET"
-  | "OPEN_LOAD";
+  | "OPEN_LOAD"
+  | "OPEN_RUNNER";
 
 export type ContextPredicate =
   | "hasSuggestion"
@@ -91,6 +92,7 @@ export const KEYMAP: KeyEntry[] = [
   { key: "Escape", when: "hasPlan", label: "close plan", group: "ui", action: "CLOSE_PLAN" },
   { key: "Escape", label: "close help",          group: "ui", action: "CLOSE_HELP" },
   { key: "L", shift: true, label: "load a changeset (URL / file / paste)", group: "ui", action: "OPEN_LOAD" },
+  { key: "R", shift: true, label: "open the free code runner", group: "ui", action: "OPEN_RUNNER" },
 
   // ── testing ─────────────────────────────────────────────────────────────────
   { key: "[", label: "previous sample changeset", group: "testing", action: "PREV_CHANGESET" },

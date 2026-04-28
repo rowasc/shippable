@@ -1,43 +1,77 @@
 import "./CodeRunner.css";
-import { useEffect, useRef, useState } from "react";
-import { detectLang, parseSelection } from "../runner/parseInputs";
-import type { Lang, ParsedSelection } from "../runner/parseInputs";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { detectLang, parseSelection, placeholderFor } from "../runner/parseInputs";
+import type { Lang } from "../runner/parseInputs";
 import { runJs } from "../runner/executeJs";
 import type { RunResult } from "../runner/executeJs";
 import { runPhp } from "../runner/executePhp";
 
 interface Props {
   currentFilePath: string;
+  /** Parent-controlled: when true, open the panel as a free-style runner
+   *  (no selection required, source starts empty, edit mode by default). */
+  freeOpen: boolean;
+  onFreeClose: () => void;
 }
+
+type Mode = "guided" | "edit";
 
 interface Anchor {
   top: number;
   left: number;
 }
 
-export function CodeRunner({ currentFilePath }: Props) {
-  const lang: Lang | null = detectLang(currentFilePath);
-  const [anchor, setAnchor] = useState<Anchor | null>(null);
-  const [parsed, setParsed] = useState<ParsedSelection | null>(null);
-  const [expanded, setExpanded] = useState(false);
+/**
+ * Two ways the panel opens:
+ *  - selection-driven: `anchor` set by the diff click; source starts as the
+ *    selected text; mode defaults to "guided".
+ *  - free runner: `anchor` null (panel renders centered-ish near the topbar);
+ *    source starts empty; mode forced to "edit" until the user has something
+ *    to run.
+ */
+interface OpenState {
+  source: string;
+  anchor: Anchor | null;
+  isFree: boolean;
+}
+
+const FREE_RUNNER_STARTER_TS = "// type or paste a snippet, then press ▷ run\n";
+const FREE_RUNNER_STARTER_PHP = "// type or paste PHP, then press ▷ run\n";
+
+export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
+  // Detected language drives the runner choice and the placeholder hints.
+  // Free runner falls back to TS when the current file isn't a known
+  // language (so opening the runner from anywhere still works).
+  const detectedLang: Lang | null = detectLang(currentFilePath);
+  const lang: Lang = detectedLang ?? "ts";
+
+  const [pill, setPill] = useState<{ anchor: Anchor; source: string } | null>(null);
+  const [open, setOpen] = useState<OpenState | null>(null);
+  const [mode, setMode] = useState<Mode>("guided");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  // Mirror `expanded` into a ref so the selectionchange listener can read the
-  // current value without re-subscribing on every render.
-  const expandedRef = useRef(expanded);
-  useEffect(() => {
-    expandedRef.current = expanded;
-  }, [expanded]);
+  const openRef = useRef<OpenState | null>(open);
+  useEffect(() => { openRef.current = open; }, [open]);
 
-  // Watch the selection. Only react to selections anchored inside the diff
-  // body — clicks in the sidebar or inspector shouldn't open the runner.
-  // Once the panel is expanded, ignore selection collapses (clicking inside
-  // the panel collapses the document selection but shouldn't dismiss the
-  // panel — Escape / the close button do that).
+  // Re-parse on every source change. Cheap (regex-based) so it's fine to
+  // run inline; the editor benefits from live shape detection.
+  const parsed = useMemo(
+    () => (open ? parseSelection(open.source, lang) : null),
+    [open, lang],
+  );
+
+  // Inputs is a sticky map keyed by slot name. We never reconcile when the
+  // slot set changes — render just looks up `inputs[slot] ?? ""`, so stale
+  // entries are harmless. (Skipping the reconcile avoids a cascading
+  // setState during render.)
+
+  // Selection listener — only active when there's a known language for the
+  // current file (otherwise selecting code in non-runnable files would
+  // pop a useless pill).
   useEffect(() => {
-    if (!lang) return;
+    if (!detectedLang) return;
 
     function onSelection() {
       const sel = window.getSelection();
@@ -48,52 +82,76 @@ export function CodeRunner({ currentFilePath }: Props) {
       const range = sel.getRangeAt(0);
       const container = range.commonAncestorContainer as Node;
       if (!isInsideDiff(container)) return hide();
-      // Don't trigger when selection is inside the runner itself.
       if (panelRef.current && panelRef.current.contains(container as Node)) return;
 
       const rect = range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return hide();
 
-      setAnchor({ top: rect.top + window.scrollY, left: rect.right + window.scrollX + 8 });
-      const p = parseSelection(cleanSelection(text), lang!);
-      setParsed(p);
-      setInputs((prev) => {
-        const next: Record<string, string> = {};
-        for (const s of p.slots) next[s] = prev[s] ?? "";
-        return next;
+      setPill({
+        anchor: { top: rect.top + window.scrollY, left: rect.right + window.scrollX + 8 },
+        source: cleanSelection(text),
       });
-      setResult(null);
     }
 
     function hide() {
-      if (expandedRef.current) return;
-      setAnchor(null);
-      setParsed(null);
-      setExpanded(false);
+      // Don't yank the panel out from under a user that's already opened it.
+      if (openRef.current) return;
+      setPill(null);
       setResult(null);
     }
 
     document.addEventListener("selectionchange", onSelection);
     return () => document.removeEventListener("selectionchange", onSelection);
-  }, [lang]);
+  }, [detectedLang]);
 
-  // Swallow Escape while the panel is open so it doesn't get swallowed by the
-  // app's global keymap first.
+  // Parent-driven free runner: when freeOpen flips true, open the panel
+  // with an empty source and edit mode forced on. Cascading setState here
+  // is intentional — the prop is the trigger; the rule's "you might not
+  // need an effect" alternative would mean lifting more state into App.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (!anchor) return;
+    if (!freeOpen) return;
+    setOpen({
+      source: lang === "php" ? FREE_RUNNER_STARTER_PHP : FREE_RUNNER_STARTER_TS,
+      anchor: null,
+      isFree: true,
+    });
+    setMode("edit");
+    setResult(null);
+    setPill(null);
+  }, [freeOpen, lang]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Escape closes the panel. Inlined rather than calling closePanel() so
+  // the effect dep list stays { open } and doesn't pull a non-stable
+  // function reference in.
+  useEffect(() => {
+    if (!open) return;
+    const wasFree = open.isFree;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setAnchor(null);
-        setExpanded(false);
-      }
+      if (e.key !== "Escape") return;
+      setOpen(null);
+      setPill(null);
+      setResult(null);
+      if (wasFree) onFreeClose();
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [anchor]);
+  }, [open, onFreeClose]);
 
-  if (!lang || !anchor || !parsed) return null;
+  function closePanel() {
+    setOpen(null);
+    setPill(null);
+    setResult(null);
+    if (open?.isFree) onFreeClose();
+  }
 
-  const hasSlots = parsed.slots.length > 0;
+  function openFromPill() {
+    if (!pill) return;
+    setOpen({ source: pill.source, anchor: pill.anchor, isFree: false });
+    setMode("guided");
+    setResult(null);
+  }
 
   async function onRun() {
     if (!parsed) return;
@@ -110,130 +168,195 @@ export function CodeRunner({ currentFilePath }: Props) {
     }
   }
 
+  // ── render ────────────────────────────────────────────────────────────
+
+  // Pill: only when we have a selection and the panel isn't open yet.
+  if (!open && pill && detectedLang) {
+    return (
+      <div
+        className="coderunner coderunner--pill"
+        style={{ top: pill.anchor.top, left: pill.anchor.left }}
+        onMouseDown={(e) => {
+          const t = e.target as HTMLElement;
+          if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") e.preventDefault();
+        }}
+      >
+        <button
+          className="coderunner__pill"
+          onClick={openFromPill}
+          title={`run this ${detectedLang} selection`}
+        >
+          ▷ run {detectedLang}
+        </button>
+      </div>
+    );
+  }
+
+  if (!open || !parsed) return null;
+
+  const hasSlots = parsed.slots.length > 0;
+  const panelStyle: React.CSSProperties = open.anchor
+    ? { top: open.anchor.top, left: open.anchor.left, position: "absolute" }
+    : { position: "fixed", top: 56, right: 24 };
+
   return (
     <div
       ref={panelRef}
-      className={`coderunner ${expanded ? "coderunner--open" : "coderunner--pill"}`}
-      style={{ top: anchor.top, left: anchor.left }}
-      // Prevent mousedown from collapsing the text selection or shifting
-      // focus — that would fire selectionchange and hide the panel. The click
-      // event still fires on mouseup. Inputs are exempted so users can still
-      // place the caret.
+      className={`coderunner coderunner--open ${open.isFree ? "coderunner--free" : ""}`}
+      style={panelStyle}
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
         if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") e.preventDefault();
       }}
     >
-      {!expanded ? (
-        <button
-          className="coderunner__pill"
-          onClick={() => setExpanded(true)}
-          title={`run this ${parsed.lang} selection`}
-        >
-          ▷ run {parsed.lang}
-          {hasSlots && <span className="coderunner__pill-slots">({parsed.slots.length})</span>}
-        </button>
-      ) : (
-        <div className="coderunner__panel">
-          <header className="coderunner__head">
-            <span className="coderunner__lang">{parsed.lang}</span>
-            <span className="coderunner__shape">
-              {parsed.shape.kind === "anon-fn"
+      <div className="coderunner__panel">
+        <header className="coderunner__head">
+          <span className="coderunner__lang">{parsed.lang}</span>
+          <span className="coderunner__shape">
+            {open.isFree
+              ? "free runner"
+              : parsed.shape.kind === "anon-fn"
                 ? "anonymous function"
                 : parsed.shape.kind === "named-fn"
                   ? `function ${parsed.shape.name}`
                   : "free statements"}
-            </span>
-            <span className="coderunner__spacer" />
-            <button className="coderunner__close" onClick={() => setExpanded(false)} title="collapse">
-              –
-            </button>
-          </header>
-
-          {hasSlots ? (
-            <div className="coderunner__inputs">
-              {parsed.slots.map((name) => (
-                <label key={name} className="coderunner__input">
-                  <span className="coderunner__input-name">
-                    {parsed.lang === "php" ? "$" : ""}
-                    {name}
-                  </span>
-                  <input
-                    className="coderunner__input-box"
-                    value={inputs[name] ?? ""}
-                    placeholder={parsed.lang === "php" ? "e.g. 2 or \"hi\"" : "e.g. 2 or \"hi\""}
-                    onChange={(e) =>
-                      setInputs((prev) => ({ ...prev, [name]: e.target.value }))
-                    }
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") onRun();
-                    }}
-                    autoFocus={name === parsed.slots[0]}
-                  />
-                </label>
-              ))}
-            </div>
-          ) : (
-            <div className="coderunner__nohint">no inputs detected — run as-is</div>
-          )}
-
-          <div className="coderunner__actions">
+          </span>
+          <span className="coderunner__spacer" />
+          <div className="coderunner__modes" role="tablist">
             <button
-              className="coderunner__run"
-              disabled={running}
-              onClick={onRun}
+              role="tab"
+              aria-selected={mode === "guided"}
+              className={`coderunner__mode ${mode === "guided" ? "coderunner__mode--on" : ""}`}
+              onClick={() => setMode("guided")}
+              title="guided: read-only snippet, fill the input form"
             >
-              {running ? "running…" : "▷ run"}
+              guided
             </button>
-            <span className="coderunner__hint">
-              {parsed.lang === "php"
-                ? "PHP 8.3 · WASM"
-                : "sandboxed iframe · 2s timeout"}
-            </span>
+            <button
+              role="tab"
+              aria-selected={mode === "edit"}
+              className={`coderunner__mode ${mode === "edit" ? "coderunner__mode--on" : ""}`}
+              onClick={() => setMode("edit")}
+              title="edit: edit the snippet itself; inputs detect on the fly"
+            >
+              edit
+            </button>
           </div>
+          <button className="coderunner__close" onClick={closePanel} title="close (Esc)">
+            ×
+          </button>
+        </header>
 
-          {result && (
-            <div className={`coderunner__out ${result.ok ? "" : "coderunner__out--err"}`}>
-              {result.logs.length > 0 && (
-                <pre className="coderunner__logs">
-                  {result.logs.map((l) => renderLog(l)).join("\n")}
-                </pre>
-              )}
-              {result.result !== undefined && (
-                <pre className="coderunner__return">
-                  <span className="coderunner__label">return</span> {result.result}
-                </pre>
-              )}
-              {result.vars && Object.keys(result.vars).length > 0 && (
-                <div className="coderunner__vars">
-                  <span className="coderunner__label">vars</span>
-                  {Object.entries(result.vars).map(([k, v]) => (
-                    <div key={k} className="coderunner__var">
-                      <span className="coderunner__var-name">
-                        {parsed.lang === "php" ? "$" : ""}
-                        {k}
-                      </span>
-                      <span className="coderunner__var-eq">=</span>
-                      <span className="coderunner__var-val">{v}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {result.error && (
-                <pre className="coderunner__err">
-                  <span className="coderunner__label">error</span> {result.error}
-                </pre>
-              )}
-              {result.ok &&
-                result.logs.length === 0 &&
-                result.result === undefined &&
-                (!result.vars || Object.keys(result.vars).length === 0) && (
-                  <span className="coderunner__empty">(no output)</span>
-                )}
-            </div>
-          )}
+        {/* Source area — read-only in guided mode, editable textarea in edit mode. */}
+        {mode === "edit" ? (
+          <textarea
+            className="coderunner__source-edit"
+            spellCheck={false}
+            autoFocus={open.isFree}
+            value={open.source}
+            placeholder={lang === "php" ? "// PHP source\n<?php …" : "// JS / TS source\n(a, b) => a + b"}
+            onChange={(e) => setOpen({ ...open, source: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                onRun();
+              }
+            }}
+          />
+        ) : (
+          <pre className="coderunner__source-view">{open.source.trim()}</pre>
+        )}
+
+        {hasSlots ? (
+          <div className="coderunner__inputs">
+            {parsed.slots.map((name) => (
+              <label key={name} className="coderunner__input">
+                <span className="coderunner__input-name">
+                  {parsed.lang === "php" ? "$" : ""}
+                  {name}
+                </span>
+                <input
+                  className="coderunner__input-box"
+                  value={inputs[name] ?? ""}
+                  placeholder={placeholderFor(name)}
+                  onChange={(e) =>
+                    setInputs((prev) => ({ ...prev, [name]: e.target.value }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") onRun();
+                  }}
+                  autoFocus={!open.isFree && name === parsed.slots[0]}
+                />
+              </label>
+            ))}
+          </div>
+        ) : (
+          <div className="coderunner__nohint">
+            {open.source.trim()
+              ? "no inputs detected — run as-is"
+              : "type a snippet above"}
+          </div>
+        )}
+
+        <div className="coderunner__actions">
+          <button
+            className="coderunner__run"
+            disabled={running || !open.source.trim()}
+            onClick={onRun}
+          >
+            {running ? "running…" : "▷ run"}
+          </button>
+          <span className="coderunner__hint">
+            {parsed.lang === "php"
+              ? "PHP 8.3 · WASM"
+              : "sandboxed iframe · 2s timeout"}
+            {mode === "edit" && (
+              <span className="coderunner__hint-extra"> · ⌘+enter to run</span>
+            )}
+          </span>
         </div>
-      )}
+
+        {result && (
+          <div className={`coderunner__out ${result.ok ? "" : "coderunner__out--err"}`}>
+            {result.logs.length > 0 && (
+              <pre className="coderunner__logs">
+                {result.logs.map((l) => renderLog(l)).join("\n")}
+              </pre>
+            )}
+            {result.result !== undefined && (
+              <pre className="coderunner__return">
+                <span className="coderunner__label">return</span> {result.result}
+              </pre>
+            )}
+            {result.vars && Object.keys(result.vars).length > 0 && (
+              <div className="coderunner__vars">
+                <span className="coderunner__label">vars</span>
+                {Object.entries(result.vars).map(([k, v]) => (
+                  <div key={k} className="coderunner__var">
+                    <span className="coderunner__var-name">
+                      {parsed.lang === "php" ? "$" : ""}
+                      {k}
+                    </span>
+                    <span className="coderunner__var-eq">=</span>
+                    <span className="coderunner__var-val">{v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {result.error && (
+              <pre className="coderunner__err">
+                <span className="coderunner__label">error</span> {result.error}
+              </pre>
+            )}
+            {result.ok &&
+              result.logs.length === 0 &&
+              result.result === undefined &&
+              (!result.vars || Object.keys(result.vars).length === 0) && (
+                <span className="coderunner__empty">(no output)</span>
+              )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -258,14 +381,12 @@ function cleanSelection(text: string): string {
   // Strip leading old/new line-number columns if present: numbers + whitespace
   // at the start of a line, followed by a sign column (+, -, or blank).
   const lines = text.split("\n").map((line) => {
-    // Drop up to two leading "number or blank" columns, then one sign column.
     return line.replace(/^\s*\d*\s+\d*\s*[+\-\s]?/, "");
   });
   return lines.join("\n").trim();
 }
 
 function renderLog(l: string): string {
-  // Prefixed by kind (log/warn/err/out) — strip the prefix for display.
   const m = /^(log|warn|err|out)\s(.*)$/s.exec(l);
   return m ? m[2] : l;
 }

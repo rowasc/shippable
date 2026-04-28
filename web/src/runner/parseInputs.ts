@@ -38,6 +38,42 @@ export function parseSelection(source: string, lang: Lang): ParsedSelection {
   return { lang, source, shape, slots };
 }
 
+/**
+ * Best-effort placeholder for an input slot, derived from the slot's name.
+ * Used by the runner panel's "guided" mode so cells like `cents` or `name`
+ * come pre-loaded with a representative example. Heuristic only — `e.g. 42`
+ * is just a label, not a default value.
+ */
+export function placeholderFor(slotName: string): string {
+  const n = slotName.toLowerCase();
+  // boolean-ish
+  if (
+    /^(is|has|can|should|did)[A-Z_]/.test(slotName) ||
+    /^(flag|enabled|disabled|active)$/.test(n)
+  ) {
+    return "e.g. true";
+  }
+  // numeric-ish
+  if (
+    /^(n|i|j|k|count|len|length|size|width|height|min|max|value|amount|cents|price|qty|index|num|total|delta|x|y|z|a|b|t)$/.test(n) ||
+    /(count|index|length|size|num|amount)$/i.test(n)
+  ) {
+    return "e.g. 42";
+  }
+  // string-ish
+  if (
+    /^(name|text|s|str|path|url|email|slug|title|msg|message|key|label|input|content)$/.test(n) ||
+    /(name|text|path|url|key|label|message)$/i.test(n)
+  ) {
+    return 'e.g. "hello"';
+  }
+  // array-ish
+  if (/^(items|list|arr|array|values|rows|tokens)$/.test(n) || /(s|list)$/.test(n)) {
+    return "e.g. [1,2,3]";
+  }
+  return 'e.g. 1 or "hi"';
+}
+
 // ---------------------------------------------------------------------------
 // JS / TS
 // ---------------------------------------------------------------------------
