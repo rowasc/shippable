@@ -26,37 +26,28 @@ There's no test runner wired up yet. `npm run build` is the typecheck for now.
 
 ### Backend (`server/`)
 
-The backend is opt-in: if it's not running, the UI shows the rule-based plan and logs a warning. To enable Claude-generated plans:
+The backend is optional. If it isn't running, the UI falls back to the rule-based plan.
 
 ```
 cd server
 npm install
 ```
 
-The server reads `ANTHROPIC_API_KEY` from its environment. On macOS, keeping the key in the system Keychain is a reasonable default: it's encrypted at rest (so a stolen disk without FileVault doesn't leak it) and harder to disclose by accident than a plaintext file. It does *not* protect against malware running as your user — anything running as you can shell out to `security` and read it.
-
-**One-time setup** — add the key to Keychain (the `-w` flag with no value prompts interactively, so the key never lands in shell history):
+Set `ANTHROPIC_API_KEY` in your shell before starting the server. On macOS, one reasonable setup is:
 
 ```
 security add-generic-password -a "$USER" -s anthropic-key-shippable -w
-```
-
-**Each new shell** — pull it into the environment, then run the server:
-
-```
 export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)
 npm run dev        # tsx watch on http://127.0.0.1:3001
 npm run typecheck  # tsc --noEmit
 ```
 
-The backend now binds to `127.0.0.1` only and does not allow browser
-cross-origin access by default. That is intentional: the normal dev path is
-the Vite proxy in `web/`, so the browser should talk to `/api` on the frontend
-origin and let Vite forward requests to the backend.
+The backend listens on `http://127.0.0.1:3001` and allows these browser origins by default:
 
-If you deliberately want the browser to call the backend directly from another
-local origin during development, set a comma-separated allowlist before starting
-the server:
+- `http://localhost:5173`
+- `http://127.0.0.1:5173`
+
+If you want a different browser-origin allowlist, set:
 
 ```
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
