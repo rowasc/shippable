@@ -5,6 +5,11 @@ import { resolve } from 'path'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3001',
+    },
+  },
   // The @php-wasm/web-* packages import their .wasm binaries as default
   // imports rather than ?url. Treat .wasm as a static asset so Vite emits a
   // file and resolves the import to its URL — Emscripten's loader fetches it

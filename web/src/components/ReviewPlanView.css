@@ -25,6 +25,14 @@
   color: var(--fg);
   margin: 0;
 }
+.plan__h-status {
+  font-size: 11px;
+  color: var(--fg-mute);
+  margin-top: 6px;
+}
+.plan__h-status--err {
+  color: var(--warn, #b8860b);
+}
 .plan__sec {
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);

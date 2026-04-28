@@ -15,14 +15,33 @@ interface Props {
   onJumpToEntry?: (entry: EntryPoint) => void;
   /** Called when any evidence reference is clicked (file, hunk, symbol). */
   onNavigate?: (ev: EvidenceRef) => void;
+  /** "loading" while the AI plan is in flight; "fallback" if it failed and
+   *  we're showing the rule-based plan instead. Omit for the rule-only path. */
+  status?: "loading" | "ready" | "fallback";
+  /** Error message to surface when status === "fallback". */
+  error?: string;
 }
 
-export function ReviewPlanView({ plan, onJumpToEntry, onNavigate }: Props) {
+export function ReviewPlanView({
+  plan,
+  onJumpToEntry,
+  onNavigate,
+  status,
+  error,
+}: Props) {
   return (
     <section className="plan">
       <header className="plan__h">
         <div className="plan__h-label">plan</div>
         <h1 className="plan__headline">{plan.headline}</h1>
+        {status === "loading" && (
+          <div className="plan__h-status">Claude is reading the diff…</div>
+        )}
+        {status === "fallback" && (
+          <div className="plan__h-status plan__h-status--err">
+            AI plan failed — showing rule-based fallback{error ? `: ${error}` : ""}
+          </div>
+        )}
       </header>
 
       <IntentSection intent={plan.intent} onNavigate={onNavigate} />
