@@ -38,13 +38,13 @@ The server reads `ANTHROPIC_API_KEY` from its environment. On macOS, keeping the
 **One-time setup** — add the key to Keychain (the `-w` flag with no value prompts interactively, so the key never lands in shell history):
 
 ```
-security add-generic-password -a "$USER" -s anthropic-key -w
+security add-generic-password -a "$USER" -s anthropic-key-shippable -w
 ```
 
 **Each new shell** — pull it into the environment, then run the server:
 
 ```
-export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key -w)
+export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)
 npm run dev        # tsx watch on http://localhost:3001
 npm run typecheck  # tsc --noEmit
 ```

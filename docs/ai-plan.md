@@ -58,7 +58,7 @@ Today there's a single function `generatePlan(cs)` that calls Anthropic. To get 
 - Pull out a `PlanProvider` interface with one method, move the Anthropic code into `providers/anthropic.ts`, add `providers/openai.ts` etc.
 - Add a config-driven registry — `PROVIDERS=anthropic,openai` from env, instantiated at startup.
 - In `POST /api/plan`, fan out to every configured provider in parallel, validate each response, then merge them into a single `ReviewPlan`. The merge is where you decide things like "claims that 2+ models surface get ranked higher" or "show entry points from all models, deduped".
-- Each provider gets its own Keychain entry (`anthropic-key`, `openai-key`, etc.).
+- Each provider gets its own Keychain entry (`anthropic-key-shippable`, `openai-key-shippable`, etc. — the `-shippable` suffix keeps these from colliding with keys other projects on the same machine might use).
 - The frontend doesn't really need to change — it still gets one merged plan back. The optional bit is showing which models contributed to each claim, with a small chip or hover, for transparency.
 
 The rule-based plan stays as the fallback regardless of how many providers are configured.
