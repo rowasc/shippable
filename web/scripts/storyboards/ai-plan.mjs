@@ -1,4 +1,4 @@
-import { storyboard, wait, waitFor, press, shot } from "../demo-lib.mjs";
+import { storyboard, wait, waitFor, press, shot, click } from "../demo-lib.mjs";
 
 // Walks the AI-generated plan flow on cs-42:
 //   - opens with the plan overlay and the "Claude is reading the diff…" status
@@ -104,17 +104,24 @@ export default storyboard({
     },
   ],
   steps: [
-    // 1. Plan overlay opens immediately on load. While the canned response is
-    //    pending, the rule-based fallback renders behind the loading status.
+    // 1. Plan overlay opens with the rule-based plan and a "Send to Claude"
+    //    button. Nothing has been sent over the network yet.
     waitFor(".plan"),
-    wait(200),
-    shot("plan_loading", 0.6),
+    wait(300),
+    shot("plan_idle", 0.6),
+    wait(1100),
+    shot("plan_idle_hold", 2.0),
+
+    // 2. Reviewer clicks "Send to Claude" — the request goes out, the
+    //    button is replaced by the "Claude is reading the diff…" status.
+    click(".plan__h-btn", { hold: 300 }),
+    shot("plan_loading", 0.5),
     wait(900),
     shot("plan_loading_hold", 1.4),
 
-    // 2. Wait for the AI plan to swap in — the loading status disappears
+    // 3. Wait for the AI plan to swap in — the loading status disappears
     //    and the intent claims re-render with new text.
-    wait(1400),
+    wait(1500),
     shot("plan_ai_arrived", 0.5),
     wait(900),
     shot("plan_ai_hold", 2.0),

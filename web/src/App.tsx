@@ -59,7 +59,12 @@ export default function App() {
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
-  const { plan, status: planStatus, error: planError } = usePlan(cs);
+  const {
+    plan,
+    status: planStatus,
+    error: planError,
+    generate: generatePlan,
+  } = usePlan(cs);
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
   const suggestion = maybeSuggest(cs, state);
@@ -350,6 +355,7 @@ export default function App() {
               plan={plan}
               status={planStatus}
               error={planError}
+              onGenerateAi={generatePlan}
               onJumpToEntry={(entry) => {
                 const f = cs.files.find((ff) => ff.id === entry.fileId);
                 if (!f) return;
