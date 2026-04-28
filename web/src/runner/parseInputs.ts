@@ -43,16 +43,24 @@ export function parseSelection(source: string, lang: Lang): ParsedSelection {
 // ---------------------------------------------------------------------------
 
 function parseJsLike(src: string): RunnerShape {
-  // function (a, b) { ... }   — anonymous
-  const anon = /^function\s*\*?\s*\(([^)]*)\)\s*\{[\s\S]*\}$/.exec(src);
+  // Optional `: ReturnType` between `)` and `{` or `=>`. Bounded by `[^={]`
+  // so we don't swallow the function body or the arrow.
+  const RETTYPE = "(?::\\s*[^={]+?)?";
+
+  // function (a, b) { ... }  /  function (a, b): T { ... } — anonymous
+  const anon = new RegExp(
+    `^function\\s*\\*?\\s*\\(([^)]*)\\)\\s*${RETTYPE}\\s*\\{[\\s\\S]*\\}$`,
+  ).exec(src);
   if (anon) return { kind: "anon-fn", params: splitParams(anon[1]) };
 
-  // function foo(a, b) { ... } — named
-  const named = /^function\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{[\s\S]*\}$/.exec(src);
+  // function foo<T>(a, b): T { ... } — named, optional generics + return type
+  const named = new RegExp(
+    `^function\\s*\\*?\\s*([A-Za-z_$][\\w$]*)\\s*(?:<[^<>]*>\\s*)?\\(([^)]*)\\)\\s*${RETTYPE}\\s*\\{[\\s\\S]*\\}$`,
+  ).exec(src);
   if (named) return { kind: "named-fn", name: named[1], params: splitParams(named[2]) };
 
-  // (a, b) => ...  or  a => ...
-  const arrowParens = /^\(([^)]*)\)\s*=>/.exec(src);
+  // (a, b) => ...  /  (a, b): T => ...  /  a => ...
+  const arrowParens = new RegExp(`^\\(([^)]*)\\)\\s*${RETTYPE}\\s*=>`).exec(src);
   if (arrowParens) return { kind: "anon-fn", params: splitParams(arrowParens[1]) };
   const arrowBare = /^([A-Za-z_$][\w$]*)\s*=>/.exec(src);
   if (arrowBare) return { kind: "anon-fn", params: [arrowBare[1]] };

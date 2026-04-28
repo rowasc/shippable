@@ -2,9 +2,11 @@
 //
 // Runs the composed program inside a sandboxed iframe (`sandbox="allow-scripts"`,
 // no allow-same-origin → null origin, no DOM access to the host). Communicates
-// over postMessage; times out at 2s. Strips a small subset of TS annotations
-// so common params/vars with `: Type` don't throw in the browser.
+// over postMessage; times out at 2s. TypeScript is transpiled to JS via
+// esbuild-wasm running in a locked-down worker (ts-worker.ts) — see that file
+// for the network lockdown details.
 
+import TsWorker from "./ts-worker.ts?worker";
 import type { ParsedSelection } from "./parseInputs";
 
 export interface RunResult {
@@ -22,13 +24,92 @@ export async function runJs(
   parsed: ParsedSelection,
   inputs: Record<string, string>,
 ): Promise<RunResult> {
-  const program = buildProgram(parsed, inputs);
+  let source = parsed.source;
+  if (parsed.lang === "ts") {
+    try {
+      source = await transpileTs(source);
+    } catch (e) {
+      return {
+        ok: false,
+        logs: [],
+        error: "TS transpile failed: " + (e instanceof Error ? e.message : String(e)),
+      };
+    }
+  }
+  const program = buildProgram({ ...parsed, source }, inputs);
   return runInSandbox(program);
 }
 
+interface TranspileResponse {
+  __id: number;
+  ok: boolean;
+  js?: string;
+  warnings?: string[];
+  error?: string;
+  probes?: Record<string, "BLOCKED" | "NO_BLOCK">;
+}
+
+let tsWorker: Worker | null = null;
+let nextTsId = 1;
+const tsPending = new Map<number, (resp: TranspileResponse) => void>();
+
+function ensureTsWorker(): Worker {
+  if (tsWorker) return tsWorker;
+  tsWorker = new TsWorker();
+  tsWorker.addEventListener("message", (ev: MessageEvent) => {
+    const data = ev.data as TranspileResponse;
+    if (!data || typeof data.__id !== "number") return;
+    const cb = tsPending.get(data.__id);
+    if (cb) {
+      tsPending.delete(data.__id);
+      cb(data);
+    }
+  });
+  tsWorker.addEventListener("error", (ev) => {
+    const err = (ev as ErrorEvent).message ?? "ts-worker error";
+    for (const cb of tsPending.values()) {
+      cb({ __id: -1, ok: false, error: err });
+    }
+    tsPending.clear();
+    tsWorker?.terminate();
+    tsWorker = null;
+  });
+  return tsWorker;
+}
+
+async function transpileTs(code: string): Promise<string> {
+  const w = ensureTsWorker();
+  const id = nextTsId++;
+  const resp = await new Promise<TranspileResponse>((resolve) => {
+    tsPending.set(id, resolve);
+    w.postMessage({ __id: id, code });
+  });
+  if (!resp.ok) throw new Error(resp.error ?? "transpile failed");
+  // esbuild appends `;\n` to expression statements. That breaks the
+  // anon-fn wrap (`const __fn = ((a) => a*2;);` is a syntax error).
+  // Trimming is safe for the other shapes too.
+  return (resp.js ?? "").replace(/[\s;]+$/, "");
+}
+
+/**
+ * Test-only: ask the TS worker to run its own network-lockdown self-test.
+ * Mirrors `probeWorker()` in executePhp.ts.
+ */
+export function probeTsWorker(): Promise<Record<string, "BLOCKED" | "NO_BLOCK">> {
+  const w = ensureTsWorker();
+  const id = nextTsId++;
+  return new Promise((resolve) => {
+    tsPending.set(id, (resp) => {
+      resolve(resp.probes ?? {});
+    });
+    w.postMessage({ __id: id, probe: true });
+  });
+}
+
 function buildProgram(parsed: ParsedSelection, inputs: Record<string, string>): string {
-  const src =
-    parsed.lang === "ts" ? stripTsAnnotations(parsed.source) : parsed.source;
+  // By the time we get here, TS has already been transpiled to JS upstream
+  // in runJs. buildProgram only sees plain JS source.
+  const src = parsed.source;
   const shape = parsed.shape;
 
   switch (shape.kind) {
@@ -58,23 +139,6 @@ function buildProgram(parsed: ParsedSelection, inputs: Record<string, string>): 
       ].join("\n");
     }
   }
-}
-
-// Very small TS -> JS stripper. Only handles what shows up in common function
-// signatures and variable declarations. Not a real compiler; fails loud if
-// the user selects something exotic.
-function stripTsAnnotations(src: string): string {
-  return (
-    src
-      // `: Type` in param lists and var decls — stop at ,)={ or end-of-line
-      .replace(/:\s*[A-Za-z_$][\w$<>[\],\s|&.?]*(?=[,)=\n{])/g, "")
-      // Generic params after identifiers:  foo<T>(...)
-      .replace(/([A-Za-z_$][\w$]*)<[^<>]*>/g, "$1")
-      // `as Type` casts
-      .replace(/\s+as\s+[A-Za-z_$][\w$<>[\],\s|&.?]*/g, "")
-      // `!` non-null assertions
-      .replace(/!(?=[.,)\s;])/g, "")
-  );
 }
 
 function runInSandbox(program: string): Promise<RunResult> {
