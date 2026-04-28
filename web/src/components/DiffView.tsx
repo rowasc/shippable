@@ -1,9 +1,10 @@
 import "./DiffView.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { highlightLines } from "../highlight";
 import type { DiffLine } from "../types";
 import type {
-  DiffViewModel,
   DiffLineViewModel,
+  DiffViewModel,
   ExpandBarViewModel,
   FullFileLineViewModel,
   HunkViewModel,
@@ -46,12 +47,17 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
       </header>
 
       {viewModel.fileFullyExpanded ? (
-        <FullFileView path={viewModel.path} lines={viewModel.fullFileLines} />
+        <FullFileView
+          path={viewModel.path}
+          language={viewModel.language}
+          lines={viewModel.fullFileLines}
+        />
       ) : (
         viewModel.hunks.map((h) => (
           <HunkBlock
             key={h.id}
             hunk={h}
+            language={viewModel.language}
             onSetExpandLevel={(dir, level) => onSetExpandLevel(h.id, dir, level)}
             cursorRef={cursorRef}
           />
@@ -63,10 +69,12 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
 
 function HunkBlock({
   hunk,
+  language,
   onSetExpandLevel,
   cursorRef,
 }: {
   hunk: HunkViewModel;
+  language: string;
   onSetExpandLevel: (dir: "above" | "below", level: number) => void;
   cursorRef: React.RefObject<HTMLDivElement | null>;
 }) {
@@ -104,29 +112,13 @@ function HunkBlock({
         />
       )}
       {hunk.contextAbove.length > 0 && (
-        <div className="hunk__body hunk__body--context">
-          {hunk.contextAbove.map((l, i) => (
-            <ContextLine key={`ea-${i}`} line={l} />
-          ))}
-        </div>
+        <ContextLinesBlock lines={hunk.contextAbove} language={language} prefix="ea" />
       )}
 
-      <div className="hunk__body">
-        {hunk.lines.map((line, i) => (
-          <Line
-            key={i}
-            line={line}
-            cursorRef={line.isCursor ? cursorRef : undefined}
-          />
-        ))}
-      </div>
+      <HunkLinesBlock lines={hunk.lines} language={language} cursorRef={cursorRef} />
 
       {hunk.contextBelow.length > 0 && (
-        <div className="hunk__body hunk__body--context">
-          {hunk.contextBelow.map((l, i) => (
-            <ContextLine key={`eb-${i}`} line={l} />
-          ))}
-        </div>
+        <ContextLinesBlock lines={hunk.contextBelow} language={language} prefix="eb" />
       )}
       {hunk.expandBelow && (
         <ExpandBar
@@ -179,25 +171,34 @@ function ExpandBar({
   );
 }
 
-function ContextLine({ line }: { line: DiffLine }) {
+function ContextLine({
+  line,
+  highlightedHtml,
+}: {
+  line: DiffLine;
+  highlightedHtml?: string;
+}) {
   return (
     <div className="line line--context line--ctx-expand">
       <span className="line__old">{line.oldNo ?? ""}</span>
       <span className="line__new">{line.newNo ?? ""}</span>
       <span className="line__ai" aria-hidden="true">{" "}</span>
       <span className="line__sign">{" "}</span>
-      <span className="line__text">{line.text || " "}</span>
+      <LineText text={line.text} highlightedHtml={highlightedHtml} />
     </div>
   );
 }
 
 function FullFileView({
   path,
+  language,
   lines,
 }: {
   path: string;
+  language: string;
   lines: FullFileLineViewModel[];
 }) {
+  const highlightedLines = useHighlightedLines(lines, language);
   return (
     <section className="hunk hunk--full">
       <header className="hunk__h">
@@ -215,7 +216,7 @@ function FullFileView({
             <span className="line__new">{line.newNo ?? ""}</span>
             <span className="line__ai" aria-hidden="true">{" "}</span>
             <span className="line__sign">{line.sign}</span>
-            <span className="line__text">{line.text || " "}</span>
+            <LineText text={line.text} highlightedHtml={highlightedLines?.[i]} />
           </div>
         ))}
       </div>
@@ -225,9 +226,11 @@ function FullFileView({
 
 function Line({
   line,
+  highlightedHtml,
   cursorRef,
 }: {
   line: DiffLineViewModel;
+  highlightedHtml?: string;
   cursorRef?: React.RefObject<HTMLDivElement | null>;
 }) {
   const sign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
@@ -248,9 +251,99 @@ function Line({
         {line.aiGlyph}
       </span>
       <span className="line__sign">{sign}</span>
-      <span className="line__text">{line.text || " "}</span>
+      <LineText text={line.text} highlightedHtml={highlightedHtml} />
     </div>
   );
+}
+
+function ContextLinesBlock({
+  lines,
+  language,
+  prefix,
+}: {
+  lines: DiffLine[];
+  language: string;
+  prefix: string;
+}) {
+  const highlightedLines = useHighlightedLines(lines, language);
+  return (
+    <div className="hunk__body hunk__body--context">
+      {lines.map((line, i) => (
+        <ContextLine
+          key={`${prefix}-${i}`}
+          line={line}
+          highlightedHtml={highlightedLines?.[i]}
+        />
+      ))}
+    </div>
+  );
+}
+
+function HunkLinesBlock({
+  lines,
+  language,
+  cursorRef,
+}: {
+  lines: DiffLineViewModel[];
+  language: string;
+  cursorRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const highlightedLines = useHighlightedLines(lines, language);
+  return (
+    <div className="hunk__body">
+      {lines.map((line, i) => (
+        <Line
+          key={i}
+          line={line}
+          highlightedHtml={highlightedLines?.[i]}
+          cursorRef={line.isCursor ? cursorRef : undefined}
+        />
+      ))}
+    </div>
+  );
+}
+
+function LineText({
+  text,
+  highlightedHtml,
+}: {
+  text: string;
+  highlightedHtml?: string;
+}) {
+  if (!highlightedHtml) {
+    return <span className="line__text">{text || " "}</span>;
+  }
+  return (
+    <span
+      className="line__text line__text--highlighted"
+      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+    />
+  );
+}
+
+function useHighlightedLines(
+  lines: Array<{ text: string }>,
+  language: string,
+): string[] | null {
+  const requestKey = `${language}\u0000${lines.map((line) => line.text).join("\n")}`;
+  const lineTexts = useMemo(() => lines.map((line) => line.text), [lines]);
+  const [result, setResult] = useState<{ key: string; lines: string[] } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void highlightLines(lineTexts, language).then((next) => {
+      if (!cancelled) {
+        setResult({ key: requestKey, lines: next.lines });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [language, lineTexts, requestKey]);
+
+  return result?.key === requestKey ? result.lines : null;
 }
 
 function Badge({

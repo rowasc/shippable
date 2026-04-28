@@ -1,0 +1,110 @@
+.syntax-block {
+  margin: 0;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  min-width: 0;
+}
+
+.syntax-block__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-2) 82%, transparent);
+  font-size: 11px;
+}
+
+.syntax-block__lang {
+  color: var(--yellow);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.syntax-block__caption {
+  color: var(--fg-mute);
+}
+
+.syntax-block__body {
+  overflow-x: auto;
+}
+
+.syntax-block__fallback,
+.syntax-block__html > pre {
+  margin: 0;
+  padding: 12px 0;
+  min-width: max-content;
+  font: inherit;
+  line-height: 1.6;
+}
+
+.syntax-block__fallback {
+  padding-inline: 14px;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+.syntax-block__html .shiki {
+  tab-size: 2;
+}
+
+.syntax-block__html .shiki code {
+  display: grid;
+}
+
+.syntax-block__html .shiki .line {
+  display: inline-block;
+  min-height: 1.6em;
+  padding: 0 14px;
+}
+
+.syntax-block[data-lines="true"] .syntax-block__html .shiki code {
+  counter-reset: line;
+}
+
+.syntax-block[data-lines="true"] .syntax-block__html .shiki .line::before {
+  counter-increment: line;
+  content: counter(line);
+  display: inline-block;
+  width: 2ch;
+  margin-right: 18px;
+  color: var(--fg-mute);
+  text-align: right;
+  user-select: none;
+}
+
+:root[data-color-mode="light"] .syntax-block .shiki,
+:root[data-color-mode="light"] .syntax-block .shiki span {
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg) !important;
+  font-style: var(--shiki-light-font-style) !important;
+  font-weight: var(--shiki-light-font-weight) !important;
+  text-decoration: var(--shiki-light-text-decoration) !important;
+}
+
+:root[data-color-mode="dark"] .syntax-block .shiki,
+:root[data-color-mode="dark"] .syntax-block .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
+
+.syntax-block[data-color-mode="light"] .shiki,
+.syntax-block[data-color-mode="light"] .shiki span {
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg) !important;
+  font-style: var(--shiki-light-font-style) !important;
+  font-weight: var(--shiki-light-font-weight) !important;
+  text-decoration: var(--shiki-light-text-decoration) !important;
+}
+
+.syntax-block[data-color-mode="dark"] .shiki,
+.syntax-block[data-color-mode="dark"] .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
+}
