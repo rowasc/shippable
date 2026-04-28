@@ -38,7 +38,7 @@ export const press = (key, opts = {}) => ({
   hold: opts.hold ?? 0,
 });
 
-// `caption` paints a subtitle strip at the bottom of the viewport before the
+// `caption` paints a subtitle strip at the top of the viewport before the
 // screenshot is taken. Pass `null` to clear an existing caption; omit it to
 // inherit the previous shot's caption.
 export const shot = (label, hold, opts = {}) => ({
@@ -95,27 +95,43 @@ export function storyboard(def) {
 
 // ── executor ───────────────────────────────────────────────────────────────
 
-// Inject a fixed-position subtitle strip at the bottom of the viewport. The
+// Inject a fixed-position subtitle strip at the top of the viewport. The
 // strip lives in the page itself so it shows up in screenshots without any
-// post-processing. It overlaps the bottom ~56px of the app, which is fine for
-// our flows (overlays render higher up).
+// post-processing. While a caption is visible, we reserve the same vertical
+// space in the page so the bar does not cover the app content itself.
 async function injectCaptionBar(page) {
   await page.evaluate(() => {
     if (document.getElementById("__demo_caption__")) return;
+    const style = document.createElement("style");
+    style.id = "__demo_caption_style__";
+    style.textContent = `
+      :root { --demo-caption-offset: 0px; }
+      body { padding-top: var(--demo-caption-offset); }
+      #root { height: calc(100% - var(--demo-caption-offset)); }
+      #root > * {
+        height: calc(100vh - var(--demo-caption-offset)) !important;
+      }
+    `;
+    document.head.appendChild(style);
     const bar = document.createElement("div");
     bar.id = "__demo_caption__";
     bar.style.cssText = [
       "position:fixed",
       "left:0",
       "right:0",
-      "bottom:0",
+      "top:0",
+      "display:flex",
+      "align-items:center",
+      "justify-content:center",
+      "box-sizing:border-box",
+      "min-height:56px",
       "padding:14px 24px",
       "background:rgba(12,14,20,0.92)",
       "color:#f5f7fa",
       "font:600 18px/1.35 -apple-system,system-ui,'Segoe UI',sans-serif",
       "letter-spacing:0.01em",
       "text-align:center",
-      "border-top:1px solid rgba(255,255,255,0.08)",
+      "border-bottom:1px solid rgba(255,255,255,0.08)",
       "z-index:2147483647",
       "pointer-events:none",
       "opacity:0",
@@ -131,6 +147,8 @@ async function setCaption(page, text) {
     if (!bar) return;
     bar.textContent = t || "";
     bar.style.opacity = t ? "1" : "0";
+    const offset = t ? `${bar.offsetHeight}px` : "0px";
+    document.documentElement.style.setProperty("--demo-caption-offset", offset);
   }, text);
 }
 
