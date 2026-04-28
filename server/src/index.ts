@@ -4,12 +4,11 @@ import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = "127.0.0.1";
-const ALLOWED_ORIGINS = new Set(
-  (process.env.SHIPPABLE_ALLOWED_ORIGINS ?? "")
-    .split(",")
-    .map((origin) => normalizeOrigin(origin))
-    .filter((origin): origin is string => !!origin),
-);
+const DEFAULT_ALLOWED_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+];
+const ALLOWED_ORIGINS = loadAllowedOrigins();
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error(
@@ -20,9 +19,11 @@ if (!process.env.ANTHROPIC_API_KEY) {
 
 const server = createServer(async (req, res) => {
   try {
-    const origin = normalizeOrigin(req.headers.origin);
+    const check = classifyRequestOrigin(req.headers.origin);
+    const fetchSite = classifyFetchSite(req.headers["sec-fetch-site"]);
+    const origin = check.kind === "value" ? check.origin : null;
     if (req.method === "OPTIONS") {
-      if (!originAllowed(origin)) {
+      if (!isRequestAllowed(check, fetchSite)) {
         res.writeHead(403).end();
         return;
       }
@@ -30,9 +31,9 @@ const server = createServer(async (req, res) => {
       res.writeHead(204).end();
       return;
     }
-    if (!originAllowed(origin)) {
+    if (!isRequestAllowed(check, fetchSite)) {
       res.writeHead(403, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: "origin not allowed" }));
+      res.end(JSON.stringify({ error: "request not allowed" }));
       return;
     }
     if (req.method === "POST" && req.url === "/api/plan") {
@@ -109,20 +110,88 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
-function normalizeOrigin(value: string | undefined): string | null {
-  if (!value) return null;
+function parseOrigin(value: string): string | null {
   try {
-    const url = new URL(value);
-    return url.origin;
+    return new URL(value).origin;
   } catch {
     return null;
   }
 }
 
-function originAllowed(origin: string | null): boolean {
-  // Non-browser clients and the Vite dev proxy may send no Origin header.
-  if (origin === null) return true;
-  return ALLOWED_ORIGINS.has(origin);
+function loadAllowedOrigins(): Set<string> {
+  const configured = process.env.SHIPPABLE_ALLOWED_ORIGINS;
+  const source =
+    configured === undefined
+      ? DEFAULT_ALLOWED_ORIGINS
+      : configured.split(",");
+  return new Set(
+    source
+      .map((origin) => parseOrigin(origin.trim()))
+      .filter((origin): origin is string => !!origin),
+  );
+}
+
+type OriginCheck =
+  | { kind: "absent" }
+  | { kind: "opaque" }
+  | { kind: "value"; origin: string };
+
+function classifyRequestOrigin(value: string | undefined): OriginCheck {
+  // "absent": no Origin header — non-browser caller (curl, Vite dev proxy).
+  // "opaque": header present but unparseable, including the literal string
+  //   "null" that browsers send from sandboxed iframes, data: URLs, and some
+  //   cross-origin redirects. Must be denied — collapsing this to "absent"
+  //   is a CSRF hole (see git history for the exploit).
+  // "value": parseable origin; check against the allowlist.
+  if (value === undefined) return { kind: "absent" };
+  const parsed = parseOrigin(value);
+  return parsed === null
+    ? { kind: "opaque" }
+    : { kind: "value", origin: parsed };
+}
+
+type FetchSite = "same-origin" | "same-site" | "cross-site" | "none";
+
+function classifyFetchSite(
+  value: string | string[] | undefined,
+): FetchSite | null {
+  if (
+    value === "same-origin" ||
+    value === "same-site" ||
+    value === "cross-site" ||
+    value === "none"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function isRequestAllowed(
+  check: OriginCheck,
+  fetchSite: FetchSite | null,
+): boolean {
+  // Browser requests that present an Origin header must always match the
+  // explicit allowlist. `Sec-Fetch-Site` is only an extra deny signal; it is
+  // never enough on its own to broaden the allowlist.
+  if (check.kind === "value") {
+    return ALLOWED_ORIGINS.has(check.origin);
+  }
+  // Opaque origins (`Origin: null`, sandboxed iframes, data: URLs, some
+  // redirects) are always denied.
+  if (check.kind === "opaque") {
+    return false;
+  }
+  // No Origin header: allow non-browser callers (curl, the Vite dev proxy).
+  // If a browser somehow reports this as cross-site, deny it anyway.
+  if (fetchSite === "cross-site") {
+    return false;
+  }
+  // Otherwise this is either a non-browser caller or a legacy browser that
+  // didn't send enough fetch metadata to classify further.
+  switch (check.kind) {
+    case "absent":
+      return true;
+  }
 }
 
 function writeCorsHeaders(res: ServerResponse, origin: string | null) {
