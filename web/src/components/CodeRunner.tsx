@@ -285,7 +285,10 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") onRun();
                   }}
-                  autoFocus={!open.isFree && name === parsed.slots[0]}
+                  // Only autofocus when source is read-only — in edit mode
+                  // every keystroke re-derives slots, mounting fresh
+                  // inputs whose autoFocus would steal from the textarea.
+                  autoFocus={mode === "guided" && !open.isFree && name === parsed.slots[0]}
                 />
               </label>
             ))}

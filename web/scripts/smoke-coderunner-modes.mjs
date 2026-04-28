@@ -107,8 +107,24 @@ async function main() {
   if (editActive?.trim() !== "edit") {
     throw new Error(`free runner should default to edit mode, got ${editActive}`);
   }
-  // Type a snippet and run.
-  await page.fill(".coderunner__source-edit", "(a) => a + 1");
+  // Focus must stay in the textarea while typing, even though every
+  // keystroke can re-derive slots and mount fresh input cards.
+  await page.focus(".coderunner__source-edit");
+  await page.evaluate(() =>
+    (document.querySelector(".coderunner__source-edit")).value = "",
+  );
+  await page.keyboard.type("(a) => a + 1");
+  const focusedAfterType = await page.evaluate(() =>
+    document.activeElement?.className,
+  );
+  if (!focusedAfterType?.includes("coderunner__source-edit")) {
+    throw new Error(
+      `focus left textarea while typing — landed on .${focusedAfterType}`,
+    );
+  }
+  console.log("ok: textarea keeps focus while typing in edit mode");
+
+  // The slot list updates as you type — input for `a` should be there now.
   await page.waitForTimeout(100);
   await page.fill(".coderunner__input-box", "41");
   await page.click(".coderunner__run");
