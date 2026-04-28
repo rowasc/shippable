@@ -209,6 +209,14 @@ export async function runStoryboard(sb, { browser, repoRoot }) {
   });
   const page = await ctx.newPage();
   try {
+    // Storyboards can declare `routes: [{url, handler}]` to mock specific
+    // network calls (e.g. /api/plan) so the demo is reproducible without
+    // running the backend.
+    if (sb.routes) {
+      for (const r of sb.routes) {
+        await page.route(r.url, r.handler);
+      }
+    }
     await page.goto(sb.url, { waitUntil: "networkidle" });
     const frames = await executeSteps(page, sb.steps, framesDir);
     if (frames.length === 0) {
