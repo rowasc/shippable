@@ -6,7 +6,7 @@ const PORT = Number(process.env.PORT ?? 3001);
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error(
-    "[server] ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in, then start with `ANTHROPIC_API_KEY=... npm run dev`.",
+    "[server] ANTHROPIC_API_KEY is not set in the environment. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key -w)` before `npm run dev`.",
   );
   process.exit(1);
 }
