@@ -15,14 +15,55 @@ interface Props {
   onJumpToEntry?: (entry: EntryPoint) => void;
   /** Called when any evidence reference is clicked (file, hunk, symbol). */
   onNavigate?: (ev: EvidenceRef) => void;
+  /** "idle" before the user has opted in; "loading" while in flight;
+   *  "ready" once the AI plan has replaced the rule-based one;
+   *  "fallback" if the request errored. Omit for the gallery / rule-only
+   *  rendering path. */
+  status?: "idle" | "loading" | "ready" | "fallback";
+  /** Error message to surface when status === "fallback". */
+  error?: string;
+  /** Wire this up to whatever sends the diff to the AI provider. The button
+   *  is shown when status === "idle" — we don't auto-send because the diff
+   *  leaves the user's machine. */
+  onGenerateAi?: () => void;
 }
 
-export function ReviewPlanView({ plan, onJumpToEntry, onNavigate }: Props) {
+export function ReviewPlanView({
+  plan,
+  onJumpToEntry,
+  onNavigate,
+  status,
+  error,
+  onGenerateAi,
+}: Props) {
   return (
     <section className="plan">
       <header className="plan__h">
         <div className="plan__h-label">plan</div>
         <h1 className="plan__headline">{plan.headline}</h1>
+        {status === "idle" && onGenerateAi && (
+          <div className="plan__h-action">
+            <button
+              type="button"
+              className="plan__h-btn"
+              onClick={onGenerateAi}
+              title="Sends the diff content to Claude over the network"
+            >
+              Send to Claude
+            </button>
+            <span className="plan__h-hint">
+              the full diff will leave your machine
+            </span>
+          </div>
+        )}
+        {status === "loading" && (
+          <div className="plan__h-status">Claude is reading the diff…</div>
+        )}
+        {status === "fallback" && (
+          <div className="plan__h-status plan__h-status--err">
+            AI plan failed — showing rule-based fallback{error ? `: ${error}` : ""}
+          </div>
+        )}
       </header>
 
       <IntentSection intent={plan.intent} onNavigate={onNavigate} />
