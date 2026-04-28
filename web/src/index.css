@@ -4,5 +4,5 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: #0b0e14;
+  background: var(--bg, #0b0e14);
 }

@@ -559,6 +559,7 @@ export interface InspectorViewModel {
   // ── Location section ───────────────────────────────────────────────────
   /** Display string: "path/file.ts:42" or just "path/file.ts". */
   locationLabel: string;
+  language: string;
   lineKind: LineKind;
   lineText: string;
   lineSign: string;
@@ -779,6 +780,7 @@ export function buildInspectorViewModel({
 
   return {
     locationLabel,
+    language: file.language,
     lineKind: line.kind,
     lineText: line.text,
     lineSign,

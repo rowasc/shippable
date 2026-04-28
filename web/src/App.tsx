@@ -13,11 +13,13 @@ import { Inspector } from "./components/Inspector";
 import { LoadModal } from "./components/LoadModal";
 import { ReviewPlanView } from "./components/ReviewPlanView";
 import { CodeRunner } from "./components/CodeRunner";
+import { ThemePicker } from "./components/ThemePicker";
 import { buildSymbolIndex } from "./symbols";
 import type { SymbolIndex } from "./symbols";
 import type { ChangeSet, Cursor, EvidenceRef } from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import { KEYMAP } from "./keymap";
+import { useTheme } from "./useTheme";
 import {
   buildDiffViewModel,
   buildSidebarViewModel,
@@ -27,6 +29,7 @@ import {
 } from "./view";
 
 export default function App() {
+  const [themeId, setThemeId] = useTheme();
   const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
     // ?cs=<id> (or the short `?c=<n>`) loads a specific sample changeset.
     // Accepts the full id ("cs-09") or the numeric tail ("09" / "9").
@@ -249,6 +252,7 @@ export default function App() {
         </span>
         <span className="topbar__spacer" />
         <span className="topbar__author">@{cs.author}</span>
+        <ThemePicker value={themeId} onChange={setThemeId} />
         <button
           className="topbar__btn"
           onClick={() => setFreeRunnerOpen(true)}

@@ -1,48 +1,126 @@
-export const colors = {
-  bg: "#0b0e14",
-  bg2: "#11151c",
-  bg3: "#161b24",
-  fg: "#c7cbd1",
-  fgDim: "#7f8896",
-  fgMute: "#555b66",
-  accent: "#89ddff",
-  green: "#a6e3a1",
-  greenBg: "rgba(166, 227, 161, 0.08)",
-  red: "#f38ba8",
-  redBg: "rgba(243, 139, 168, 0.08)",
-  yellow: "#f9e2af",
-  magenta: "#cba6f7",
-  blue: "#74c7ec",
-  border: "#232a36",
-  borderActive: "#4a5467",
-  cursorBg: "#1e2532",
-  reviewedBg: "rgba(137, 221, 255, 0.05)",
-  reviewedMark: "#3c4656",
-} as const;
+export interface ThemeDefinition {
+  label: string;
+  colorScheme: "light" | "dark";
+  vars: Record<string, string>;
+}
 
-export const fonts = {
-  mono: '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas", monospace',
-} as const;
+const monoFont =
+  '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas", monospace';
 
-export function applyTokensToRoot(el: HTMLElement): void {
-  el.style.setProperty("--bg", colors.bg);
-  el.style.setProperty("--bg-2", colors.bg2);
-  el.style.setProperty("--bg-3", colors.bg3);
-  el.style.setProperty("--fg", colors.fg);
-  el.style.setProperty("--fg-dim", colors.fgDim);
-  el.style.setProperty("--fg-mute", colors.fgMute);
-  el.style.setProperty("--accent", colors.accent);
-  el.style.setProperty("--green", colors.green);
-  el.style.setProperty("--green-bg", colors.greenBg);
-  el.style.setProperty("--red", colors.red);
-  el.style.setProperty("--red-bg", colors.redBg);
-  el.style.setProperty("--yellow", colors.yellow);
-  el.style.setProperty("--magenta", colors.magenta);
-  el.style.setProperty("--blue", colors.blue);
-  el.style.setProperty("--border", colors.border);
-  el.style.setProperty("--border-active", colors.borderActive);
-  el.style.setProperty("--cursor-bg", colors.cursorBg);
-  el.style.setProperty("--reviewed-bg", colors.reviewedBg);
-  el.style.setProperty("--reviewed-mark", colors.reviewedMark);
-  el.style.setProperty("--font-mono", fonts.mono);
+export const THEMES = {
+  dark: {
+    label: "Dark",
+    colorScheme: "dark",
+    vars: {
+      "bg": "#0b0e14",
+      "bg-2": "#11151c",
+      "bg-3": "#161b24",
+      "fg": "#c7cbd1",
+      "fg-dim": "#7f8896",
+      "fg-mute": "#555b66",
+      "accent": "#89ddff",
+      "green": "#a6e3a1",
+      "green-bg": "rgba(166, 227, 161, 0.08)",
+      "red": "#f38ba8",
+      "red-bg": "rgba(243, 139, 168, 0.08)",
+      "yellow": "#f9e2af",
+      "magenta": "#cba6f7",
+      "blue": "#74c7ec",
+      "border": "#232a36",
+      "border-active": "#4a5467",
+      "cursor-bg": "#1e2532",
+      "reviewed-bg": "rgba(137, 221, 255, 0.05)",
+      "reviewed-mark": "#3c4656",
+      "font-mono": monoFont,
+      "syntax-comment": "#6a7487",
+      "syntax-keyword": "#ff8f40",
+      "syntax-string": "#bbe67e",
+      "syntax-number": "#ffcc66",
+      "syntax-function": "#82aaff",
+      "syntax-type": "#ffd580",
+      "syntax-property": "#c3e88d",
+      "syntax-variable": "#f78c6c",
+      "syntax-tag": "#ffad66",
+      "syntax-punctuation": "#8f9bb3",
+    },
+  },
+  light: {
+    label: "Light",
+    colorScheme: "light",
+    vars: {
+      "bg": "#f5f7fb",
+      "bg-2": "#ebeff5",
+      "bg-3": "#dde5ef",
+      "fg": "#233142",
+      "fg-dim": "#506176",
+      "fg-mute": "#7b8798",
+      "accent": "#005cc5",
+      "green": "#1a7f37",
+      "green-bg": "rgba(26, 127, 55, 0.12)",
+      "red": "#cf222e",
+      "red-bg": "rgba(207, 34, 46, 0.1)",
+      "yellow": "#9a6700",
+      "magenta": "#8250df",
+      "blue": "#0969da",
+      "border": "#c8d1dc",
+      "border-active": "#8aa3c2",
+      "cursor-bg": "#d7e6ff",
+      "reviewed-bg": "rgba(9, 105, 218, 0.06)",
+      "reviewed-mark": "#90a9c9",
+      "font-mono": monoFont,
+      "syntax-comment": "#6e7781",
+      "syntax-keyword": "#8250df",
+      "syntax-string": "#0a7c3b",
+      "syntax-number": "#b35900",
+      "syntax-function": "#0550ae",
+      "syntax-type": "#953800",
+      "syntax-property": "#0f766e",
+      "syntax-variable": "#bc4c00",
+      "syntax-tag": "#b31d28",
+      "syntax-punctuation": "#57606a",
+    },
+  },
+} as const satisfies Record<string, ThemeDefinition>;
+
+export type ThemeId = keyof typeof THEMES;
+
+export const DEFAULT_THEME_ID: ThemeId = "dark";
+export const THEME_STORAGE_KEY = "shippable:theme";
+
+export const THEME_OPTIONS = (Object.entries(THEMES) as [ThemeId, ThemeDefinition][])
+  .map(([id, theme]) => ({
+    id,
+    label: theme.label,
+  }));
+
+export function isThemeId(value: string | null): value is ThemeId {
+  return value !== null && value in THEMES;
+}
+
+export function getStoredThemeId(): ThemeId {
+  if (typeof window === "undefined") return DEFAULT_THEME_ID;
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isThemeId(raw) ? raw : DEFAULT_THEME_ID;
+  } catch {
+    return DEFAULT_THEME_ID;
+  }
+}
+
+export function persistThemeId(themeId: ThemeId): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeId);
+  } catch {
+    // Storage can fail in private browsing or embedded contexts.
+  }
+}
+
+export function applyThemeToRoot(el: HTMLElement, themeId: ThemeId): void {
+  const theme = THEMES[themeId];
+  for (const [name, value] of Object.entries(theme.vars)) {
+    el.style.setProperty(`--${name}`, value);
+  }
+  el.style.setProperty("color-scheme", theme.colorScheme);
+  el.dataset.theme = themeId;
 }

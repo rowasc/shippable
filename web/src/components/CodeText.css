@@ -1,0 +1,10 @@
+.code-token--comment { color: var(--syntax-comment); }
+.code-token--string { color: var(--syntax-string); }
+.code-token--keyword { color: var(--syntax-keyword); }
+.code-token--number { color: var(--syntax-number); }
+.code-token--function { color: var(--syntax-function); }
+.code-token--type { color: var(--syntax-type); }
+.code-token--property { color: var(--syntax-property); }
+.code-token--variable { color: var(--syntax-variable); }
+.code-token--tag { color: var(--syntax-tag); }
+.code-token--punctuation { color: var(--syntax-punctuation); }

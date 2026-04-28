@@ -1,6 +1,7 @@
 import "./Inspector.css";
 import type { Cursor, LineSelection, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
+import { CodeText } from "./CodeText";
 import type {
   InspectorViewModel,
   AiNoteRowItem,
@@ -66,7 +67,7 @@ export function Inspector({
         <div className="inspector__loc">{vm.locationLabel}</div>
         <div className={`inspector__code inspector__code--${vm.lineKind}`}>
           <span className="inspector__code-sign">{vm.lineSign}</span>
-          {vm.lineText || " "}
+          {vm.lineText ? <CodeText text={vm.lineText} language={vm.language} /> : " "}
         </div>
       </section>
 

@@ -101,8 +101,10 @@
 .gallery__topbar-desc {
   color: var(--fg-dim);
 }
+.gallery__topbar-spacer {
+  flex: 1;
+}
 .gallery__topbar-nav {
-  margin-left: auto;
   color: var(--accent);
   font-size: 12px;
 }

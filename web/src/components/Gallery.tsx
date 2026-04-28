@@ -3,9 +3,11 @@ import { useState, useReducer, useCallback } from "react";
 import { DiffView } from "./DiffView";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { SyntaxShowcase } from "./SyntaxShowcase";
+import { ThemePicker } from "./ThemePicker";
 import { reducer } from "../state";
 import { buildDiffViewModel } from "../view";
 import { ALL_FIXTURES } from "../gallery-fixtures";
+import { useTheme } from "../useTheme";
 import type {
   DiffGalleryFixture,
   GalleryFixture,
@@ -15,6 +17,7 @@ import type {
 import type { EvidenceRef } from "../types";
 
 export function Gallery() {
+  const [themeId, setThemeId] = useTheme();
   const [selected, setSelected] = useState<GalleryFixture>(ALL_FIXTURES[0]);
   const [lastNav, setLastNav] = useState<EvidenceRef | null>(null);
 
@@ -55,6 +58,8 @@ export function Gallery() {
           <span className="gallery__topbar-name">{selected.name}</span>
           <span className="gallery__topbar-sep">│</span>
           <span className="gallery__topbar-desc">{selected.description}</span>
+          <span className="gallery__topbar-spacer" />
+          <ThemePicker value={themeId} onChange={setThemeId} />
           {lastNav && (
             <span className="gallery__topbar-nav">
               → navigated: {describeNav(lastNav)}
