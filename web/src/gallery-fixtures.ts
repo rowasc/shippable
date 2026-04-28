@@ -24,7 +24,21 @@ export interface PlanGalleryFixture {
   plan: ReviewPlan;
 }
 
-export type GalleryFixture = DiffGalleryFixture | PlanGalleryFixture;
+export interface SyntaxGalleryFixture {
+  kind: "syntax";
+  name: string;
+  description: string;
+  snippets: {
+    title: string;
+    language: string;
+    code: string;
+  }[];
+}
+
+export type GalleryFixture =
+  | DiffGalleryFixture
+  | PlanGalleryFixture
+  | SyntaxGalleryFixture;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -175,7 +189,8 @@ export const fixtureAiSaturated: GalleryFixture = {
         {
           id: "g-r1",
           author: "romina",
-          body: "Will add compactMode and notifyOnMention in a follow-up.",
+          body:
+            "Fix will probably look like this once I validate the payload:\n\n```ts\nconst next = sanitizePrefs(loadPrefs());\nsetPrefs(next);\n```",
           createdAt: "2026-04-22T12:00:00Z",
         },
       ],
@@ -288,6 +303,38 @@ export const fixturePlanRule: PlanGalleryFixture = {
 // ── export all ─────────────────────────────────────────────────────────────
 
 export const ALL_FIXTURES: GalleryFixture[] = [
+  {
+    kind: "syntax",
+    name: "syntax-highlighting",
+    description:
+      "Shiki-based code rendering previewed in explicit light and dark surfaces.",
+    snippets: [
+      {
+        title: "TypeScript",
+        language: "ts",
+        code:
+          "export function clamp(value: number, min: number, max: number) {\n  return Math.min(max, Math.max(min, value));\n}",
+      },
+      {
+        title: "JavaScript",
+        language: "js",
+        code:
+          "const submit = async (payload) => {\n  const res = await fetch('/api/review', {\n    method: 'POST',\n    body: JSON.stringify(payload),\n  });\n  return res.json();\n};",
+      },
+      {
+        title: "PHP",
+        language: "php",
+        code:
+          "<?php\nfunction load_prefs(array $defaults, array $input): array {\n    return [\n        'theme' => $input['theme'] ?? $defaults['theme'],\n        'density' => $input['density'] ?? $defaults['density'],\n    ];\n}\n",
+      },
+      {
+        title: "Diff",
+        language: "diff",
+        code:
+          "@@ -12,7 +12,8 @@\n-const prefs = loadPrefs();\n+const raw = loadPrefs();\n+const prefs = sanitizePrefs(raw);\n renderPanel(prefs);\n",
+      },
+    ],
+  },
   fixturePlanRule,
   fixtureEmpty,
   fixtureMidReview,

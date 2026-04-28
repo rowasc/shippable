@@ -47,9 +47,9 @@ export function ReplyThread({
               <span className="reply__sep">·</span>
               <span className="reply__time">{timeAgo(r.createdAt)}</span>
             </div>
-            <p className="reply__body">
+            <div className="reply__body">
               <RichText text={r.body} symbols={symbols} onJump={onJump} />
-            </p>
+            </div>
           </li>
         ))}
       </ul>

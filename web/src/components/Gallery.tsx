@@ -2,6 +2,7 @@ import "./Gallery.css";
 import { useState, useReducer, useCallback } from "react";
 import { DiffView } from "./DiffView";
 import { ReviewPlanView } from "./ReviewPlanView";
+import { SyntaxShowcase } from "./SyntaxShowcase";
 import { reducer } from "../state";
 import { buildDiffViewModel } from "../view";
 import { ALL_FIXTURES } from "../gallery-fixtures";
@@ -9,6 +10,7 @@ import type {
   DiffGalleryFixture,
   GalleryFixture,
   PlanGalleryFixture,
+  SyntaxGalleryFixture,
 } from "../gallery-fixtures";
 import type { EvidenceRef } from "../types";
 
@@ -96,6 +98,9 @@ function GalleryItem({
   if (fixture.kind === "plan") {
     return <PlanGalleryItem fixture={fixture} onNavigate={onNavigate} />;
   }
+  if (fixture.kind === "syntax") {
+    return <SyntaxGalleryItem fixture={fixture} />;
+  }
   return <DiffGalleryItem fixture={fixture} />;
 }
 
@@ -150,4 +155,8 @@ function DiffGalleryItem({ fixture }: { fixture: DiffGalleryFixture }) {
       onToggleExpandFile={handleToggleExpandFile}
     />
   );
+}
+
+function SyntaxGalleryItem({ fixture }: { fixture: SyntaxGalleryFixture }) {
+  return <SyntaxShowcase snippets={fixture.snippets} />;
 }
