@@ -66,6 +66,20 @@ async function main() {
   }
   console.log("ok: WASM fetched only after PHP run:", wasmAfter[0]);
 
+  // Verify the worker's own network lockdown — try each exfiltration vector
+  // from inside the worker and assert it's blocked.
+  const probes = await page.evaluate(async () => {
+    const { probeWorker } = await import("/src/runner/executePhp.ts");
+    return await probeWorker();
+  });
+  console.log("worker probes:", probes);
+  for (const k of ["fetch", "xhr", "websocket", "eventsource"]) {
+    if (probes[k] !== "BLOCKED") {
+      throw new Error(`worker ${k} not blocked: got ${probes[k]}`);
+    }
+  }
+  console.log("ok: worker network lockdown enforced");
+
   await browser.close();
   console.log("OK");
 }

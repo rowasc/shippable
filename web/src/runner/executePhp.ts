@@ -61,6 +61,33 @@ function runInWorker(code: string): Promise<PhpResponse> {
   });
 }
 
+/**
+ * Test-only: ask the worker to run its own network-lockdown self-test and
+ * report whether each probe was BLOCKED. Smokes use this to confirm the
+ * worker's fetch / XHR / WebSocket / EventSource overrides are in effect.
+ */
+export function probeWorker(): Promise<{
+  fetch: "BLOCKED" | "NO_BLOCK";
+  xhr: "BLOCKED" | "NO_BLOCK";
+  websocket: "BLOCKED" | "NO_BLOCK";
+  eventsource: "BLOCKED" | "NO_BLOCK";
+}> {
+  const w = ensureWorker();
+  const id = nextId++;
+  return new Promise((resolve) => {
+    pending.set(id, (resp) => {
+      const probes = (resp as unknown as { probes?: unknown }).probes as {
+        fetch: "BLOCKED" | "NO_BLOCK";
+        xhr: "BLOCKED" | "NO_BLOCK";
+        websocket: "BLOCKED" | "NO_BLOCK";
+        eventsource: "BLOCKED" | "NO_BLOCK";
+      };
+      resolve(probes);
+    });
+    w.postMessage({ __id: id, probe: true });
+  });
+}
+
 export async function runPhp(
   parsed: ParsedSelection,
   inputs: Record<string, string>,
