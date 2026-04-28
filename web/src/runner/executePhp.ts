@@ -1,84 +1,91 @@
 // PHP execution backed by @php-wasm/web (WordPress Playground).
 //
-// Lazy-loads a real PHP 8.3 runtime on the first call so the rest of the app
-// stays light. Keeps a single cached `PHP` instance for subsequent calls —
-// each `run()` resets PHP's request state, so it's safe to reuse.
+// The runtime + WASM live in a Web Worker (php-worker.ts) so user PHP code
+// can't reach the host page's DOM, cookies, or localStorage. The first run
+// pays the cold-start cost (load worker → fetch ~21MB WASM → instantiate);
+// subsequent runs reuse the same worker instance.
 //
 // We compose a tiny PHP script that binds the user's inputs to top-level
 // variables, then pastes the selected source. For function-shaped
 // selections we also append a call expression and emit its return value.
 
+import PhpWorker from "./php-worker.ts?worker";
 import type { ParsedSelection, RunnerShape } from "./parseInputs";
 import type { RunResult } from "./executeJs";
 
-let phpPromise: Promise<{ run: (code: string) => Promise<{ stdout: string; stderr: string; exitCode: number }> }> | null = null;
+interface PhpResponse {
+  __id: number;
+  ok: boolean;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number;
+  error?: string;
+}
 
-function loadPhp() {
-  if (phpPromise) return phpPromise;
-  phpPromise = (async () => {
-    // Import the version-specific package directly so Rolldown only bundles
-    // PHP 8.3 (loadWebRuntime's switch over 8 versions would pull them all).
-    const [webPkg, { loadPHPRuntime, PHP }] = await Promise.all([
-      // The version-specific package doesn't ship types — its shape is
-      // `{ getPHPLoaderModule(): Promise<PHPLoaderModule> }`.
-      import("@php-wasm/web-8-3" as string) as Promise<{
-        getPHPLoaderModule: () => Promise<unknown>;
-      }>,
-      import("@php-wasm/universal"),
-    ]);
-    if (!("setImmediate" in globalThis)) {
-      // Emscripten relies on this; polyfill before loading the runtime.
-      (globalThis as unknown as { setImmediate: typeof setTimeout }).setImmediate =
-        ((cb: (...args: unknown[]) => void) => setTimeout(cb, 0)) as typeof setTimeout;
+let worker: Worker | null = null;
+let nextId = 1;
+const pending = new Map<number, (resp: PhpResponse) => void>();
+
+function ensureWorker(): Worker {
+  if (worker) return worker;
+  worker = new PhpWorker();
+  worker.addEventListener("message", (ev: MessageEvent) => {
+    const data = ev.data as PhpResponse;
+    if (!data || typeof data.__id !== "number") return;
+    const cb = pending.get(data.__id);
+    if (cb) {
+      pending.delete(data.__id);
+      cb(data);
     }
-    const loaderModule = await webPkg.getPHPLoaderModule();
-    // The PHPLoaderModule type isn't exported as a value, so cast at the boundary.
-    const runtimeId = await loadPHPRuntime(loaderModule as Parameters<typeof loadPHPRuntime>[0], {});
-    const php = new PHP(runtimeId);
-    const decoder = new TextDecoder();
-    return {
-      async run(code: string) {
-        const response = await php.run({ code });
-        return {
-          stdout: decoder.decode(response.bytes),
-          stderr: response.errors,
-          exitCode: response.exitCode,
-        };
-      },
-    };
-  })();
-  return phpPromise;
+  });
+  worker.addEventListener("error", (ev) => {
+    // If the worker dies, fail every pending call and reset so the next
+    // run gets a fresh worker.
+    const err = (ev as ErrorEvent).message ?? "worker error";
+    for (const cb of pending.values()) {
+      cb({ __id: -1, ok: false, error: err });
+    }
+    pending.clear();
+    worker?.terminate();
+    worker = null;
+  });
+  return worker;
+}
+
+function runInWorker(code: string): Promise<PhpResponse> {
+  const w = ensureWorker();
+  const id = nextId++;
+  return new Promise((resolve) => {
+    pending.set(id, resolve);
+    w.postMessage({ __id: id, code });
+  });
 }
 
 export async function runPhp(
   parsed: ParsedSelection,
   inputs: Record<string, string>,
 ): Promise<RunResult> {
-  let php;
-  try {
-    php = await loadPhp();
-  } catch (e) {
-    return {
-      ok: false,
-      logs: [],
-      error:
-        "Couldn't load the PHP runtime: " +
-        (e instanceof Error ? e.message : String(e)),
-    };
-  }
-
   const script = buildScript(parsed, inputs);
 
   try {
-    const r = await php.run(script);
-    const parsed = parseStdout(r.stdout);
-    const logs = parsed.text ? ["out " + parsed.text] : [];
+    const r = await runInWorker(script);
+    if (!r.ok) {
+      return {
+        ok: false,
+        logs: [],
+        error: "Couldn't load the PHP runtime: " + (r.error ?? "unknown error"),
+      };
+    }
+    const out = parseStdout(r.stdout ?? "");
+    const logs = out.text ? ["out " + out.text] : [];
     return {
-      ok: r.exitCode === 0 && !r.stderr,
+      ok: (r.exitCode ?? 0) === 0 && !r.stderr,
       logs,
-      result: parsed.result,
-      vars: parsed.vars,
-      error: r.stderr || (r.exitCode !== 0 ? `exit ${r.exitCode}` : undefined),
+      result: out.result,
+      vars: out.vars,
+      error:
+        r.stderr ||
+        ((r.exitCode ?? 0) !== 0 ? `exit ${r.exitCode}` : undefined),
     };
   } catch (e) {
     return {
