@@ -53,6 +53,26 @@
     } as unknown;
   (self as unknown as { WebSocket: unknown }).WebSocket = blockingCtor("WebSocket");
   (self as unknown as { EventSource: unknown }).EventSource = blockingCtor("EventSource");
+
+  // Subworkers spawn with pristine globals — they don't inherit the patches
+  // above. Blocking the constructor stops the exfiltration vector entirely.
+  // (We don't need subworkers; php-wasm runs in this thread.)
+  (self as unknown as { Worker: unknown }).Worker = blockingCtor("Worker");
+  // SharedWorker / WebTransport / WebSocketStream are conditionally defined
+  // depending on the browser — only override when present so we don't add
+  // properties workers don't otherwise have.
+  for (const name of ["SharedWorker", "WebTransport", "WebSocketStream"]) {
+    const g = self as unknown as Record<string, unknown>;
+    if (typeof g[name] !== "undefined") g[name] = blockingCtor(name);
+  }
+
+  // Known residual gap: cross-origin dynamic `import('https://…')` is
+  // resolved by the JS engine, not via `self.fetch`, so the patches above
+  // can't intercept it. The target server still needs to send CORS headers
+  // for the import to succeed, which narrows the vector to attacker-
+  // controlled servers. Closing this fully requires CSP `script-src 'self'`
+  // on the worker's response — set it via your hosting layer if you want
+  // belt-and-suspenders.
 }
 
 interface PhpRuntime {
@@ -103,6 +123,7 @@ self.addEventListener("message", async (ev: MessageEvent) => {
       xhr: probeXhr(),
       websocket: probeWebSocket(),
       eventsource: probeEventSource(),
+      subworker: probeSubworker(),
     };
     (self as unknown as Worker).postMessage({ __id: data.__id, probes });
     return;
@@ -157,6 +178,20 @@ function probeWebSocket(): "BLOCKED" | "NO_BLOCK" {
 function probeEventSource(): "BLOCKED" | "NO_BLOCK" {
   try {
     new EventSource("https://example.com");
+    return "NO_BLOCK";
+  } catch {
+    return "BLOCKED";
+  }
+}
+function probeSubworker(): "BLOCKED" | "NO_BLOCK" {
+  // A subworker spawned from a Blob URL starts with pristine globals — its
+  // fetch/XHR/etc. are not patched. If `new Worker(...)` succeeds, anything
+  // running inside the child can exfiltrate freely.
+  try {
+    const blob = new Blob(["self.postMessage('hi')"], {
+      type: "application/javascript",
+    });
+    new Worker(URL.createObjectURL(blob));
     return "NO_BLOCK";
   } catch {
     return "BLOCKED";

@@ -73,7 +73,7 @@ async function main() {
     return await probeWorker();
   });
   console.log("worker probes:", probes);
-  for (const k of ["fetch", "xhr", "websocket", "eventsource"]) {
+  for (const k of ["fetch", "xhr", "websocket", "eventsource", "subworker"]) {
     if (probes[k] !== "BLOCKED") {
       throw new Error(`worker ${k} not blocked: got ${probes[k]}`);
     }
