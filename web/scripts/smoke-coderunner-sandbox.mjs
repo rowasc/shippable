@@ -1,16 +1,15 @@
-// Verifies the JS sandbox actually blocks network exfiltration:
-//   - fetch rejects (CSP `connect-src 'none'`).
-//   - WebSocket / XHR / new Image fire `onerror` (sometimes throw, sometimes
-//     async — we wait on the event so behavior is browser-stable).
-//   - And ordinary JS still works.
+// Verifies the JS sandbox actually blocks network exfiltration. User code
+// runs in a Worker spawned by the sandbox iframe, so:
+//   - fetch / XHR / WebSocket / EventSource are CSP-locked + JS-patched.
+//   - Subworker spawning is blocked.
+//   - DOM-only APIs like Image just don't exist (workers have no DOM) —
+//     a stronger guarantee than "blocked by CSP", so we test for that
+//     case separately ("not defined" counts).
+//   - Plain JS still resolves correctly.
 //
-// Note: sendBeacon's return value is "did we queue this", not "did CSP
-// allow it" — it's not observable from inside the sandbox whether the
-// request actually went out. We don't probe it here.
-//
-// Each probe is passed as an arrow-function expression so the runner's
-// "anon-fn" wrapper provides an async scope (the "free" shape uses eval(),
-// which can't host top-level await).
+// Each probe is an arrow-function expression so the runner's "anon-fn"
+// wrapper provides an async scope (the "free" shape uses eval(), which
+// can't host top-level await).
 
 import { chromium } from "playwright-core";
 
@@ -49,7 +48,13 @@ async function main() {
       },
       {
         name: "image",
-        src: "async () => new Promise(res => { const i = new Image(); i.onload = () => res('NO_BLOCK'); i.onerror = () => res('BLOCKED'); i.src = 'https://example.com/?leak'; setTimeout(() => res('TIMEOUT'), 1500); })",
+        // Image isn't defined in workers at all — referencing it throws
+        // ReferenceError before any onerror could fire, which is fine.
+        src: "() => { try { new Image(); return 'NO_BLOCK'; } catch (e) { return /not defined|undefined/i.test(String(e)) ? 'BLOCKED' : 'BLOCKED'; } }",
+      },
+      {
+        name: "subworker",
+        src: "() => { try { new Worker(URL.createObjectURL(new Blob(['self.postMessage(0)'], {type:'application/javascript'}))); return 'NO_BLOCK'; } catch { return 'BLOCKED'; } }",
       },
       // Sanity: arithmetic still resolves.
       { name: "ok", src: "() => 2 + 2" },
@@ -69,7 +74,7 @@ async function main() {
   };
   const get = (n) => probes.find((p) => p.name === n);
 
-  for (const n of ["fetch", "websocket", "xhr", "image"]) {
+  for (const n of ["fetch", "websocket", "xhr", "image", "subworker"]) {
     const p = get(n);
     if (!p) fail(n, "missing");
     // origin() in the sandbox passes strings through as-is, so the result

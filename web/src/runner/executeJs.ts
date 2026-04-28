@@ -1,10 +1,20 @@
 // JS/TS execution for the CodeRunner prototype.
 //
-// Runs the composed program inside a sandboxed iframe (`sandbox="allow-scripts"`,
-// no allow-same-origin → null origin, no DOM access to the host). Communicates
-// over postMessage; times out at 2s. TypeScript is transpiled to JS via
-// esbuild-wasm running in a locked-down worker (ts-worker.ts) — see that file
-// for the network lockdown details.
+// Architecture:
+//   parent → iframe (coordinator) → inner Worker (executes user code)
+//
+// The iframe is sandboxed (`allow-scripts`, no allow-same-origin → opaque
+// origin → no DOM access to host). The inner worker is spawned by the
+// iframe from a Blob URL, so it inherits the opaque origin, and its
+// network is locked down at the JS layer (same set as ts-worker.ts /
+// php-worker.ts). The iframe stays as a thin coordinator: it forwards the
+// code payload to the worker, listens for the response, and terminates the
+// worker on timeout. Putting execution in a worker means a tight loop
+// like `while(true){}` no longer blocks the iframe's setTimeout — the 2s
+// limit is real, not advisory.
+//
+// TypeScript is transpiled to JS via esbuild-wasm running in a separate
+// locked-down worker (ts-worker.ts) before being shipped to the sandbox.
 
 import TsWorker from "./ts-worker.ts?worker";
 import type { ParsedSelection } from "./parseInputs";

