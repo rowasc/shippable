@@ -248,13 +248,13 @@
 .line__text--highlighted .line::before {
   content: none;
 }
-:root[data-color-mode="light"] .line__text--highlighted .shiki-token {
+:root[data-theme="light"] .line__text--highlighted .shiki-token {
   color: var(--shiki-light);
   font-style: var(--shiki-light-font-style);
   font-weight: var(--shiki-light-font-weight);
   text-decoration: var(--shiki-light-text-decoration);
 }
-:root[data-color-mode="dark"] .line__text--highlighted .shiki-token {
+:root[data-theme="dark"] .line__text--highlighted .shiki-token {
   color: var(--shiki-dark);
   font-style: var(--shiki-dark-font-style);
   font-weight: var(--shiki-dark-font-weight);
