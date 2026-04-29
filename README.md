@@ -33,14 +33,16 @@ cd server
 npm install
 ```
 
-Set `ANTHROPIC_API_KEY` in your shell before starting the server. On macOS, one reasonable setup is:
+Set `ANTHROPIC_API_KEY` in your shell before starting the server. On macOS, store it in the system Keychain once and pull it into your shell before starting:
 
 ```
-security add-generic-password -a "$USER" -s anthropic-key-shippable -w
-export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)
+security add-generic-password -s shippable -a ANTHROPIC_API_KEY -w
+export ANTHROPIC_API_KEY=$(security find-generic-password -s shippable -a ANTHROPIC_API_KEY -w)
 npm run dev        # tsx watch on http://127.0.0.1:3001
 npm run typecheck  # tsc --noEmit
 ```
+
+The bundled desktop app reads from the same Keychain entry, so this one setup serves both surfaces.
 
 The backend listens on `http://127.0.0.1:3001` and allows these browser origins by default:
 
@@ -60,3 +62,46 @@ Three entry points:
 - `/` is the live app.
 - `/gallery.html` is a screen catalog that renders every UI state against canned fixtures. This is the intended surface for design work — way faster than driving the live app with the keyboard to reach an edge case.
 - `?cs=<id>` on the main app jumps straight to a specific sample ChangeSet, which is handy if you need to reproduce a fixture state manually.
+
+## Building the desktop app
+
+Shippable can also ship as a native macOS app. The React frontend gets wrapped in a [Tauri 2](https://tauri.app/) shell, and `server/` gets compiled to a standalone binary via [`bun build --compile`](https://bun.sh/docs/bundler/executables) and bundled inside the .app — so the .dmg is self-contained, no Node or browser dev server required at runtime.
+
+### One-time setup
+
+```
+brew tap oven-sh/bun && brew install bun
+cargo install tauri-cli --version "^2.0"
+(cd server && bun install)
+(cd web && npm install)
+```
+
+### Build
+
+```
+(cd server && bun run build:sidecar)   # compile the backend to src-tauri/binaries/
+cargo tauri build                       # bundle frontend + sidecar into .app + .dmg
+```
+
+Output:
+
+- `src-tauri/target/release/bundle/macos/Shippable.app`
+- `src-tauri/target/release/bundle/dmg/Shippable_0.1.0_aarch64.dmg`
+
+`cargo tauri build` does **not** invoke `bun run build:sidecar` — re-run it manually whenever you change anything in `server/src/`.
+
+The .dmg is unsigned, so first launch trips macOS Gatekeeper — right-click the .app in Finder → Open → confirm once. Subsequent launches don't prompt.
+
+### First launch
+
+If no Anthropic API key is in the Keychain, the app shows a setup modal where you can paste one. The key is stored at `service=shippable, account=ANTHROPIC_API_KEY` in your login Keychain (same entry the dev backend uses). Quit and relaunch after saving — the bundled backend is spawned at app startup, so it only picks up new keys on the next run.
+
+Remove a saved key with:
+
+```
+security delete-generic-password -s shippable -a ANTHROPIC_API_KEY
+```
+
+### Iterating
+
+For quick iteration on the Rust shell or the frontend, `cargo tauri dev` runs the React app via Vite in a native window with hot reload. The bundled-sidecar path still applies — if `src-tauri/binaries/shippable-server-aarch64-apple-darwin` is missing, the app launches but AI plans fail. Either run `bun run build:sidecar` once before `cargo tauri dev`, or run the standalone `server/` separately and stick to the browser dev flow above.
