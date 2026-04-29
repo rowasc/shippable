@@ -1,3 +1,10 @@
 node_modules/
 .env*
 *.log
+
+# Bun-compiled sidecar binaries (built by `bun build --compile`,
+# bundled into the Tauri app at build time, never committed).
+dist/
+
+# Bun crash dumps.
+bun-debug-*.log
