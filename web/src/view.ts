@@ -399,6 +399,12 @@ export interface StatusBarViewModel {
   readDisplay: string;
   /** "files X/Y" — how many files the reviewer has signed off on. */
   filesDisplay: string;
+  /**
+   * "selection L12–L18 · c to comment" when the reviewer has an active
+   * shift-extended selection. Null otherwise. Replaces the trailing hint
+   * temporarily so the affordance is paired with the selection state.
+   */
+  selectionHint: string | null;
 }
 
 export interface BuildStatusBarViewModelArgs {
@@ -418,6 +424,12 @@ export interface BuildStatusBarViewModelArgs {
   readCoverage: number;
   /** Count of files the reviewer has signed off on. */
   reviewedFiles: number;
+  /**
+   * Active shift-extended selection (or null). When set, the status
+   * bar emits a selectionHint instead of leaving the user to discover
+   * the block-comment affordance from Help.
+   */
+  selection: { lo: number; hi: number; loLineNo: number; hiLineNo: number } | null;
 }
 
 export function buildStatusBarViewModel({
@@ -429,6 +441,7 @@ export function buildStatusBarViewModel({
   lineIdx,
   readCoverage,
   reviewedFiles,
+  selection,
 }: BuildStatusBarViewModelArgs): StatusBarViewModel {
   return {
     lineDisplay: `line ${lineIdx + 1}/${totalLines}`,
@@ -436,6 +449,9 @@ export function buildStatusBarViewModel({
     fileDisplay: `file ${fileIdx + 1}/${totalFiles}`,
     readDisplay: `read ${Math.round(readCoverage * 100)}%`,
     filesDisplay: `reviewed ${reviewedFiles}/${totalFiles}`,
+    selectionHint: selection
+      ? `selection L${selection.loLineNo}–L${selection.hiLineNo} · c to comment`
+      : null,
   };
 }
 

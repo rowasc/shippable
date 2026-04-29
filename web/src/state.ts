@@ -33,7 +33,18 @@ function addLine(
 }
 
 export type Action =
-  | { type: "MOVE_LINE"; delta: number; extend?: boolean }
+  | {
+      type: "MOVE_LINE";
+      delta: number;
+      extend?: boolean;
+      /**
+       * When true, a same-hunk move preserves the existing selection
+       * instead of collapsing it. Used while a block-comment draft is
+       * open so the reviewer can scroll back through the range they're
+       * commenting on without losing the visual cue.
+       */
+      preserveSelection?: boolean;
+    }
   | { type: "MOVE_HUNK"; delta: number }
   | { type: "MOVE_FILE"; delta: number }
   | { type: "SET_CURSOR"; cursor: Cursor; selection?: LineSelection | null }
@@ -51,7 +62,12 @@ export type Action =
 export function reducer(state: ReviewState, action: Action): ReviewState {
   switch (action.type) {
     case "MOVE_LINE":
-      return moveLine(state, action.delta, action.extend ?? false);
+      return moveLine(
+        state,
+        action.delta,
+        action.extend ?? false,
+        action.preserveSelection ?? false,
+      );
     case "COLLAPSE_SELECTION":
       return state.selection === null ? state : { ...state, selection: null };
     case "MOVE_HUNK":
@@ -157,6 +173,7 @@ function moveLine(
   state: ReviewState,
   delta: number,
   extend: boolean,
+  preserveSelection: boolean,
 ): ReviewState {
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
@@ -165,25 +182,35 @@ function moveLine(
   const nextLineIdx = state.cursor.lineIdx + delta;
 
   if (nextLineIdx < 0) {
-    if (hunkIdx === 0) return applyCursor(state, state.cursor, extend);
+    if (hunkIdx === 0)
+      return applyCursor(state, state.cursor, extend, preserveSelection);
     const prev = file.hunks[hunkIdx - 1];
+    // Crossing a hunk boundary always collapses selection — the range no
+    // longer applies once the cursor is in a different hunk.
     return applyCursor(
       state,
       { ...state.cursor, hunkId: prev.id, lineIdx: prev.lines.length - 1 },
+      false,
       false,
     );
   }
   if (nextLineIdx >= hunk.lines.length) {
     if (hunkIdx === file.hunks.length - 1)
-      return applyCursor(state, state.cursor, extend);
+      return applyCursor(state, state.cursor, extend, preserveSelection);
     const next = file.hunks[hunkIdx + 1];
     return applyCursor(
       state,
       { ...state.cursor, hunkId: next.id, lineIdx: 0 },
       false,
+      false,
     );
   }
-  return applyCursor(state, { ...state.cursor, lineIdx: nextLineIdx }, extend);
+  return applyCursor(
+    state,
+    { ...state.cursor, lineIdx: nextLineIdx },
+    extend,
+    preserveSelection,
+  );
 }
 
 function moveHunk(state: ReviewState, delta: number): ReviewState {
@@ -218,14 +245,18 @@ function moveFile(state: ReviewState, delta: number): ReviewState {
 }
 
 /**
- * Apply a new cursor. Always extends the read track. Selection state
- * follows the same rules as before — extending only stays alive within
- * a hunk.
+ * Apply a new cursor. Always extends the read track. Selection lifetime:
+ *   - extend (Shift+arrow): grows the head within the same hunk
+ *   - preserveSelection: keeps the existing selection unchanged within
+ *     the same hunk; used while drafting a block comment
+ *   - otherwise: collapses
+ *   - crossing a hunk boundary: always collapses
  */
 function applyCursor(
   state: ReviewState,
   cursor: Cursor,
   extend: boolean,
+  preserveSelection: boolean = false,
 ): ReviewState {
   const sameHunk = cursor.hunkId === state.cursor.hunkId;
   let selection = state.selection;
@@ -235,6 +266,8 @@ function applyCursor(
         ? selection.anchor
         : state.cursor.lineIdx;
     selection = { hunkId: cursor.hunkId, anchor, head: cursor.lineIdx };
+  } else if (preserveSelection && sameHunk && selection) {
+    // keep selection unchanged
   } else {
     selection = null;
   }

@@ -24,9 +24,15 @@ export function StatusBar({ viewModel }: Props) {
         {viewModel.filesDisplay}
       </span>
       <span className="statusbar__spacer" />
-      <span className="statusbar__hint">
-        j/k line · Tab file · a ack · c comment · ⇧M sign off · i inspector · p plan · ? help
-      </span>
+      {viewModel.selectionHint ? (
+        <span className="statusbar__hint statusbar__hint--selection">
+          {viewModel.selectionHint}
+        </span>
+      ) : (
+        <span className="statusbar__hint">
+          j/k line · Tab file · a ack · c comment · ⇧M sign off · i inspector · p plan · ? help
+        </span>
+      )}
     </footer>
   );
 }

@@ -137,12 +137,18 @@ export default function App() {
 
       e.preventDefault();
 
+      // Block-comment drafts pin the selection across same-hunk moves so
+      // the reviewer can scroll back through the range they're commenting
+      // on without losing the visual cue.
+      const preserveSelection =
+        draftingKey?.startsWith("block:") ?? false;
+
       switch (entry.action) {
         case "MOVE_LINE_DOWN":
-          dispatch({ type: "MOVE_LINE", delta: 1 });
+          dispatch({ type: "MOVE_LINE", delta: 1, preserveSelection });
           break;
         case "MOVE_LINE_UP":
-          dispatch({ type: "MOVE_LINE", delta: -1 });
+          dispatch({ type: "MOVE_LINE", delta: -1, preserveSelection });
           break;
         case "MOVE_LINE_DOWN_EXTEND":
           dispatch({ type: "MOVE_LINE", delta: 1, extend: true });
@@ -518,6 +524,7 @@ export default function App() {
           lineIdx: state.cursor.lineIdx,
           readCoverage,
           reviewedFiles,
+          selection: selectionForStatusBar(hunk, state.selection),
         })}
       />
     </div>
@@ -576,6 +583,28 @@ function cycleChangeset(
   const i = list.findIndex((c) => c.id === currentId);
   const n = list.length;
   return list[(i + delta + n) % n].id;
+}
+
+/**
+ * Resolve the active selection into the line-number range the StatusBar
+ * needs. Returns null when there's no selection or it doesn't match the
+ * current hunk (defensive — shouldn't happen, but cheaper than throwing).
+ */
+function selectionForStatusBar(
+  hunk: { id: string; lines: { oldNo?: number; newNo?: number }[] },
+  selection: { hunkId: string; anchor: number; head: number } | null,
+): { lo: number; hi: number; loLineNo: number; hiLineNo: number } | null {
+  if (!selection || selection.hunkId !== hunk.id) return null;
+  const lo = Math.min(selection.anchor, selection.head);
+  const hi = Math.max(selection.anchor, selection.head);
+  const loLine = hunk.lines[lo];
+  const hiLine = hunk.lines[hi];
+  return {
+    lo,
+    hi,
+    loLineNo: loLine?.newNo ?? loLine?.oldNo ?? lo + 1,
+    hiLineNo: hiLine?.newNo ?? hiLine?.oldNo ?? hi + 1,
+  };
 }
 
 /**

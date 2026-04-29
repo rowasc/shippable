@@ -23,3 +23,7 @@
 .statusbar__hint {
   color: var(--fg-mute);
 }
+.statusbar__hint--selection {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
