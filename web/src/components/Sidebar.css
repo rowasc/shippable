@@ -84,6 +84,7 @@
 }
 .row--skill-on {
   color: var(--green);
+  font-weight: 600;
 }
 .row__label {
   overflow: hidden;

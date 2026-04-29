@@ -49,6 +49,9 @@ interface Props {
   onCloseDraft: () => void;
   onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
+  /** Delete a reply by id within the given thread. UI gates this to
+   *  user-authored entries; the reducer enforces no other contracts. */
+  onDeleteReply: (key: string, replyId: string) => void;
 }
 
 export function Inspector({
@@ -62,6 +65,7 @@ export function Inspector({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -141,6 +145,9 @@ export function Inspector({
                 onCloseDraft={onCloseDraft}
                 onChangeDraft={(body) => onChangeDraft(row.replyKey, body)}
                 onSubmitReply={(body) => onSubmitReply(row.replyKey, body)}
+                onDeleteReply={(replyId) =>
+                  onDeleteReply(row.replyKey, replyId)
+                }
               />
             ))}
           </ul>
@@ -161,6 +168,9 @@ export function Inspector({
           onCloseDraft={onCloseDraft}
           onChangeDraft={(body) => onChangeDraft(vm.aiSummaryReplyKey!, body)}
           onSubmitReply={(body) => onSubmitReply(vm.aiSummaryReplyKey!, body)}
+          onDeleteReply={(replyId) =>
+            onDeleteReply(vm.aiSummaryReplyKey!, replyId)
+          }
         />
       )}
 
@@ -174,6 +184,9 @@ export function Inspector({
           onCloseDraft={onCloseDraft}
           onChangeDraft={(body) => onChangeDraft(vm.teammate!.replyKey, body)}
           onSubmitReply={(body) => onSubmitReply(vm.teammate!.replyKey, body)}
+          onDeleteReply={(replyId) =>
+            onDeleteReply(vm.teammate!.replyKey, replyId)
+          }
         />
       )}
 
@@ -187,6 +200,7 @@ export function Inspector({
         onCloseDraft={onCloseDraft}
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
+        onDeleteReply={onDeleteReply}
       />
     </aside>
   );
@@ -202,6 +216,7 @@ function UserCommentsSection({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: {
   vm: InspectorViewModel;
   symbols: SymbolIndex;
@@ -212,6 +227,7 @@ function UserCommentsSection({
   onCloseDraft: () => void;
   onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
+  onDeleteReply: (key: string, replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -253,6 +269,9 @@ function UserCommentsSection({
               onSubmitReply={(body) =>
                 onSubmitReply(vm.draftStubRow!.threadKey, body)
               }
+              onDeleteReply={(replyId) =>
+                onDeleteReply(vm.draftStubRow!.threadKey, replyId)
+              }
             />
           )}
           {vm.userCommentRows.map((row) => (
@@ -277,6 +296,9 @@ function UserCommentsSection({
               onCloseDraft={onCloseDraft}
               onChangeDraft={(body) => onChangeDraft(row.threadKey, body)}
               onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
+              onDeleteReply={(replyId) =>
+                onDeleteReply(row.threadKey, replyId)
+              }
             />
           ))}
         </ul>
@@ -295,6 +317,7 @@ function UserThreadCard({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: {
   row: UserCommentRowItem;
   symbols: SymbolIndex;
@@ -305,6 +328,7 @@ function UserThreadCard({
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
+  onDeleteReply: (replyId: string) => void;
 }) {
   return (
     <li
@@ -342,6 +366,7 @@ function UserThreadCard({
         onCloseDraft={onCloseDraft}
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
+        onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
       />
@@ -361,6 +386,7 @@ function NoteCard({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: {
   row: AiNoteRowItem;
   symbols: SymbolIndex;
@@ -374,6 +400,7 @@ function NoteCard({
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
+  onDeleteReply: (replyId: string) => void;
 }) {
   return (
     <li
@@ -422,6 +449,7 @@ function NoteCard({
         onCloseDraft={onCloseDraft}
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
+        onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
       />
@@ -441,6 +469,7 @@ function HunkSummarySection({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: {
   summary: string;
   replies: Reply[];
@@ -454,6 +483,7 @@ function HunkSummarySection({
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
+  onDeleteReply: (replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -474,6 +504,7 @@ function HunkSummarySection({
           onCloseDraft={onCloseDraft}
           onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
+          onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
         />
@@ -491,6 +522,7 @@ function TeammateSection({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
 }: {
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
@@ -500,6 +532,7 @@ function TeammateSection({
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
+  onDeleteReply: (replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -527,6 +560,7 @@ function TeammateSection({
           onCloseDraft={onCloseDraft}
           onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
+          onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
         />

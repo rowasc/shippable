@@ -55,6 +55,7 @@ export type Action =
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
+  | { type: "DELETE_REPLY"; targetKey: string; replyId: string }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
   | { type: "TOGGLE_FILE_REVIEWED"; fileId: string };
@@ -147,6 +148,19 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
           [action.targetKey]: [...existing, action.reply],
         },
       };
+    }
+    case "DELETE_REPLY": {
+      const existing = state.replies[action.targetKey];
+      if (!existing) return state;
+      const filtered = existing.filter((r) => r.id !== action.replyId);
+      if (filtered.length === existing.length) return state;
+      const next = { ...state.replies };
+      // Drop the key entirely when the last reply on a thread is removed
+      // — keeps the persisted snapshot tidy and lets the inspector's
+      // "no comments yet" empty state appear naturally.
+      if (filtered.length === 0) delete next[action.targetKey];
+      else next[action.targetKey] = filtered;
+      return { ...state, replies: next };
     }
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";

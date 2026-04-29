@@ -71,6 +71,19 @@
 .reply__time {
   color: var(--fg-mute);
 }
+.reply__delete {
+  background: transparent;
+  border: none;
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: 6px;
+  padding: 0;
+}
+.reply__delete:hover {
+  color: var(--red);
+}
 .reply__body {
   margin: 2px 0 0 0;
   color: var(--fg);

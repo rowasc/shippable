@@ -18,6 +18,8 @@ interface Props {
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
+  /** Delete a reply by id. Only invoked for user-authored replies. */
+  onDeleteReply: (replyId: string) => void;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
 }
@@ -30,6 +32,7 @@ export function ReplyThread({
   onCloseDraft,
   onChangeDraft,
   onSubmitReply,
+  onDeleteReply,
   symbols,
   onJump,
 }: Props) {
@@ -60,6 +63,19 @@ export function ReplyThread({
               <span className="reply__author">@{r.author}</span>
               <span className="reply__sep">·</span>
               <span className="reply__time">{timeAgo(r.createdAt)}</span>
+              {r.author === "you" && (
+                <button
+                  className="reply__delete"
+                  onClick={() => {
+                    if (window.confirm("Delete this reply?")) {
+                      onDeleteReply(r.id);
+                    }
+                  }}
+                  title="delete reply"
+                >
+                  × delete
+                </button>
+              )}
             </div>
             <div className="reply__body">
               <RichText text={r.body} symbols={symbols} onJump={onJump} />
