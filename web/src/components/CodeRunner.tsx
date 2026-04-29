@@ -12,6 +12,13 @@ interface Props {
    *  (no selection required, source starts empty, edit mode by default). */
   freeOpen: boolean;
   onFreeClose: () => void;
+  /**
+   * Counter that increments whenever the user presses the "run selection"
+   * gesture (e). On change we read the current window selection — if it's
+   * inside the diff and parses, we open the panel directly. Replaces the
+   * old selectionchange auto-show, which fired on every text-drag.
+   */
+  selectionRunTrigger: number;
 }
 
 type Mode = "guided" | "edit";
@@ -38,14 +45,18 @@ interface OpenState {
 const FREE_RUNNER_STARTER_TS = "// type or paste a snippet, then press ▷ run\n";
 const FREE_RUNNER_STARTER_PHP = "// type or paste PHP, then press ▷ run\n";
 
-export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
+export function CodeRunner({
+  currentFilePath,
+  freeOpen,
+  onFreeClose,
+  selectionRunTrigger,
+}: Props) {
   // Detected language drives the runner choice and the placeholder hints.
   // Free runner falls back to TS when the current file isn't a known
   // language (so opening the runner from anywhere still works).
   const detectedLang: Lang | null = detectLang(currentFilePath);
   const lang: Lang = detectedLang ?? "ts";
 
-  const [pill, setPill] = useState<{ anchor: Anchor; source: string } | null>(null);
   const [open, setOpen] = useState<OpenState | null>(null);
   const [mode, setMode] = useState<Mode>("guided");
   const [inputs, setInputs] = useState<Record<string, string>>({});
@@ -67,42 +78,35 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
   // entries are harmless. (Skipping the reconcile avoids a cascading
   // setState during render.)
 
-  // Selection listener — only active when there's a known language for the
-  // current file (otherwise selecting code in non-runnable files would
-  // pop a useless pill).
+  // Selection-driven open is parent-triggered: App increments
+  // selectionRunTrigger when the reviewer presses `e`. We read the
+  // current window selection at that exact moment — no auto-show on
+  // every drag, no floating pill stage. Goes straight to the panel.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    if (selectionRunTrigger === 0) return;
     if (!detectedLang) return;
-
-    function onSelection() {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return hide();
-      const text = sel.toString();
-      if (!text.trim() || text.length < 2) return hide();
-
-      const range = sel.getRangeAt(0);
-      const container = range.commonAncestorContainer as Node;
-      if (!isInsideDiff(container)) return hide();
-      if (panelRef.current && panelRef.current.contains(container as Node)) return;
-
-      const rect = range.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return hide();
-
-      setPill({
-        anchor: { top: rect.top + window.scrollY, left: rect.right + window.scrollX + 8 },
-        source: cleanSelection(text),
-      });
-    }
-
-    function hide() {
-      // Don't yank the panel out from under a user that's already opened it.
-      if (openRef.current) return;
-      setPill(null);
-      setResult(null);
-    }
-
-    document.addEventListener("selectionchange", onSelection);
-    return () => document.removeEventListener("selectionchange", onSelection);
-  }, [detectedLang]);
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const text = sel.toString();
+    if (!text.trim() || text.length < 2) return;
+    const range = sel.getRangeAt(0);
+    const container = range.commonAncestorContainer as Node;
+    if (!isInsideDiff(container)) return;
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return;
+    setOpen({
+      source: cleanSelection(text),
+      anchor: {
+        top: rect.top + window.scrollY,
+        left: rect.right + window.scrollX + 8,
+      },
+      isFree: false,
+    });
+    setMode("guided");
+    setResult(null);
+  }, [selectionRunTrigger, detectedLang]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Parent-driven free runner: when freeOpen flips true, open the panel
   // with an empty source and edit mode forced on. Cascading setState here
@@ -118,7 +122,6 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
     });
     setMode("edit");
     setResult(null);
-    setPill(null);
   }, [freeOpen, lang]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -131,7 +134,6 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
     function onKey(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
       setOpen(null);
-      setPill(null);
       setResult(null);
       if (wasFree) onFreeClose();
     }
@@ -141,16 +143,8 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
 
   function closePanel() {
     setOpen(null);
-    setPill(null);
     setResult(null);
     if (open?.isFree) onFreeClose();
-  }
-
-  function openFromPill() {
-    if (!pill) return;
-    setOpen({ source: pill.source, anchor: pill.anchor, isFree: false });
-    setMode("guided");
-    setResult(null);
   }
 
   async function onRun() {
@@ -169,28 +163,6 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
   }
 
   // ── render ────────────────────────────────────────────────────────────
-
-  // Pill: only when we have a selection and the panel isn't open yet.
-  if (!open && pill && detectedLang) {
-    return (
-      <div
-        className="coderunner coderunner--pill"
-        style={{ top: pill.anchor.top, left: pill.anchor.left }}
-        onMouseDown={(e) => {
-          const t = e.target as HTMLElement;
-          if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") e.preventDefault();
-        }}
-      >
-        <button
-          className="coderunner__pill"
-          onClick={openFromPill}
-          title={`run this ${detectedLang} selection`}
-        >
-          ▷ run {detectedLang}
-        </button>
-      </div>
-    );
-  }
 
   if (!open || !parsed) return null;
 
@@ -296,7 +268,7 @@ export function CodeRunner({ currentFilePath, freeOpen, onFreeClose }: Props) {
         ) : (
           <div className="coderunner__nohint">
             {open.source.trim()
-              ? "no inputs detected — run as-is"
+              ? "ready to run — no inputs needed"
               : "type a snippet above"}
           </div>
         )}

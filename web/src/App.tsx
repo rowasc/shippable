@@ -59,6 +59,9 @@ export default function App() {
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
   const [freeRunnerOpen, setFreeRunnerOpen] = useState(false);
+  // Counter that ticks each time the user presses `e` to run the current
+  // selection. CodeRunner reads window.getSelection on the change.
+  const [selectionRunTrigger, setSelectionRunTrigger] = useState(0);
   // Start with the plan visible so first-time reviewers see the "where to
   // start" view before the diff. They press Enter/click an entry point (or
   // Escape) to dismiss and can press `p` to reopen.
@@ -243,6 +246,9 @@ export default function App() {
           break;
         case "CLOSE_PROMPT_PICKER":
           setShowPicker(false);
+          break;
+        case "RUN_SELECTION":
+          setSelectionRunTrigger((t) => t + 1);
           break;
         case "PREV_CHANGESET":
           dispatch({
@@ -487,6 +493,7 @@ export default function App() {
         currentFilePath={file.path}
         freeOpen={freeRunnerOpen}
         onFreeClose={() => setFreeRunnerOpen(false)}
+        selectionRunTrigger={selectionRunTrigger}
       />
       {(apiKey.status.kind === "missing" ||
         apiKey.status.kind === "saved-pending-restart") && (

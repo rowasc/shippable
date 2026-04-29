@@ -142,9 +142,8 @@
 
 .coderunner__nohint {
   padding: 8px 10px;
-  color: var(--fg-mute);
+  color: var(--fg-dim);
   font-size: 11px;
-  font-style: italic;
 }
 
 .coderunner__source-view {
