@@ -29,6 +29,12 @@ function cardClick(jump: () => void) {
 interface Props {
   viewModel: InspectorViewModel;
   symbols: SymbolIndex;
+  /**
+   * Per-key draft bodies. The composer is fully controlled by this map —
+   * closing the composer (Esc / close button) does not clear the entry,
+   * so reopening restores what the user typed.
+   */
+  draftBodies: Record<string, string>;
   onJump: (c: Cursor) => void;
   /**
    * Clicking a block-scoped comment should re-select its range so the user
@@ -38,21 +44,26 @@ interface Props {
   onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onToggleAck: (hunkId: string, lineIdx: number) => void;
   onStartDraft: (key: string) => void;
-  onCancelDraft: () => void;
+  /** Close the composer without discarding the draft. */
+  onCloseDraft: () => void;
+  onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
 }
 
 export function Inspector({
   viewModel,
   symbols,
+  draftBodies,
   onJump,
   onJumpToBlock,
   onToggleAck,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: Props) {
   const vm = viewModel;
+  const draftFor = (key: string) => draftBodies[key] ?? "";
 
   return (
     <aside className="inspector">
@@ -85,6 +96,7 @@ export function Inspector({
                 key={row.lineIdx}
                 row={row}
                 symbols={symbols}
+                draftBody={draftFor(row.replyKey)}
                 onJump={onJump}
                 onAck={() => {
                   // Extract hunkId from the replyKey ("note:hunkId:lineIdx")
@@ -93,7 +105,8 @@ export function Inspector({
                 }}
                 onClickLineNo={() => onJump(row.jumpTarget)}
                 onStartDraft={() => onStartDraft(row.replyKey)}
-                onCancelDraft={onCancelDraft}
+                onCloseDraft={onCloseDraft}
+                onChangeDraft={(body) => onChangeDraft(row.replyKey, body)}
                 onSubmitReply={(body) => onSubmitReply(row.replyKey, body)}
               />
             ))}
@@ -107,11 +120,13 @@ export function Inspector({
           replies={vm.aiSummaryReplies}
           replyKey={vm.aiSummaryReplyKey}
           isDrafting={vm.aiSummaryIsDrafting}
+          draftBody={draftFor(vm.aiSummaryReplyKey)}
           jumpTarget={vm.aiSummaryJumpTarget!}
           symbols={symbols}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.aiSummaryReplyKey!)}
-          onCancelDraft={onCancelDraft}
+          onCloseDraft={onCloseDraft}
+          onChangeDraft={(body) => onChangeDraft(vm.aiSummaryReplyKey!, body)}
           onSubmitReply={(body) => onSubmitReply(vm.aiSummaryReplyKey!, body)}
         />
       )}
@@ -120,9 +135,11 @@ export function Inspector({
         <TeammateSection
           teammate={vm.teammate}
           symbols={symbols}
+          draftBody={draftFor(vm.teammate.replyKey)}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.teammate!.replyKey)}
-          onCancelDraft={onCancelDraft}
+          onCloseDraft={onCloseDraft}
+          onChangeDraft={(body) => onChangeDraft(vm.teammate!.replyKey, body)}
           onSubmitReply={(body) => onSubmitReply(vm.teammate!.replyKey, body)}
         />
       )}
@@ -130,10 +147,12 @@ export function Inspector({
       <UserCommentsSection
         vm={vm}
         symbols={symbols}
+        draftFor={draftFor}
         onJump={onJump}
         onJumpToBlock={onJumpToBlock}
         onStartDraft={onStartDraft}
-        onCancelDraft={onCancelDraft}
+        onCloseDraft={onCloseDraft}
+        onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
       />
     </aside>
@@ -143,18 +162,22 @@ export function Inspector({
 function UserCommentsSection({
   vm,
   symbols,
+  draftFor,
   onJump,
   onJumpToBlock,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: {
   vm: InspectorViewModel;
   symbols: SymbolIndex;
+  draftFor: (key: string) => string;
   onJump: (c: Cursor) => void;
   onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onStartDraft: (key: string) => void;
-  onCancelDraft: () => void;
+  onCloseDraft: () => void;
+  onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
 }) {
   return (
@@ -169,7 +192,9 @@ function UserCommentsSection({
           className="thread__start thread__start--cta"
           onClick={() => onStartDraft(vm.currentLineCommentKey)}
         >
-          + comment on L{vm.currentLineNo}{" "}
+          {draftFor(vm.currentLineCommentKey).trim()
+            ? "↻ resume draft"
+            : `+ comment on L${vm.currentLineNo}`}{" "}
           <span className="thread__start-hint">
             press <kbd>c</kbd>
           </span>
@@ -184,10 +209,14 @@ function UserCommentsSection({
             <UserThreadCard
               row={vm.draftStubRow}
               symbols={symbols}
+              draftBody={draftFor(vm.draftStubRow.threadKey)}
               onJump={onJump}
               onClickLineNo={() => onJump(vm.draftStubRow!.jumpTarget)}
               onStartDraft={() => onStartDraft(vm.draftStubRow!.threadKey)}
-              onCancelDraft={onCancelDraft}
+              onCloseDraft={onCloseDraft}
+              onChangeDraft={(body) =>
+                onChangeDraft(vm.draftStubRow!.threadKey, body)
+              }
               onSubmitReply={(body) =>
                 onSubmitReply(vm.draftStubRow!.threadKey, body)
               }
@@ -198,6 +227,7 @@ function UserCommentsSection({
               key={row.threadKey}
               row={row}
               symbols={symbols}
+              draftBody={draftFor(row.threadKey)}
               onJump={onJump}
               onClickLineNo={() => {
                 if (row.rangeHiLineIdx !== undefined && onJumpToBlock) {
@@ -211,7 +241,8 @@ function UserCommentsSection({
                 }
               }}
               onStartDraft={() => onStartDraft(row.threadKey)}
-              onCancelDraft={onCancelDraft}
+              onCloseDraft={onCloseDraft}
+              onChangeDraft={(body) => onChangeDraft(row.threadKey, body)}
               onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
             />
           ))}
@@ -224,18 +255,22 @@ function UserCommentsSection({
 function UserThreadCard({
   row,
   symbols,
+  draftBody,
   onJump,
   onClickLineNo,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: {
   row: UserCommentRowItem;
   symbols: SymbolIndex;
+  draftBody: string;
   onJump: (c: Cursor) => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
-  onCancelDraft: () => void;
+  onCloseDraft: () => void;
+  onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
 }) {
   return (
@@ -269,8 +304,10 @@ function UserThreadCard({
       <ReplyThread
         replies={row.replies}
         isDrafting={row.isDrafting}
+        draftBody={draftBody}
         onStartDraft={onStartDraft}
-        onCancelDraft={onCancelDraft}
+        onCloseDraft={onCloseDraft}
+        onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         symbols={symbols}
         onJump={onJump}
@@ -282,20 +319,24 @@ function UserThreadCard({
 function NoteCard({
   row,
   symbols,
+  draftBody,
   onJump,
   onAck,
   onClickLineNo,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: {
   row: AiNoteRowItem;
   symbols: SymbolIndex;
+  draftBody: string;
   onJump: (c: Cursor) => void;
   onAck: () => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
-  onCancelDraft: () => void;
+  onCloseDraft: () => void;
+  onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
 }) {
   return (
@@ -339,8 +380,10 @@ function NoteCard({
       <ReplyThread
         replies={row.replies}
         isDrafting={row.isDrafting}
+        draftBody={draftBody}
         onStartDraft={onStartDraft}
-        onCancelDraft={onCancelDraft}
+        onCloseDraft={onCloseDraft}
+        onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         symbols={symbols}
         onJump={onJump}
@@ -353,22 +396,26 @@ function HunkSummarySection({
   summary,
   replies,
   isDrafting,
+  draftBody,
   jumpTarget,
   symbols,
   onJump,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: {
   summary: string;
   replies: Reply[];
   replyKey: string;
   isDrafting: boolean;
+  draftBody: string;
   jumpTarget: Cursor;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
-  onCancelDraft: () => void;
+  onCloseDraft: () => void;
+  onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
 }) {
   return (
@@ -385,8 +432,10 @@ function HunkSummarySection({
         <ReplyThread
           replies={replies}
           isDrafting={isDrafting}
+          draftBody={draftBody}
           onStartDraft={onStartDraft}
-          onCancelDraft={onCancelDraft}
+          onCloseDraft={onCloseDraft}
+          onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
           symbols={symbols}
           onJump={onJump}
@@ -399,16 +448,20 @@ function HunkSummarySection({
 function TeammateSection({
   teammate,
   symbols,
+  draftBody,
   onJump,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
 }: {
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
+  draftBody: string;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
-  onCancelDraft: () => void;
+  onCloseDraft: () => void;
+  onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
 }) {
   return (
@@ -432,8 +485,10 @@ function TeammateSection({
         <ReplyThread
           replies={teammate.replies}
           isDrafting={teammate.isDrafting}
+          draftBody={draftBody}
           onStartDraft={onStartDraft}
-          onCancelDraft={onCancelDraft}
+          onCloseDraft={onCloseDraft}
+          onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
           symbols={symbols}
           onJump={onJump}

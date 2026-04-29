@@ -1,5 +1,5 @@
 import "./ReplyThread.css";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { Cursor, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { RichText } from "./RichText";
@@ -7,8 +7,16 @@ import { RichText } from "./RichText";
 interface Props {
   replies: Reply[];
   isDrafting: boolean;
+  /**
+   * Current draft body for this thread. Persists across composer
+   * close/reopen — the parent owns it. The composer is fully
+   * controlled.
+   */
+  draftBody: string;
   onStartDraft: () => void;
-  onCancelDraft: () => void;
+  /** Close the composer without discarding `draftBody`. */
+  onCloseDraft: () => void;
+  onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
@@ -17,17 +25,23 @@ interface Props {
 export function ReplyThread({
   replies,
   isDrafting,
+  draftBody,
   onStartDraft,
-  onCancelDraft,
+  onCloseDraft,
+  onChangeDraft,
   onSubmitReply,
   symbols,
   onJump,
 }: Props) {
+  // A non-empty draft on a closed composer means the user closed without
+  // sending. Surface a hint so they know it's still waiting.
+  const hasUnsentDraft = !isDrafting && draftBody.trim().length > 0;
+
   if (replies.length === 0 && !isDrafting) {
     return (
       <div className="thread thread--empty">
         <button className="thread__start" onClick={onStartDraft}>
-          + reply
+          {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       </div>
     );
@@ -54,10 +68,15 @@ export function ReplyThread({
         ))}
       </ul>
       {isDrafting ? (
-        <Composer onCancel={onCancelDraft} onSubmit={onSubmitReply} />
+        <Composer
+          body={draftBody}
+          onChange={onChangeDraft}
+          onClose={onCloseDraft}
+          onSubmit={onSubmitReply}
+        />
       ) : (
         <button className="thread__start" onClick={onStartDraft}>
-          + reply
+          {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       )}
     </div>
@@ -65,16 +84,23 @@ export function ReplyThread({
 }
 
 function Composer({
-  onCancel,
+  body,
+  onChange,
+  onClose,
   onSubmit,
 }: {
-  onCancel: () => void;
+  body: string;
+  onChange: (body: string) => void;
+  onClose: () => void;
   onSubmit: (body: string) => void;
 }) {
-  const [body, setBody] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     ref.current?.focus();
+    // Place caret at the end when reopening a saved draft so the user
+    // can keep typing without re-clicking.
+    const len = ref.current?.value.length ?? 0;
+    ref.current?.setSelectionRange(len, len);
   }, []);
   return (
     <div className="composer">
@@ -82,11 +108,11 @@ function Composer({
         ref={ref}
         className="composer__input"
         value={body}
-        onChange={(e) => setBody(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
-            onCancel();
+            onClose();
           }
           if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
@@ -98,10 +124,10 @@ function Composer({
       />
       <div className="composer__foot">
         <span className="composer__hint">
-          <kbd>⌘Enter</kbd> send · <kbd>Esc</kbd> cancel
+          <kbd>⌘Enter</kbd> send · <kbd>Esc</kbd> close (saves draft)
         </span>
-        <button className="composer__cancel" onClick={onCancel}>
-          cancel
+        <button className="composer__cancel" onClick={onClose}>
+          close
         </button>
         <button
           className="composer__send"

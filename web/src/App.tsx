@@ -57,6 +57,10 @@ export default function App() {
   // Escape) to dismiss and can press `p` to reopen.
   const [showPlan, setShowPlan] = useState(true);
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
+  // Composer drafts persist across open/close. Closing the composer
+  // (Esc or the close button) leaves the entry intact, so reopening
+  // restores the in-progress text. Submitting clears the entry.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
@@ -325,6 +329,7 @@ export default function App() {
               draftingKey,
             })}
             symbols={symbolIndex}
+            draftBodies={drafts}
             onJump={jumpTo}
             onJumpToBlock={(cursor, selection) =>
               dispatch({ type: "SET_CURSOR", cursor, selection })
@@ -333,7 +338,10 @@ export default function App() {
               dispatch({ type: "TOGGLE_ACK", hunkId, lineIdx })
             }
             onStartDraft={(key) => setDraftingKey(key)}
-            onCancelDraft={() => setDraftingKey(null)}
+            onCloseDraft={() => setDraftingKey(null)}
+            onChangeDraft={(key, body) =>
+              setDrafts((prev) => ({ ...prev, [key]: body }))
+            }
             onSubmitReply={(key, body) => {
               dispatch({
                 type: "ADD_REPLY",
@@ -344,6 +352,12 @@ export default function App() {
                   body,
                   createdAt: new Date().toISOString(),
                 },
+              });
+              setDrafts((prev) => {
+                if (!(key in prev)) return prev;
+                const next = { ...prev };
+                delete next[key];
+                return next;
               });
               setDraftingKey(null);
             }}
