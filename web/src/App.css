@@ -72,6 +72,10 @@ body,
   cursor: default;
   opacity: 0.85;
 }
+.topbar__btn--danger:hover:not(:disabled) {
+  color: var(--red);
+  border-color: var(--red);
+}
 /* Plan chip — sits next to the title; reads as part of the changeset
    metadata. Brighter when the modal is open so the user knows where
    the visible plan came from. */

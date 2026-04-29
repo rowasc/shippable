@@ -24,6 +24,7 @@ import type { SymbolIndex } from "./symbols";
 import type { ChangeSet, Cursor, EvidenceRef } from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import { KEYMAP } from "./keymap";
+import { clearSession, loadSession, saveSession } from "./persist";
 import { useApiKey } from "./useApiKey";
 import { useTheme } from "./useTheme";
 import {
@@ -36,22 +37,54 @@ import {
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
+  // Read the persisted session once at boot. We need the result both for
+  // the reducer init (state hydration) and for restoring drafts below;
+  // calling loadSession twice would re-validate and re-walk the
+  // changeset tree, so cache the result in a ref.
+  const hydratedRef = useRef(loadSession(CHANGESETS));
   const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
-    // ?cs=<id> (or the short `?c=<n>`) loads a specific sample changeset.
-    // Accepts the full id ("cs-09") or the numeric tail ("09" / "9").
     const initial = initialState(changesets);
+
+    // ?cs=<id> (or the short `?c=<n>`) wins over the persisted cursor —
+    // a URL param is an explicit "go here" gesture; persistence is
+    // background restore.
     const params = new URLSearchParams(window.location.search);
     const wanted = params.get("cs") ?? params.get("c");
-    if (!wanted) return initial;
-    const target = changesets.find(
-      (c) => c.id === wanted || c.id === `cs-${wanted}` || c.id.replace(/^cs-/, "") === wanted,
-    );
-    if (!target) return initial;
-    const file = target.files[0];
-    const hunk = file.hunks[0];
+    if (wanted) {
+      const target = changesets.find(
+        (c) =>
+          c.id === wanted ||
+          c.id === `cs-${wanted}` ||
+          c.id.replace(/^cs-/, "") === wanted,
+      );
+      if (target) {
+        const file = target.files[0];
+        const hunk = file.hunks[0];
+        return {
+          ...initial,
+          cursor: {
+            changesetId: target.id,
+            fileId: file.id,
+            hunkId: hunk.id,
+            lineIdx: 0,
+          },
+        };
+      }
+    }
+
+    const hydrated = hydratedRef.current.state;
+    if (!hydrated) return initial;
     return {
       ...initial,
-      cursor: { changesetId: target.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
+      cursor: hydrated.cursor,
+      readLines: hydrated.readLines,
+      reviewedFiles: hydrated.reviewedFiles,
+      dismissedGuides: hydrated.dismissedGuides,
+      activeSkills: hydrated.activeSkills,
+      ackedNotes: hydrated.ackedNotes,
+      // initialState seeds replies with SEED_REPLIES; merge those with
+      // any user replies/comments the persisted session captured.
+      replies: { ...initial.replies, ...hydrated.replies },
     };
   });
   const apiKey = useApiKey();
@@ -70,9 +103,21 @@ export default function App() {
   // Composer drafts persist across open/close. Closing the composer
   // (Esc or the close button) leaves the entry intact, so reopening
   // restores the in-progress text. Submitting clears the entry.
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Hydrated from localStorage on boot (see hydratedRef above).
+  const [drafts, setDrafts] = useState<Record<string, string>>(
+    () => hydratedRef.current.drafts,
+  );
   const [showPicker, setShowPicker] = useState(false);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
+
+  // Debounced session save. Every state/drafts change schedules a write
+  // 300ms out; rapid edits coalesce so j/k navigation doesn't thrash
+  // localStorage. The effect cleanup cancels a pending write when the
+  // dependencies change again before the timer fires.
+  useEffect(() => {
+    const t = window.setTimeout(() => saveSession(state, drafts), 300);
+    return () => window.clearTimeout(t);
+  }, [state, drafts]);
   // One AbortController per in-flight run, keyed by run id. Lives in a ref
   // so we can abort without re-rendering and so prior runs survive when a
   // new run starts.
@@ -348,6 +393,22 @@ export default function App() {
           title="load a changeset from URL, file, or paste (shift+L)"
         >
           + load
+        </button>
+        <button
+          className="topbar__btn topbar__btn--danger"
+          onClick={() => {
+            if (
+              window.confirm(
+                "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
+              )
+            ) {
+              clearSession();
+              window.location.reload();
+            }
+          }}
+          title="clear persisted progress and reload"
+        >
+          × reset
         </button>
       </header>
 
