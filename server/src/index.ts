@@ -32,6 +32,9 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (!isRequestAllowed(check, fetchSite)) {
+      console.warn(
+        `[server] denied: origin=${JSON.stringify(req.headers.origin)} parsed=${JSON.stringify(check)} fetch-site=${fetchSite}`,
+      );
       res.writeHead(403, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "request not allowed" }));
       return;
@@ -112,7 +115,15 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 function parseOrigin(value: string): string | null {
   try {
-    return new URL(value).origin;
+    const url = new URL(value);
+    // WHATWG URL spec returns the literal string "null" for `.origin` of any
+    // non-special scheme (tauri://, app://, file://, etc.), which would
+    // collapse every tauri:// URL into the same allowlist entry. Reconstruct
+    // a stable scheme+host form so each non-special origin stays distinct.
+    if (url.origin === "null") {
+      return `${url.protocol}//${url.host}`;
+    }
+    return url.origin;
   } catch {
     return null;
   }
