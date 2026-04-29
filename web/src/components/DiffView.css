@@ -82,7 +82,9 @@
 .expandbar__main--done {
   cursor: default;
   color: var(--fg-mute);
-  font-style: italic;
+}
+.expandbar__main--done .expandbar__arrow {
+  color: var(--green);
 }
 .expandbar__main--done:hover {
   background: transparent;
@@ -364,6 +366,17 @@
   width: 2px;
   background: var(--accent);
   animation: blink 1s steps(2) infinite;
+}
+/* Pause the blink when the window loses focus — there's nothing to
+   indicate while the user is in another tab, and animations on
+   off-screen pages still cost. */
+body:not(:focus-within) .line--cursor::after {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .line--cursor::after {
+    animation: none;
+  }
 }
 @keyframes blink {
   50% { opacity: 0; }

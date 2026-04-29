@@ -24,6 +24,15 @@
   text-transform: none;
   letter-spacing: 0;
 }
+/* "viewing as @you" — surfaces the hardcoded reply attribution so it
+   stops looking like a bug. Sits in the middle of the inspector header
+   between the label and the keyboard hint. */
+.inspector__h-viewer {
+  color: var(--fg-mute);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10.5px;
+}
 .inspector__sec {
   padding: 10px 12px;
   border-bottom: 1px dashed var(--border);

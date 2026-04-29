@@ -13,14 +13,17 @@ function keyLabel(key: string): string {
   }
 }
 
-/** Build a display string for a single KeyEntry's key chord. */
+/**
+ * Build a display string for a single KeyEntry's key chord. Shift is
+ * always rendered as `⇧X` so the dialog stays consistent — the previous
+ * "uppercase letters imply shift" branch put `M` next to `⇧Tab` in the
+ * same table, which read as two different conventions.
+ */
 function chordLabel(key: string, shift?: boolean): string {
   if (shift) {
-    // For letter keys the uppercase already implies shift; avoid "⇧L".
-    const isLetter = key.length === 1 && key !== key.toLowerCase();
-    return isLetter ? key : `⇧${key}`;
+    const base = key.length === 1 ? key.toLowerCase() : keyLabel(key);
+    return `⇧${base}`;
   }
-  if (key === "Tab") return "Tab";
   return keyLabel(key);
 }
 
@@ -89,7 +92,10 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
             </tr>
           </tbody>
         </table>
-        <div className="help__hint">Lines you&apos;ve visited are marked as reviewed.</div>
+        <div className="help__hint">
+          Lines you visit are marked as <em>read</em>. Press{" "}
+          <kbd>⇧m</kbd> to sign off the current file as reviewed.
+        </div>
       </div>
     </div>
   );

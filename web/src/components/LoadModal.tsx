@@ -15,6 +15,15 @@ export function LoadModal({ onLoad, onClose }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const urlIsValid = isValidHttpUrl(url);
+
+  /** Outside-click should not yank a long pasted diff or a typed URL out
+   *  from under the user — only close when there's nothing to lose. */
+  function tryCloseFromBackdrop() {
+    if (url.trim() || pasted.trim()) return;
+    onClose();
+  }
+
   function handleParsedText(text: string, id: string, title?: string) {
     try {
       const cs = parseDiff(text, { id, title });
@@ -29,16 +38,25 @@ export function LoadModal({ onLoad, onClose }: Props) {
   }
 
   async function loadFromUrl() {
-    if (!url.trim()) return;
+    if (!urlIsValid) return;
     setErr(null);
     setUrlBusy(true);
     try {
       const res = await fetch(url);
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const text = await res.text();
       handleParsedText(text, idFromUrl(url), titleFromUrl(url));
     } catch (e) {
-      setErr(e instanceof Error ? `fetch failed: ${e.message}` : "fetch failed");
+      // TypeError on the fetch promise typically means CORS / network
+      // refused — distinguish so users don't waste time looking for a
+      // status code that won't ever come.
+      const isLikelyCors = e instanceof TypeError;
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(
+        isLikelyCors
+          ? `Couldn't reach that URL — likely a CORS rejection from the host. Check devtools for the network error, or download the diff and use Upload.`
+          : `fetch failed: ${msg}`,
+      );
     } finally {
       setUrlBusy(false);
     }
@@ -61,7 +79,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
   }
 
   return (
-    <div className="modal" onClick={onClose}>
+    <div className="modal" onClick={tryCloseFromBackdrop}>
       <div className="modal__box" onClick={(e) => e.stopPropagation()}>
         <header className="modal__h">
           <span className="modal__h-label">load changeset</span>
@@ -88,7 +106,12 @@ export function LoadModal({ onLoad, onClose }: Props) {
             <button
               className="modal__btn modal__btn--primary"
               onClick={loadFromUrl}
-              disabled={urlBusy || !url.trim()}
+              disabled={urlBusy || !urlIsValid}
+              title={
+                !urlIsValid && url.trim()
+                  ? "URL must start with http:// or https://"
+                  : undefined
+              }
             >
               {urlBusy ? "loading…" : "load"}
             </button>
@@ -161,4 +184,17 @@ function titleFromUrl(url: string): string {
 
 function idFromFilename(name: string): string {
   return name.replace(/\.(diff|patch)$/i, "") || `file-${Date.now().toString(36)}`;
+}
+
+/** Pre-flight check before the fetch — disables the load button when
+ *  the field is empty or obviously not an http(s) URL. */
+function isValidHttpUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  try {
+    const u = new URL(trimmed);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
 }

@@ -78,10 +78,18 @@ export function Inspector({
     currentNoteRef.current?.scrollIntoView({ block: "nearest" });
   }, [currentNoteLineIdx]);
 
+  // The location card duplicates the line text that the matching AI
+  // note already shows when the cursor is on a noted line — collapse to
+  // the path-only label in that case so the inspector doesn't repeat
+  // itself. When there's no matching note, the code preview earns its
+  // space back as the only "what am I looking at" cue.
+  const cursorOnNote = currentNoteLineIdx !== null;
+
   return (
     <aside className="inspector">
       <header className="inspector__h">
         <span className="inspector__h-label">inspector</span>
+        <span className="inspector__h-viewer">viewing as @you</span>
         <span className="inspector__h-hint">
           <kbd>i</kbd> · <kbd>a</kbd> ack · <kbd>r</kbd> reply
         </span>
@@ -89,10 +97,12 @@ export function Inspector({
 
       <section className="inspector__sec">
         <div className="inspector__loc">{vm.locationLabel}</div>
-        <div className={`inspector__code inspector__code--${vm.lineKind}`}>
-          <span className="inspector__code-sign">{vm.lineSign}</span>
-          {vm.lineText ? <CodeText text={vm.lineText} language={vm.language} /> : " "}
-        </div>
+        {!cursorOnNote && (
+          <div className={`inspector__code inspector__code--${vm.lineKind}`}>
+            <span className="inspector__code-sign">{vm.lineSign}</span>
+            {vm.lineText ? <CodeText text={vm.lineText} language={vm.language} /> : " "}
+          </div>
+        )}
       </section>
 
       <section className="inspector__sec">

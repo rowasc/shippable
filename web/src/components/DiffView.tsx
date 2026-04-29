@@ -163,7 +163,7 @@ function ExpandBar({
         </button>
       ) : (
         <span className="expandbar__main expandbar__main--done">
-          <span className="expandbar__arrow">{arrow}</span> all {bar.maxLevel} block
+          <span className="expandbar__arrow">✓</span> all {bar.maxLevel} block
           {bar.maxLevel === 1 ? "" : "s"} {dir} revealed
         </span>
       )}

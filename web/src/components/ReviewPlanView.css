@@ -222,8 +222,9 @@
   background: var(--cursor-bg);
 }
 .plan__entry-btn:disabled {
-  cursor: default;
-  opacity: 0.85;
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: saturate(0.6);
 }
 .plan__entry-rank {
   color: var(--fg-mute);

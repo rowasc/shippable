@@ -43,6 +43,18 @@
   background: var(--border);
   color: var(--blue);
 }
+/* Inside reply bodies, the hover-to-blue collides with @author chips
+   (also blue). Keep the underline-as-affordance but stay on accent so
+   identity remains the only blue thing in a thread. */
+.reply__body .sym:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
+  text-decoration-style: solid;
+}
+.reply__body .sym--code:hover {
+  background: var(--border);
+  color: var(--accent);
+}
 .rt-code {
   background: var(--bg-3);
   padding: 0 3px;
