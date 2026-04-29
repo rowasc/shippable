@@ -103,7 +103,17 @@ export interface LineSelection {
 export interface ReviewState {
   cursor: Cursor;
   changesets: ChangeSet[];
-  reviewedLines: Record<string, Set<number>>;
+  /**
+   * Lines the cursor has visited, by hunk id. Auto-populated on every
+   * cursor move. Renders as a dim gutter rail. Coverage from this map
+   * is the "read" signal — informational, not a verdict.
+   */
+  readLines: Record<string, Set<number>>;
+  /**
+   * File ids the reviewer has explicitly signed off on, via Shift+M.
+   * The single verdict gesture. Toggle: pressing again clears the file.
+   */
+  reviewedFiles: Set<string>;
   dismissedGuides: Set<string>;
   activeSkills: Set<string>;
   /** keys are `${hunkId}:${lineIdx}` */

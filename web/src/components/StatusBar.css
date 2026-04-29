@@ -11,8 +11,11 @@
 .statusbar__cell {
   color: var(--fg);
 }
+.statusbar__cell--read {
+  color: var(--fg-dim);
+}
 .statusbar__cell--cov {
-  color: var(--yellow);
+  color: var(--green);
 }
 .statusbar__spacer {
   flex: 1;

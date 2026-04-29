@@ -25,14 +25,14 @@ export function maybeSuggest(
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId);
   if (!hunk || !hunk.referencesSymbols?.length) return null;
 
-  if (hunkCoverage(hunk, state.reviewedLines) < 0.5) return null;
+  if (hunkCoverage(hunk, state.readLines) < 0.5) return null;
 
   for (const symbol of hunk.referencesSymbols) {
     for (const otherFile of cs.files) {
       if (otherFile.id === file.id) continue;
       for (const otherHunk of otherFile.hunks) {
         if (!otherHunk.definesSymbols?.includes(symbol)) continue;
-        if (hunkCoverage(otherHunk, state.reviewedLines) > 0.8) continue;
+        if (hunkCoverage(otherHunk, state.readLines) > 0.8) continue;
         const guideId = `${hunk.id}->${otherHunk.id}:${symbol}`;
         if (state.dismissedGuides.has(guideId)) continue;
         return {

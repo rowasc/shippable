@@ -25,7 +25,7 @@ export type ActionId =
   | "TOGGLE_PLAN"
   | "CLOSE_PLAN"
   | "TOGGLE_ACK"
-  | "MARK_FILE_REVIEWED"
+  | "TOGGLE_FILE_REVIEWED"
   | "START_REPLY"
   | "START_COMMENT"
   | "ACCEPT_GUIDE"
@@ -76,7 +76,7 @@ export const KEYMAP: KeyEntry[] = [
   { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK" },
   { key: "r", label: "reply to AI note on current line",     group: "review", action: "START_REPLY",   when: "lineHasAiNote" },
   { key: "c", label: "start a new comment on current line",  group: "review", action: "START_COMMENT" },
-  { key: "M", shift: true, label: "mark current file as read (toggle)", group: "review", action: "MARK_FILE_REVIEWED" },
+  { key: "M", shift: true, label: "sign off on current file (toggle)", group: "review", action: "TOGGLE_FILE_REVIEWED" },
 
   // ── guide ───────────────────────────────────────────────────────────────────
   { key: "Enter",  label: "accept guide", group: "guide", action: "ACCEPT_GUIDE",  when: "hasSuggestion" },

@@ -18,6 +18,16 @@
   color: var(--fg-dim);
   margin-left: 8px;
 }
+.diff__path-reviewed {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border: 1px solid var(--green);
+  color: var(--green);
+  border-radius: 2px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
 .diff__spacer {
   flex: 1;
 }
@@ -136,7 +146,7 @@
   border-bottom: 1px solid var(--border);
 }
 .hunk__meter {
-  color: var(--yellow);
+  color: var(--fg-dim);
   font-variant-numeric: tabular-nums;
   min-width: 34px;
 }
@@ -288,7 +298,8 @@
 .line--del .line__text:not(.line__text--highlighted) {
   color: var(--red);
 }
-.line--reviewed::before {
+/* "read" rail: cursor visited this line. Auto. Dim — informational, not a verdict. */
+.line--read::before {
   content: "";
   position: absolute;
   left: 0;
@@ -297,8 +308,16 @@
   width: 2px;
   background: var(--reviewed-mark);
 }
-.line--reviewed .line__text {
-  opacity: 0.7;
+.line--read .line__text {
+  opacity: 0.85;
+}
+/* When the whole file is signed off, every line picks up a soft green
+   tint regardless of read-state. This makes flipping Shift+M feel decisive. */
+.diff--file-reviewed .line {
+  background-color: rgba(166, 227, 161, 0.04);
+}
+.diff--file-reviewed .line--add {
+  background-color: rgba(166, 227, 161, 0.10);
 }
 .line--selected {
   background: var(--cursor-bg);

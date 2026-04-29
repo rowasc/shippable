@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useState } from "react";
 import "./App.css";
 import { CHANGESETS } from "./fixtures";
-import { initialState, reducer, changesetCoverage } from "./state";
+import { initialState, reducer, changesetCoverage, reviewedFilesCount } from "./state";
 import { maybeSuggest } from "./guide";
 import { usePlan } from "./usePlan";
 import { Sidebar } from "./components/Sidebar";
@@ -163,8 +163,8 @@ export default function App() {
             lineIdx: state.cursor.lineIdx,
           });
           break;
-        case "MARK_FILE_REVIEWED":
-          dispatch({ type: "MARK_FILE_REVIEWED", fileId: state.cursor.fileId });
+        case "TOGGLE_FILE_REVIEWED":
+          dispatch({ type: "TOGGLE_FILE_REVIEWED", fileId: state.cursor.fileId });
           break;
         case "START_REPLY":
           setDraftingKey(
@@ -229,7 +229,8 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [showHelp, showPlan, state.cursor, state.changesets, state.selection, suggestion, line]);
 
-  const coverage = changesetCoverage(cs, state.reviewedLines);
+  const readCoverage = changesetCoverage(cs, state.readLines);
+  const reviewedFiles = reviewedFilesCount(cs, state.reviewedFiles);
   const fileIdx = cs.files.findIndex((f) => f.id === file.id);
   const hunkIdx = file.hunks.findIndex((h) => h.id === hunk.id);
   const guideViewModel = suggestion
@@ -272,7 +273,8 @@ export default function App() {
             files: cs.files,
             skills: cs.skills,
             currentFileId: state.cursor.fileId,
-            reviewedLines: state.reviewedLines,
+            readLines: state.readLines,
+            reviewedFiles: state.reviewedFiles,
             activeSkills: state.activeSkills,
           })}
           onPickFile={(fileId) => {
@@ -294,7 +296,8 @@ export default function App() {
             file,
             currentHunkId: hunk.id,
             cursorLineIdx: state.cursor.lineIdx,
-            reviewed: state.reviewedLines,
+            read: state.readLines,
+            isFileReviewed: state.reviewedFiles.has(file.id),
             acked: state.ackedNotes,
             replies: state.replies,
             expandLevelAbove: state.expandLevelAbove,
@@ -416,7 +419,8 @@ export default function App() {
           hunkIdx,
           totalLines: hunk.lines.length,
           lineIdx: state.cursor.lineIdx,
-          coverage,
+          readCoverage,
+          reviewedFiles,
         })}
       />
     </div>

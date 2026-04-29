@@ -148,7 +148,8 @@ function DiffGalleryItem({ fixture }: { fixture: DiffGalleryFixture }) {
           itemState.cursor.hunkId === hunk.id
             ? itemState.cursor.lineIdx
             : fixture.cursorLineIdx,
-        reviewed: itemState.reviewedLines,
+        read: itemState.readLines,
+        isFileReviewed: itemState.reviewedFiles.has(file.id),
         acked: itemState.ackedNotes,
         replies: itemState.replies,
         expandLevelAbove: itemState.expandLevelAbove,

@@ -30,10 +30,15 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
   }, [currentHunk?.id, cursorLineIdx, viewModel.fileId, viewModel.fileFullyExpanded]);
 
   return (
-    <main className="diff">
+    <main className={`diff ${viewModel.isFileReviewed ? "diff--file-reviewed" : ""}`}>
       <header className="diff__path">
         <span className="diff__path-icon">▚</span> {viewModel.path}
         <span className="diff__path-status">[{viewModel.status}]</span>
+        {viewModel.isFileReviewed && (
+          <span className="diff__path-reviewed" title="signed off · Shift+M to clear">
+            ✓ reviewed
+          </span>
+        )}
         <span className="diff__spacer" />
         {viewModel.canExpandFile && (
           <button
@@ -239,10 +244,12 @@ function Line({
     <div
       ref={cursorRef}
       className={`line line--${line.kind} ${line.isCursor ? "line--cursor" : ""} ${
-        line.isReviewed ? "line--reviewed" : ""
-      } ${line.isSelected ? "line--selected" : ""} ${sev ? `line--ai-${sev}` : ""} ${
-        line.isAcked ? "line--ai-acked" : ""
-      } ${line.hasUserComment ? "line--has-comment" : ""}`}
+        line.isRead ? "line--read" : ""
+      } ${line.isSelected ? "line--selected" : ""} ${
+        sev ? `line--ai-${sev}` : ""
+      } ${line.isAcked ? "line--ai-acked" : ""} ${
+        line.hasUserComment ? "line--has-comment" : ""
+      }`}
       title={line.aiNote?.summary ?? (line.hasUserComment ? "user comment" : undefined)}
     >
       <span className="line__old">{line.oldNo ?? ""}</span>

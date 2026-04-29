@@ -22,8 +22,8 @@ export interface DiffLineViewModel {
   newNo?: number;
   /** True when this is the cursor position. */
   isCursor: boolean;
-  /** True when this line has been visited/reviewed. */
-  isReviewed: boolean;
+  /** True when the cursor has visited this line. Drives the dim "read" rail. */
+  isRead: boolean;
   /** True when this line falls inside the active shift-extended selection. */
   isSelected: boolean;
   /** The AI note attached to this line, or undefined. */
@@ -110,6 +110,8 @@ export interface DiffViewModel {
   status: string;
   /** File ID (needed for toggle-expand-file callback). */
   fileId: string;
+  /** True when the reviewer has signed off on this file. */
+  isFileReviewed: boolean;
   /** True when a full-file expand is available for this file. */
   canExpandFile: boolean;
   /** True when the file is currently in full-expand mode. */
@@ -129,7 +131,10 @@ export interface BuildDiffViewModelArgs {
   file: DiffFile;
   currentHunkId: string;
   cursorLineIdx: number;
-  reviewed: Record<string, Set<number>>;
+  /** Auto-tracked read lines (cursor visits). Drives the dim gutter rail. */
+  read: Record<string, Set<number>>;
+  /** True when the reviewer has signed off on the current file. */
+  isFileReviewed: boolean;
   acked: Set<string>;
   replies: Record<string, string[]> | Record<string, unknown[]>;
   expandLevelAbove: Record<string, number>;
@@ -143,7 +148,8 @@ export function buildDiffViewModel({
   file,
   currentHunkId,
   cursorLineIdx,
-  reviewed,
+  read,
+  isFileReviewed,
   acked,
   replies,
   expandLevelAbove,
@@ -171,8 +177,10 @@ export function buildDiffViewModel({
     ? []
     : file.hunks.map((hunk) => {
         const isCurrent = hunk.id === currentHunkId;
-        const reviewedForHunk = reviewed[hunk.id] ?? new Set<number>();
-        const coverage = hunkCoverage(hunk, reviewed);
+        const readForHunk = read[hunk.id] ?? new Set<number>();
+        // Hunk-header % shows read coverage. The verdict signal lives at
+        // the file level; per-hunk we just expose progress.
+        const coverage = hunkCoverage(hunk, read);
 
         // Expand-above: blocks ordered farthest-first for top-to-bottom rendering.
         const aboveBlocks = hunk.expandAbove ?? [];
@@ -249,7 +257,7 @@ export function buildDiffViewModel({
             oldNo: line.oldNo,
             newNo: line.newNo,
             isCursor: isCurrent && i === cursorLineIdx,
-            isReviewed: reviewedForHunk.has(i),
+            isRead: readForHunk.has(i),
             isSelected: selForHunk !== null && i >= selLo && i <= selHi,
             aiNote: line.aiNote,
             isAcked,
@@ -281,6 +289,7 @@ export function buildDiffViewModel({
     language: file.language,
     status: file.status,
     fileId: file.id,
+    isFileReviewed,
     canExpandFile,
     fileFullyExpanded,
     fullFileLines,
@@ -296,11 +305,13 @@ export interface SidebarFileItem {
   status: FileStatus;
   /** Pre-computed status character: "A" | "M" | "D" | "R" | "?". */
   statusChar: string;
-  /** 0–1 fraction of lines visited. */
-  coverage: number;
-  /** Pre-computed coverage percentage string, e.g. "42". */
-  coveragePct: number;
-  /** Pre-computed meter bar string, e.g. "██░░". */
+  /** True when the reviewer has signed off on this file. The verdict signal. */
+  isReviewed: boolean;
+  /** 0–1 fraction of lines the cursor has visited. */
+  readCoverage: number;
+  /** Pre-computed read percentage, e.g. 42. */
+  readPct: number;
+  /** Pre-computed read meter (8-block bar): e.g. "█████░░░". */
   meterBar: string;
   /** True when this is the file the cursor is currently in. */
   isCurrent: boolean;
@@ -332,7 +343,8 @@ export interface BuildSidebarViewModelArgs {
   files: Array<{ id: string; path: string; status: FileStatus; hunks: { id: string; lines: unknown[] }[] }>;
   skills: Array<{ id: string; label: string; reason: string }>;
   currentFileId: string;
-  reviewedLines: Record<string, Set<number>>;
+  readLines: Record<string, Set<number>>;
+  reviewedFiles: Set<string>;
   activeSkills: Set<string>;
 }
 
@@ -340,21 +352,25 @@ export function buildSidebarViewModel({
   files,
   skills,
   currentFileId,
-  reviewedLines,
+  readLines,
+  reviewedFiles,
   activeSkills,
 }: BuildSidebarViewModelArgs): SidebarViewModel {
   const fileItems: SidebarFileItem[] = files.map((f) => {
-    const coverage = fileCoverage(f, reviewedLines);
-    const coveragePct = Math.round(coverage * 100);
-    const blocks = Math.round(coverage * 4);
-    const meterBar = "█".repeat(blocks) + "░".repeat(4 - blocks);
+    const readCoverage = fileCoverage(f, readLines);
+    const readPct = Math.round(readCoverage * 100);
+    // 8 blocks gives a finer signal than 4 — the old bar collapsed
+    // 25–50% into a single block, which read as more progress than there was.
+    const blocks = Math.round(readCoverage * 8);
+    const meterBar = "█".repeat(blocks) + "░".repeat(8 - blocks);
     return {
       fileId: f.id,
       path: f.path,
       status: f.status,
       statusChar: fileStatusChar(f.status),
-      coverage,
-      coveragePct,
+      isReviewed: reviewedFiles.has(f.id),
+      readCoverage,
+      readPct,
       meterBar,
       isCurrent: f.id === currentFileId,
     };
@@ -379,8 +395,10 @@ export interface StatusBarViewModel {
   hunkDisplay: string;
   /** 1-based current file number / total files. */
   fileDisplay: string;
-  /** Coverage percentage rounded to nearest integer. */
-  coverageDisplay: string;
+  /** "read NN%" — fraction of lines the cursor has visited. */
+  readDisplay: string;
+  /** "files X/Y" — how many files the reviewer has signed off on. */
+  filesDisplay: string;
 }
 
 export interface BuildStatusBarViewModelArgs {
@@ -396,8 +414,10 @@ export interface BuildStatusBarViewModelArgs {
   totalLines: number;
   /** 0-based cursor line index within the current hunk. */
   lineIdx: number;
-  /** 0–1 overall changeset coverage fraction. */
-  coverage: number;
+  /** 0–1 overall changeset read fraction (cursor visits). */
+  readCoverage: number;
+  /** Count of files the reviewer has signed off on. */
+  reviewedFiles: number;
 }
 
 export function buildStatusBarViewModel({
@@ -407,13 +427,15 @@ export function buildStatusBarViewModel({
   hunkIdx,
   totalLines,
   lineIdx,
-  coverage,
+  readCoverage,
+  reviewedFiles,
 }: BuildStatusBarViewModelArgs): StatusBarViewModel {
   return {
     lineDisplay: `line ${lineIdx + 1}/${totalLines}`,
     hunkDisplay: `hunk ${hunkIdx + 1}/${totalHunks}`,
     fileDisplay: `file ${fileIdx + 1}/${totalFiles}`,
-    coverageDisplay: `reviewed ${Math.round(coverage * 100)}%`,
+    readDisplay: `read ${Math.round(readCoverage * 100)}%`,
+    filesDisplay: `reviewed ${reviewedFiles}/${totalFiles}`,
   };
 }
 

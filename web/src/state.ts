@@ -9,7 +9,8 @@ export function initialState(seed: ChangeSet[]): ReviewState {
   return {
     cursor: { changesetId: cs.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
     changesets: seed,
-    reviewedLines: markLine({}, hunk.id, 0),
+    readLines: addLine({}, hunk.id, 0),
+    reviewedFiles: new Set(),
     dismissedGuides: new Set(),
     activeSkills: new Set(),
     ackedNotes: new Set(),
@@ -21,7 +22,7 @@ export function initialState(seed: ChangeSet[]): ReviewState {
   };
 }
 
-function markLine(
+function addLine(
   existing: Record<string, Set<number>>,
   hunkId: string,
   lineIdx: number,
@@ -45,7 +46,7 @@ export type Action =
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
-  | { type: "MARK_FILE_REVIEWED"; fileId: string };
+  | { type: "TOGGLE_FILE_REVIEWED"; fileId: string };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
   switch (action.type) {
@@ -58,9 +59,6 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     case "MOVE_FILE":
       return moveFile(state, action.delta);
     case "SET_CURSOR": {
-      // applyCursor always collapses; if the caller wants to restore a
-      // selection (e.g. clicking a block comment should re-select its range),
-      // overlay it after.
       const applied = applyCursor(state, action.cursor, false);
       if (action.selection === undefined) return applied;
       return { ...applied, selection: action.selection };
@@ -80,7 +78,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         ...state,
         cursor,
         selection: null,
-        reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
+        readLines: addLine(state.readLines, hunk.id, 0),
       };
     }
     case "LOAD_CHANGESET": {
@@ -103,7 +101,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
           lineIdx: 0,
         },
         selection: null,
-        reviewedLines: markLine(state.reviewedLines, hunk.id, 0),
+        readLines: addLine(state.readLines, hunk.id, 0),
       };
     }
     case "TOGGLE_SKILL": {
@@ -143,27 +141,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "TOGGLE_EXPAND_FILE":
       return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
-    case "MARK_FILE_REVIEWED": {
-      const cs = state.changesets.find((c) => c.id === state.cursor.changesetId);
-      if (!cs) return state;
-      const file = cs.files.find((f) => f.id === action.fileId);
-      if (!file) return state;
-
-      // Toggle: if the file is already fully covered, clear its marks;
-      // otherwise mark every line of every hunk as reviewed.
-      const isFullyReviewed = fileCoverage(file, state.reviewedLines) >= 1;
-      const next: Record<string, Set<number>> = { ...state.reviewedLines };
-      for (const h of file.hunks) {
-        if (isFullyReviewed) {
-          next[h.id] = new Set();
-        } else {
-          const set = new Set(next[h.id] ?? []);
-          for (let i = 0; i < h.lines.length; i++) set.add(i);
-          next[h.id] = set;
-        }
-      }
-      return { ...state, reviewedLines: next };
-    }
+    case "TOGGLE_FILE_REVIEWED":
+      return { ...state, reviewedFiles: togglein(state.reviewedFiles, action.fileId) };
   }
 }
 
@@ -187,8 +166,6 @@ function moveLine(
 
   if (nextLineIdx < 0) {
     if (hunkIdx === 0) return applyCursor(state, state.cursor, extend);
-    // Crossing a hunk boundary while extending would leave an orphan
-    // selection; we collapse instead and let the cursor move normally.
     const prev = file.hunks[hunkIdx - 1];
     return applyCursor(
       state,
@@ -241,11 +218,9 @@ function moveFile(state: ReviewState, delta: number): ReviewState {
 }
 
 /**
- * Apply a new cursor. When `extend` is true and the new cursor stays within
- * the same hunk, the selection's head moves with it (anchor is set to the
- * previous cursor if no selection existed). Any other case collapses the
- * selection to null — crossing hunks while extending would produce an
- * orphaned selection, and plain moves should clear a stale selection.
+ * Apply a new cursor. Always extends the read track. Selection state
+ * follows the same rules as before — extending only stays alive within
+ * a hunk.
  */
 function applyCursor(
   state: ReviewState,
@@ -267,43 +242,53 @@ function applyCursor(
     ...state,
     cursor,
     selection,
-    reviewedLines: markLine(state.reviewedLines, cursor.hunkId, cursor.lineIdx),
+    readLines: addLine(state.readLines, cursor.hunkId, cursor.lineIdx),
   };
 }
 
 export function hunkCoverage(
   hunk: { id: string; lines: unknown[] },
-  reviewed: Record<string, Set<number>>,
+  lines: Record<string, Set<number>>,
 ): number {
   const total = hunk.lines.length;
-  const seen = reviewed[hunk.id]?.size ?? 0;
+  const seen = lines[hunk.id]?.size ?? 0;
   return total === 0 ? 0 : seen / total;
 }
 
 export function fileCoverage(
   file: { hunks: { id: string; lines: unknown[] }[] },
-  reviewed: Record<string, Set<number>>,
+  lines: Record<string, Set<number>>,
 ): number {
   let total = 0;
   let seen = 0;
   for (const h of file.hunks) {
     total += h.lines.length;
-    seen += reviewed[h.id]?.size ?? 0;
+    seen += lines[h.id]?.size ?? 0;
   }
   return total === 0 ? 0 : seen / total;
 }
 
 export function changesetCoverage(
   cs: ChangeSet,
-  reviewed: Record<string, Set<number>>,
+  lines: Record<string, Set<number>>,
 ): number {
   let total = 0;
   let seen = 0;
   for (const f of cs.files) {
     for (const h of f.hunks) {
       total += h.lines.length;
-      seen += reviewed[h.id]?.size ?? 0;
+      seen += lines[h.id]?.size ?? 0;
     }
   }
   return total === 0 ? 0 : seen / total;
+}
+
+/** Returns the count of reviewed files within the given changeset. */
+export function reviewedFilesCount(
+  cs: ChangeSet,
+  reviewedFiles: Set<string>,
+): number {
+  let n = 0;
+  for (const f of cs.files) if (reviewedFiles.has(f.id)) n++;
+  return n;
 }

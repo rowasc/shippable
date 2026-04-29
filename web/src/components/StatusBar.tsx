@@ -11,12 +11,21 @@ export function StatusBar({ viewModel }: Props) {
       <span className="statusbar__cell">{viewModel.lineDisplay}</span>
       <span className="statusbar__cell">{viewModel.hunkDisplay}</span>
       <span className="statusbar__cell">{viewModel.fileDisplay}</span>
-      <span className="statusbar__cell statusbar__cell--cov">
-        {viewModel.coverageDisplay}
+      <span
+        className="statusbar__cell statusbar__cell--read"
+        title="cursor visits — auto-tracked"
+      >
+        {viewModel.readDisplay}
+      </span>
+      <span
+        className="statusbar__cell statusbar__cell--cov"
+        title="files signed off via Shift+M"
+      >
+        {viewModel.filesDisplay}
       </span>
       <span className="statusbar__spacer" />
       <span className="statusbar__hint">
-        j/k line · J/K hunk · Tab file · a ack · c comment · ? help
+        j/k line · Tab file · a ack · c comment · ⇧M sign off · p plan · ? help
       </span>
     </footer>
   );

@@ -58,6 +58,30 @@
   margin-right: 2px;
   margin-left: -10px;
 }
+/* File reviewed: a green tint across the row plus the leading checkmark.
+   Layered with row--active via separate properties so the active arrow
+   still reads. */
+.row--file-reviewed {
+  background: rgba(166, 227, 161, 0.06);
+  color: var(--green);
+}
+.row--file-reviewed:hover {
+  background: rgba(166, 227, 161, 0.12);
+}
+.row--file-reviewed.row--active {
+  background: color-mix(in srgb, var(--cursor-bg) 70%, rgba(166, 227, 161, 0.25));
+}
+.row__check {
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  color: var(--fg-mute);
+  font-weight: 600;
+  user-select: none;
+}
+.row--file-reviewed .row__check {
+  color: var(--green);
+}
 .row--skill-on {
   color: var(--green);
 }
@@ -83,10 +107,20 @@
 .row__status--renamed { color: var(--blue); }
 
 .meter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
   color: var(--fg-mute);
-  letter-spacing: -1px;
   font-variant-numeric: tabular-nums;
 }
-.meter--full {
+.meter__bar {
+  letter-spacing: -1px;
+  color: var(--fg-dim);
+}
+.meter__pct {
+  color: var(--fg-mute);
+}
+.row--file-reviewed .meter__bar,
+.row--file-reviewed .meter__pct {
   color: var(--green);
 }

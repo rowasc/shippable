@@ -16,11 +16,23 @@ export function Sidebar({ viewModel, onPickFile, onToggleSkill }: Props) {
           {viewModel.files.map((f) => (
             <li key={f.fileId}>
               <button
-                className={`row ${f.isCurrent ? "row--active" : ""}`}
+                className={`row ${f.isCurrent ? "row--active" : ""} ${
+                  f.isReviewed ? "row--file-reviewed" : ""
+                }`}
                 onClick={() => onPickFile(f.fileId)}
-                title={f.path}
+                title={
+                  f.isReviewed
+                    ? `${f.path} — reviewed · read ${f.readPct}%`
+                    : `${f.path} — read ${f.readPct}%`
+                }
               >
-                <Meter coveragePct={f.coveragePct} meterBar={f.meterBar} />
+                <span
+                  className="row__check"
+                  aria-label={f.isReviewed ? "reviewed" : "not reviewed"}
+                >
+                  {f.isReviewed ? "✓" : " "}
+                </span>
+                <Meter readPct={f.readPct} meterBar={f.meterBar} />
                 <span className={`row__status row__status--${f.status}`}>
                   {f.statusChar}
                 </span>
@@ -54,13 +66,17 @@ export function Sidebar({ viewModel, onPickFile, onToggleSkill }: Props) {
   );
 }
 
-function Meter({ coveragePct, meterBar }: { coveragePct: number; meterBar: string }) {
+/**
+ * Meter shows the reviewer's reading progress as an 8-block bar plus a
+ * percentage. Reading is a "where have I been" signal — never a verdict —
+ * so the bar is always neutral; the verdict (reviewed) is communicated
+ * separately by the file-row tint and the leading checkmark.
+ */
+function Meter({ readPct, meterBar }: { readPct: number; meterBar: string }) {
   return (
-    <span
-      className={`meter ${coveragePct === 100 ? "meter--full" : ""}`}
-      aria-label={`${coveragePct}% reviewed`}
-    >
-      {meterBar} {coveragePct.toString().padStart(3)}%
+    <span className="meter" aria-label={`${readPct}% read`}>
+      <span className="meter__bar">{meterBar}</span>
+      <span className="meter__pct">{readPct.toString().padStart(3)}%</span>
     </span>
   );
 }

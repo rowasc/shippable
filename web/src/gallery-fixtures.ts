@@ -62,10 +62,10 @@ const emptyState = initialState([cs42]);
 export const fixtureEmpty: GalleryFixture = {
   kind: "diff",
   name: "empty",
-  description: "Initial state — no lines reviewed, no notes acked.",
+  description: "Initial state — nothing read, no files signed off, no notes acked.",
   state: {
     ...emptyState,
-    reviewedLines: {},
+    readLines: {},
     replies: {},
   },
   fileId: cs42.files[0].id,
@@ -81,7 +81,7 @@ const storageFile = cs42.files[1]; // src/utils/storage.ts
 const storageH1 = storageFile.hunks[0];
 const storageH2 = storageFile.hunks[1];
 
-const midReviewedLines = markLines(
+const midReadLines = markLines(
   markLines({}, storageH1.id, [0, 1, 2, 3, 4]),
   storageH2.id,
   [0, 1, 2, 3, 4, 5],
@@ -90,7 +90,8 @@ const midReviewedLines = markLines(
 export const fixtureMidReview: GalleryFixture = {
   kind: "diff",
   name: "mid-review",
-  description: "Several lines reviewed across two hunks; one AI note acked.",
+  description:
+    "Several lines read across two hunks; one AI note acked; no files signed off yet.",
   state: {
     ...emptyState,
     cursor: {
@@ -99,7 +100,7 @@ export const fixtureMidReview: GalleryFixture = {
       hunkId: storageH2.id,
       lineIdx: 6,
     },
-    reviewedLines: midReviewedLines,
+    readLines: midReadLines,
     ackedNotes: new Set([noteKey(storageH2.id, 6)]),
     replies: { ...SEED_REPLIES },
   },
@@ -178,7 +179,7 @@ export const fixtureAiSaturated: GalleryFixture = {
       hunkId: prefH1Saturated.id,
       lineIdx: 26,
     },
-    reviewedLines: markLines({}, prefH1Saturated.id, [0, 1, 2, 3, 10, 11, 12, 13, 14]),
+    readLines: markLines({}, prefH1Saturated.id, [0, 1, 2, 3, 10, 11, 12, 13, 14]),
     ackedNotes: new Set([
       noteKey(prefH1Saturated.id, 4), // info — acked
       noteKey(prefH1Saturated.id, 14), // info — acked
@@ -227,7 +228,7 @@ export const fixtureTeammateEndorsed: GalleryFixture = {
       hunkId: authH2.id,
       lineIdx: 1,
     },
-    reviewedLines: markLines({}, authH2.id, [0, 1, 2, 3]),
+    readLines: markLines({}, authH2.id, [0, 1, 2, 3]),
     replies: {
       [teammateReplyKey(authH2.id)]: [
         {
@@ -287,7 +288,46 @@ export const fixtureBlockSelectionGallery: GalleryFixture = {
   cursorLineIdx: BLOCK_HI,
 };
 
-// ── 6. plan (rule-based) ───────────────────────────────────────────────────
+// ── 6. file-reviewed ───────────────────────────────────────────────────────
+// All hunks of storage.ts read end-to-end and the file signed off via
+// Shift+M. Shows the green path-header badge, the row tint, and the
+// soft green wash across the diff body.
+
+const reviewedAllReadLines = (() => {
+  let acc: Record<string, Set<number>> = {};
+  for (const h of storageFile.hunks) {
+    acc = markLines(
+      acc,
+      h.id,
+      Array.from({ length: h.lines.length }, (_, i) => i),
+    );
+  }
+  return acc;
+})();
+
+export const fixtureFileReviewed: GalleryFixture = {
+  kind: "diff",
+  name: "file-reviewed",
+  description:
+    "storage.ts read in full and signed off via Shift+M — green badge in the path, green check + tint on the sidebar row, soft green wash across the diff.",
+  state: {
+    ...emptyState,
+    cursor: {
+      changesetId: cs42.id,
+      fileId: storageFile.id,
+      hunkId: storageH1.id,
+      lineIdx: 0,
+    },
+    readLines: reviewedAllReadLines,
+    reviewedFiles: new Set([storageFile.id]),
+    replies: { ...SEED_REPLIES },
+  },
+  fileId: storageFile.id,
+  hunkId: storageH1.id,
+  cursorLineIdx: 0,
+};
+
+// ── 7. plan (rule-based) ───────────────────────────────────────────────────
 // The "where to begin" screen for cs-42, computed deterministically from the
 // parsed ChangeSet (no AI). Shows the intent/map/entry-points layout with
 // every claim citing a source.
@@ -338,6 +378,7 @@ export const ALL_FIXTURES: GalleryFixture[] = [
   fixturePlanRule,
   fixtureEmpty,
   fixtureMidReview,
+  fixtureFileReviewed,
   fixtureBlockSelectionGallery,
   fixtureAiSaturated,
   fixtureTeammateEndorsed,
