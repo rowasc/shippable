@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import "./App.css";
 import { CHANGESETS } from "./fixtures";
 import { initialState, reducer, changesetCoverage } from "./state";
@@ -62,7 +62,7 @@ export default function App() {
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
-  const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
+  const symbolIndex = buildSymbolIndex(cs);
   const {
     plan,
     status: planStatus,
@@ -72,8 +72,6 @@ export default function App() {
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
   const suggestion = maybeSuggest(cs, state);
-  const suggestionRef = useRef(suggestion);
-  suggestionRef.current = suggestion;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -98,10 +96,9 @@ export default function App() {
       }
 
       // Evaluate runtime predicates once so keymap entries can reference them.
-      const currentLine = hunk.lines[state.cursor.lineIdx];
       const predicates: Record<string, boolean> = {
-        hasSuggestion: !!suggestionRef.current,
-        lineHasAiNote: !!currentLine?.aiNote,
+        hasSuggestion: !!suggestion,
+        lineHasAiNote: !!line?.aiNote,
         hasSelection: !!state.selection,
         hasPlan: showPlan,
       };
@@ -190,7 +187,7 @@ export default function App() {
           break;
         }
         case "ACCEPT_GUIDE": {
-          const s = suggestionRef.current!;
+          const s = suggestion!;
           dispatch({
             type: "SET_CURSOR",
             cursor: {
@@ -203,7 +200,7 @@ export default function App() {
           break;
         }
         case "DISMISS_GUIDE":
-          dispatch({ type: "DISMISS_GUIDE", guideId: suggestionRef.current!.id });
+          dispatch({ type: "DISMISS_GUIDE", guideId: suggestion!.id });
           break;
         case "CLOSE_HELP":
           if (showHelp) setShowHelp(false);
@@ -230,7 +227,7 @@ export default function App() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, showPlan, state.cursor, state.changesets, state.selection]);
+  }, [showHelp, showPlan, state.cursor, state.changesets, state.selection, suggestion, line]);
 
   const coverage = changesetCoverage(cs, state.reviewedLines);
   const fileIdx = cs.files.findIndex((f) => f.id === file.id);

@@ -27,22 +27,26 @@ export interface UsePlanResult {
  */
 export function usePlan(cs: ChangeSet): UsePlanResult {
   const rulePlan = useMemo(() => planReview(cs), [cs]);
+  const [prevCs, setPrevCs] = useState(cs);
   const [aiPlan, setAiPlan] = useState<ReviewPlan | null>(null);
   const [status, setStatus] = useState<PlanStatus>("idle");
   const [error, setError] = useState<string | undefined>(undefined);
 
-  // Track which cs the caller is currently looking at, so generate() can
-  // refuse if state has moved on by the time it's called (defensive, but
-  // matters more when generate() ends up wired to a button).
-  const csRef = useRef(cs);
-  csRef.current = cs;
-
-  // Reset on changeset switch.
-  useEffect(() => {
+  // Reset on changeset switch (the prevState-during-render pattern, so we
+  // don't need a setState-in-effect).
+  if (cs !== prevCs) {
+    setPrevCs(cs);
     setAiPlan(null);
     setStatus("idle");
     setError(undefined);
-  }, [cs]);
+  }
+
+  // Track which cs the caller is currently looking at, so generate() can
+  // drop a stale fetch result if state has moved on by the time it resolves.
+  const csRef = useRef(cs);
+  useEffect(() => {
+    csRef.current = cs;
+  });
 
   const generate = useCallback(() => {
     const targetCs = csRef.current;
