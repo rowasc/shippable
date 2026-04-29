@@ -74,6 +74,21 @@ export const setSelection = (selector, text) => ({
   text,
 });
 
+// Pick an option in a native <select>. `value` matches the option's value attr.
+export const select = (selector, value, opts = {}) => ({
+  type: "select",
+  selector,
+  value,
+  hold: opts.hold ?? 0,
+});
+
+// Navigate the page to a new URL. Used to switch fixtures inside one storyboard.
+export const goto = (url, opts = {}) => ({
+  type: "goto",
+  url,
+  hold: opts.hold ?? 0,
+});
+
 // ── storyboard factory ─────────────────────────────────────────────────────
 
 export function storyboard(def) {
@@ -209,6 +224,18 @@ async function executeSteps(page, steps, framesDir) {
           },
           { selector: step.selector, text: step.text },
         );
+        break;
+      }
+      case "select": {
+        await page.selectOption(step.selector, step.value);
+        if (step.hold) await page.waitForTimeout(step.hold);
+        break;
+      }
+      case "goto": {
+        await page.goto(step.url);
+        await injectCaptionBar(page);
+        if (currentCaption) await setCaption(page, currentCaption);
+        if (step.hold) await page.waitForTimeout(step.hold);
         break;
       }
       case "shot": {

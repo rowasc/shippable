@@ -6,6 +6,9 @@ import {
   shot,
   click,
   type,
+  select,
+  goto,
+  setSelection,
 } from "../demo-lib.mjs";
 import { mockPlanRoute } from "./_fixtures.mjs";
 
@@ -118,7 +121,26 @@ export default storyboard({
     wait(800),
     shot("at_definition_hold", 1.8),
 
-    // 11. Help overlay — full keymap.
+    // 11. Theme picker — cycle through every theme, one capture each. Each
+    //     swap repaints UI chrome and Shiki code tokens together.
+    select(".theme-picker__select", "light", { hold: 350 }),
+    shot("theme_light", 1.4, {
+      caption: "Light theme — UI and code colors repaint together",
+    }),
+    select(".theme-picker__select", "dollhouse", { hold: 350 }),
+    shot("theme_dollhouse", 1.4, {
+      caption: "Dollhouse — a softer light palette",
+    }),
+    select(".theme-picker__select", "dollhouseNoir", { hold: 350 }),
+    shot("theme_dollhouse_noir", 1.4, {
+      caption: "Dollhouse Noir — same hues, dimmed for night",
+    }),
+    select(".theme-picker__select", "dark", { hold: 350 }),
+    shot("theme_back_dark", 1.4, {
+      caption: "Back to dark — the choice is persisted across sessions",
+    }),
+
+    // 12. Help overlay — full keymap.
     press("?", { hold: 350 }),
     shot("help", 0.8, {
       caption: "Press ? for the full keymap",
@@ -126,7 +148,7 @@ export default storyboard({
     wait(900),
     shot("help_hold", 2.4),
 
-    // 12. Reopen plan with `p` to show the AI plan is sticky.
+    // 13. Reopen plan with `p` to show the AI plan is sticky.
     press("Escape", { hold: 250 }),
     press("p", { hold: 350 }),
     shot("plan_back", 0.8, {
@@ -134,5 +156,38 @@ export default storyboard({
     }),
     wait(900),
     shot("plan_back_hold", 2.4),
+
+    // 14. Custom PHP runner — switch to the cs-09 fixture (a real .php file)
+    //     so the runner pill detects PHP, then seed a self-contained snippet,
+    //     bind an input, and run it through the in-browser php-wasm runtime.
+    press("Escape", { hold: 250 }),
+    goto("http://localhost:5199/?cs=cs-09", { hold: 600 }),
+    waitFor(".diff"),
+    press("Escape", { hold: 350 }),
+    waitFor(".diff .line .line__text"),
+    shot("php_diff", 1.2, {
+      caption: "Open a PHP changeset — the inline runner detects the language",
+    }),
+    setSelection(
+      ".diff .line .line__text",
+      "function format_money($cents) { return '$' . number_format($cents / 100, 2); }",
+    ),
+    wait(250),
+    waitFor(".coderunner__pill"),
+    shot("php_pill", 1.4, {
+      caption: "Select code — a `▷ run php` pill floats next to the line",
+    }),
+    click(".coderunner__pill", { hold: 300 }),
+    waitFor(".coderunner__panel"),
+    shot("php_panel", 1.2, {
+      caption: "Open the runner — bind any free variables you need",
+    }),
+    type(".coderunner__input-box", "1234", { hold: 350 }),
+    click(".coderunner__run"),
+    waitFor(".coderunner__out", { timeout: 10000 }),
+    wait(400),
+    shot("php_output", 2.4, {
+      caption: "Real PHP runs in the browser via php-wasm — no server",
+    }),
   ],
 });
