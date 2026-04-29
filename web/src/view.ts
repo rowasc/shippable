@@ -592,6 +592,16 @@ export interface InspectorViewModel {
   /** "none" or "N/M acked". */
   aiNoteCountLabel: string;
   aiNoteRows: AiNoteRowItem[];
+  /**
+   * When the cursor is NOT on a noted line but the hunk has notes, this
+   * points at the nearest one. Renders as a small clickable chip in the
+   * AI section header so the count is paired with a navigation cue.
+   * null when there are no notes, or when the cursor is already on one.
+   */
+  nextNoteHint: {
+    label: string;
+    jumpTarget: Cursor;
+  } | null;
 
   // ── AI hunk summary panel (absent when hunk has no aiSummary) ──────────
   aiSummary: string | null;
@@ -697,6 +707,27 @@ export function buildInspectorViewModel({
     aiNoteRows.length === 0
       ? "none"
       : `${ackedCount}/${aiNoteRows.length} acked`;
+
+  // Find the nearest note to the cursor when the cursor isn't on one.
+  // Prefers below; falls back to above. The chip in the inspector header
+  // becomes the only "do something" affordance when notes exist but
+  // none target the current line.
+  const cursorOnNote = aiNoteRows.some((r) => r.isCurrent);
+  let nextNoteHint: InspectorViewModel["nextNoteHint"] = null;
+  if (!cursorOnNote && aiNoteRows.length > 0) {
+    const below = aiNoteRows.find((r) => r.lineIdx > cursor.lineIdx);
+    const above = [...aiNoteRows]
+      .reverse()
+      .find((r) => r.lineIdx < cursor.lineIdx);
+    const target = below ?? above;
+    if (target) {
+      const arrow = below ? "↓" : "↑";
+      nextNoteHint = {
+        label: `${arrow} L${target.lineNo}`,
+        jumpTarget: target.jumpTarget,
+      };
+    }
+  }
 
   // ── AI hunk summary ─────────────────────────────────────────────────────
   const summaryReplyKey = hunkSummaryReplyKey(hunk.id);
@@ -810,6 +841,7 @@ export function buildInspectorViewModel({
     hasAiNotes: aiNoteRows.length > 0,
     aiNoteCountLabel,
     aiNoteRows,
+    nextNoteHint,
 
     aiSummary,
     aiSummaryReplyKey: aiSummary ? summaryReplyKey : null,

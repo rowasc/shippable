@@ -130,7 +130,10 @@
   margin: 10px 14px;
   border: 1px solid var(--border);
   border-radius: 2px;
-  overflow: hidden;
+  /* No overflow: hidden — would create a new scroll context that
+     prevents the sticky hunk header below from sticking to the diff
+     scroll. The rounded corners are only 2px so the visual cost is
+     a single-pixel background-bleed that nobody will notice. */
 }
 .hunk--current {
   border-color: var(--border-active);
@@ -144,6 +147,12 @@
   background: var(--bg-3);
   color: var(--fg-dim);
   border-bottom: 1px solid var(--border);
+  /* Stick just below the file-path strip (which is sticky at top: 0).
+     Keeps the hunk's coverage %, AI/teammate badges, and def/ref pills
+     visible as the reviewer scrolls through a long hunk. */
+  position: sticky;
+  top: 32px;
+  z-index: 1;
 }
 .hunk__meter {
   color: var(--fg-dim);

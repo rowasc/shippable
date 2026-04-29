@@ -9,7 +9,8 @@ import type {
 } from "../view";
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
-import type { MouseEvent } from "react";
+import { useEffect, useRef } from "react";
+import type { MouseEvent, RefObject } from "react";
 
 /**
  * Wraps a jump action so a card's onClick ignores clicks that originated
@@ -65,6 +66,18 @@ export function Inspector({
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
 
+  // Keep the AI note for the current line on screen as the cursor moves.
+  // Mirrors what DiffView already does for the cursor itself — without
+  // this, the "current" highlight in the inspector can drift off the top
+  // when the hunk has many notes.
+  const currentNoteRef = useRef<HTMLLIElement | null>(null);
+  const currentNoteLineIdx =
+    vm.aiNoteRows.find((r) => r.isCurrent)?.lineIdx ?? null;
+  useEffect(() => {
+    if (currentNoteLineIdx === null) return;
+    currentNoteRef.current?.scrollIntoView({ block: "nearest" });
+  }, [currentNoteLineIdx]);
+
   return (
     <aside className="inspector">
       <header className="inspector__h">
@@ -86,6 +99,15 @@ export function Inspector({
         <div className="inspector__sec-h">
           AI concerns in this hunk
           <span className="inspector__sec-count">{vm.aiNoteCountLabel}</span>
+          {vm.nextNoteHint && (
+            <button
+              className="inspector__sec-jump"
+              onClick={() => onJump(vm.nextNoteHint!.jumpTarget)}
+              title="jump to the nearest AI note"
+            >
+              {vm.nextNoteHint.label}
+            </button>
+          )}
         </div>
         {!vm.hasAiNotes ? (
           <div className="inspector__empty">No AI notes on this hunk.</div>
@@ -97,6 +119,7 @@ export function Inspector({
                 row={row}
                 symbols={symbols}
                 draftBody={draftFor(row.replyKey)}
+                cardRef={row.isCurrent ? currentNoteRef : undefined}
                 onJump={onJump}
                 onAck={() => {
                   // Extract hunkId from the replyKey ("note:hunkId:lineIdx")
@@ -320,6 +343,7 @@ function NoteCard({
   row,
   symbols,
   draftBody,
+  cardRef,
   onJump,
   onAck,
   onClickLineNo,
@@ -331,6 +355,8 @@ function NoteCard({
   row: AiNoteRowItem;
   symbols: SymbolIndex;
   draftBody: string;
+  /** Attached only when this is the cursor's note — drives auto-scroll. */
+  cardRef?: RefObject<HTMLLIElement | null>;
   onJump: (c: Cursor) => void;
   onAck: () => void;
   onClickLineNo: () => void;
@@ -341,6 +367,7 @@ function NoteCard({
 }) {
   return (
     <li
+      ref={cardRef}
       className={`ainote ainote--${row.severity} ainote--clickable ${
         row.isCurrent ? "ainote--current" : ""
       } ${row.isAcked ? "ainote--acked" : ""}`}
