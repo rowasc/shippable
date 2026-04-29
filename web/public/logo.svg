@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="170" height="32" viewBox="0 0 170 32" fill="none">
+  <rect x="0" y="9" width="22" height="6" rx="2" fill="#a86bff" style="fill:color(display-p3 .66 .42 1);fill-opacity:1"/>
+  <rect x="3" y="18" width="22" height="6" rx="2" fill="#7e14ff" style="fill:color(display-p3 .4922 .0767 1);fill-opacity:1"/>
+  <text x="34" y="24" font-family="system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.5" fill="#7e14ff" style="fill:color(display-p3 .4922 .0767 1);fill-opacity:1">shippable</text>
+</svg>
