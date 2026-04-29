@@ -25,7 +25,7 @@ export function StatusBar({ viewModel }: Props) {
       </span>
       <span className="statusbar__spacer" />
       <span className="statusbar__hint">
-        j/k line · Tab file · a ack · c comment · ⇧M sign off · p plan · ? help
+        j/k line · Tab file · a ack · c comment · ⇧M sign off · i inspector · p plan · ? help
       </span>
     </footer>
   );

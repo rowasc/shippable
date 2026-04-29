@@ -251,6 +251,16 @@ export default function App() {
         <span className="topbar__sep">│</span>
         <span className="topbar__id">{cs.id}</span>
         <span className="topbar__title">{cs.title}</span>
+        <PlanChip
+          isOpen={showPlan}
+          plan={plan}
+          reviewedFiles={state.reviewedFiles}
+          onToggle={() => setShowPlan((v) => !v)}
+        />
+        <AiPlanButton
+          status={planStatus}
+          onGenerate={generatePlan}
+        />
         <span className="topbar__sep">│</span>
         <span className="topbar__branch">
           {cs.branch} → {cs.base}
@@ -387,7 +397,6 @@ export default function App() {
               plan={plan}
               status={planStatus}
               error={planError}
-              onGenerateAi={generatePlan}
               onJumpToEntry={(entry) => {
                 const f = cs.files.find((ff) => ff.id === entry.fileId);
                 if (!f) return;
@@ -504,4 +513,78 @@ function cycleChangeset(
   const i = list.findIndex((c) => c.id === currentId);
   const n = list.length;
   return list[(i + delta + n) % n].id;
+}
+
+/**
+ * Persistent plan summary in the topbar. Shows "plan · X/N" where X is
+ * the number of suggested entry-point files the reviewer has signed off
+ * on (Shift+M) and N is the total number of entries. Click toggles the
+ * plan modal — same gesture as `p`.
+ */
+function PlanChip({
+  isOpen,
+  plan,
+  reviewedFiles,
+  onToggle,
+}: {
+  isOpen: boolean;
+  plan: { entryPoints: { fileId: string }[] };
+  reviewedFiles: Set<string>;
+  onToggle: () => void;
+}) {
+  const total = plan.entryPoints.length;
+  const done = plan.entryPoints.filter((e) => reviewedFiles.has(e.fileId)).length;
+  const allDone = total > 0 && done === total;
+  return (
+    <button
+      className={`topbar__btn topbar__btn--plan ${
+        isOpen ? "topbar__btn--on" : ""
+      } ${allDone ? "topbar__btn--done" : ""}`}
+      onClick={onToggle}
+      title="open the review plan (p)"
+    >
+      ◇ plan{total > 0 ? ` · ${done}/${total}` : ""}
+    </button>
+  );
+}
+
+/**
+ * Persistent AI-plan trigger. Replaces the modal-only "Send to Claude"
+ * button so the reviewer doesn't have to reopen the plan to discover
+ * the option. Status is mirrored from usePlan: idle → clickable; loading
+ * → disabled with ellipsis; ready → checkmark, disabled (we already have
+ * the AI plan); fallback → clickable retry.
+ */
+function AiPlanButton({
+  status,
+  onGenerate,
+}: {
+  status: "idle" | "loading" | "ready" | "fallback";
+  onGenerate: () => void;
+}) {
+  const label =
+    status === "loading"
+      ? "✦ ai…"
+      : status === "ready"
+        ? "✦ ai ✓"
+        : status === "fallback"
+          ? "✦ ai retry"
+          : "✦ ai plan";
+  const disabled = status === "loading" || status === "ready";
+  const title =
+    status === "ready"
+      ? "AI plan loaded — switch changesets to regenerate"
+      : status === "loading"
+        ? "Claude is reading the diff…"
+        : "Send the diff to Claude for a richer plan. The diff will leave your machine.";
+  return (
+    <button
+      className={`topbar__btn topbar__btn--ai topbar__btn--ai-${status}`}
+      onClick={onGenerate}
+      disabled={disabled}
+      title={title}
+    >
+      {label}
+    </button>
+  );
 }

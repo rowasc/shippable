@@ -64,9 +64,52 @@ body,
   cursor: pointer;
   margin-left: 10px;
 }
-.topbar__btn:hover {
+.topbar__btn:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--accent);
+}
+.topbar__btn:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+/* Plan chip — sits next to the title; reads as part of the changeset
+   metadata. Brighter when the modal is open so the user knows where
+   the visible plan came from. */
+.topbar__btn--plan {
+  margin-left: 12px;
+  color: var(--accent);
+  border-color: var(--border-active);
+  font-variant-numeric: tabular-nums;
+}
+.topbar__btn--plan.topbar__btn--on {
+  background: var(--cursor-bg);
+  border-color: var(--accent);
+}
+.topbar__btn--plan.topbar__btn--done {
+  color: var(--green);
+  border-color: var(--green);
+}
+/* AI button — grouped with the plan chip. State drives color. */
+.topbar__btn--ai {
+  margin-left: 4px;
+  color: var(--magenta);
+  border-color: var(--border-active);
+}
+.topbar__btn--ai:hover:not(:disabled) {
+  color: var(--magenta);
+  border-color: var(--magenta);
+}
+.topbar__btn--ai-loading {
+  color: var(--fg-dim);
+}
+.topbar__btn--ai-ready {
+  color: var(--magenta);
+  border-color: var(--magenta);
+  background: rgba(203, 166, 247, 0.08);
+}
+.topbar__btn--ai-fallback {
+  color: var(--yellow);
+  border-color: var(--yellow);
 }
 
 /* main -------------------------------------------------------------------- */
