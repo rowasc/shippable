@@ -1,5 +1,5 @@
 import "./CodeRunner.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { detectLang, parseSelection, placeholderFor } from "../runner/parseInputs";
 import type { Lang } from "../runner/parseInputs";
 import { runJs } from "../runner/executeJs";
@@ -13,12 +13,12 @@ interface Props {
   freeOpen: boolean;
   onFreeClose: () => void;
   /**
-   * Counter that increments whenever the user presses the "run selection"
-   * gesture (e). On change we read the current window selection — if it's
-   * inside the diff and parses, we open the panel directly. Replaces the
-   * old selectionchange auto-show, which fired on every text-drag.
+   * Bumps whenever the user presses `e`. The parent supplies the snippet
+   * (built from the keyboard cursor / block selection in the diff state),
+   * so we don't depend on a live browser text selection — the gesture is
+   * keyboard-driven, not mouse-driven.
    */
-  selectionRunTrigger: number;
+  runRequest: { tick: number; source: string } | null;
 }
 
 type Mode = "guided" | "edit";
@@ -49,7 +49,7 @@ export function CodeRunner({
   currentFilePath,
   freeOpen,
   onFreeClose,
-  selectionRunTrigger,
+  runRequest,
 }: Props) {
   // Detected language drives the runner choice and the placeholder hints.
   // Free runner falls back to TS when the current file isn't a known
@@ -62,9 +62,6 @@ export function CodeRunner({
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const openRef = useRef<OpenState | null>(open);
-  useEffect(() => { openRef.current = open; }, [open]);
 
   // Re-parse on every source change. Cheap (regex-based) so it's fine to
   // run inline; the editor benefits from live shape detection.
@@ -78,34 +75,27 @@ export function CodeRunner({
   // entries are harmless. (Skipping the reconcile avoids a cascading
   // setState during render.)
 
-  // Selection-driven open is parent-triggered: App increments
-  // selectionRunTrigger when the reviewer presses `e`. We read the
-  // current window selection at that exact moment — no auto-show on
-  // every drag, no floating pill stage. Goes straight to the panel.
+  // Keyboard-driven open: App bumps runRequest.tick when the reviewer
+  // presses `e`, and supplies the snippet pulled from the diff cursor /
+  // block selection. We don't read window.getSelection here — the gesture
+  // is keyboard-first, the user shouldn't have to mouse-drag to use it.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (selectionRunTrigger === 0) return;
+    if (!runRequest || runRequest.tick === 0) return;
     if (!detectedLang) return;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
-    const text = sel.toString();
-    if (!text.trim() || text.length < 2) return;
-    const range = sel.getRangeAt(0);
-    const container = range.commonAncestorContainer as Node;
-    if (!isInsideDiff(container)) return;
-    const rect = range.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return;
+    const trimmed = runRequest.source.trim();
+    if (trimmed.length < 2) return;
     setOpen({
-      source: cleanSelection(text),
-      anchor: {
-        top: rect.top + window.scrollY,
-        left: rect.right + window.scrollX + 8,
-      },
+      source: runRequest.source,
+      // anchor:null pins the panel near the topbar. Without a live DOM
+      // range we have nothing to anchor to, and chasing the cursor row
+      // would fight scroll position.
+      anchor: null,
       isFree: false,
     });
     setMode("guided");
     setResult(null);
-  }, [selectionRunTrigger, detectedLang]);
+  }, [runRequest, detectedLang]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Parent-driven free runner: when freeOpen flips true, open the panel
@@ -173,7 +163,6 @@ export function CodeRunner({
 
   return (
     <div
-      ref={panelRef}
       className={`coderunner coderunner--open ${open.isFree ? "coderunner--free" : ""}`}
       style={panelStyle}
       onMouseDown={(e) => {
@@ -334,31 +323,6 @@ export function CodeRunner({
       </div>
     </div>
   );
-}
-
-function isInsideDiff(node: Node): boolean {
-  let el: Node | null = node;
-  while (el) {
-    if (el instanceof HTMLElement) {
-      if (el.classList?.contains("diff") || el.closest?.(".diff")) return true;
-      if (el.classList?.contains("coderunner") || el.closest?.(".coderunner")) return false;
-    }
-    el = el.parentNode;
-  }
-  return false;
-}
-
-function cleanSelection(text: string): string {
-  // The diff view prepends line numbers and ±/space markers via separate
-  // spans. When the browser serializes a multi-line selection it joins them
-  // with newlines, so we see lines like:
-  //   "  9    \n \nfunction ($a) {"
-  // Strip leading old/new line-number columns if present: numbers + whitespace
-  // at the start of a line, followed by a sign column (+, -, or blank).
-  const lines = text.split("\n").map((line) => {
-    return line.replace(/^\s*\d*\s+\d*\s*[+\-\s]?/, "");
-  });
-  return lines.join("\n").trim();
 }
 
 function renderLog(l: string): string {

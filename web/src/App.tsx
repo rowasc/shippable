@@ -92,9 +92,13 @@ export default function App() {
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
   const [freeRunnerOpen, setFreeRunnerOpen] = useState(false);
-  // Counter that ticks each time the user presses `e` to run the current
-  // selection. CodeRunner reads window.getSelection on the change.
-  const [selectionRunTrigger, setSelectionRunTrigger] = useState(0);
+  // Each press of `e` produces a fresh request with the snippet pulled from
+  // the diff cursor (or the active block selection). The tick lets the
+  // CodeRunner effect re-trigger on the same source.
+  const [runRequest, setRunRequest] = useState<{
+    tick: number;
+    source: string;
+  } | null>(null);
   // Start with the plan visible so first-time reviewers see the "where to
   // start" view before the diff. They press Enter/click an entry point (or
   // Escape) to dismiss and can press `p` to reopen.
@@ -292,9 +296,31 @@ export default function App() {
         case "CLOSE_PROMPT_PICKER":
           setShowPicker(false);
           break;
-        case "RUN_SELECTION":
-          setSelectionRunTrigger((t) => t + 1);
+        case "RUN_SELECTION": {
+          // Pull the snippet from diff state, not window.getSelection — the
+          // gesture is keyboard-driven. If the reviewer has a same-hunk
+          // block selection, use those lines; otherwise fall back to the
+          // current hunk so a single-line cursor still has runnable
+          // context. Drop deletion (`-`) lines: they don't exist in the
+          // post-change file.
+          const sel = state.selection;
+          const lines =
+            sel && sel.hunkId === hunk.id
+              ? hunk.lines.slice(
+                  Math.min(sel.anchor, sel.head),
+                  Math.max(sel.anchor, sel.head) + 1,
+                )
+              : hunk.lines;
+          const source = lines
+            .filter((l) => l.kind !== "del")
+            .map((l) => l.text)
+            .join("\n");
+          setRunRequest((prev) => ({
+            tick: (prev?.tick ?? 0) + 1,
+            source,
+          }));
           break;
+        }
         case "PREV_CHANGESET":
           dispatch({
             type: "SWITCH_CHANGESET",
@@ -368,10 +394,6 @@ export default function App() {
           plan={plan}
           reviewedFiles={state.reviewedFiles}
           onToggle={() => setShowPlan((v) => !v)}
-        />
-        <AiPlanButton
-          status={planStatus}
-          onGenerate={generatePlan}
         />
         <span className="topbar__sep">│</span>
         <span className="topbar__branch">
@@ -525,6 +547,7 @@ export default function App() {
               plan={plan}
               status={planStatus}
               error={planError}
+              onGenerateAi={generatePlan}
               onJumpToEntry={(entry) => {
                 const f = cs.files.find((ff) => ff.id === entry.fileId);
                 if (!f) return;
@@ -554,7 +577,7 @@ export default function App() {
         currentFilePath={file.path}
         freeOpen={freeRunnerOpen}
         onFreeClose={() => setFreeRunnerOpen(false)}
-        selectionRunTrigger={selectionRunTrigger}
+        runRequest={runRequest}
       />
       {(apiKey.status.kind === "missing" ||
         apiKey.status.kind === "saved-pending-restart") && (
@@ -708,43 +731,3 @@ function PlanChip({
   );
 }
 
-/**
- * Persistent AI-plan trigger. Replaces the modal-only "Send to Claude"
- * button so the reviewer doesn't have to reopen the plan to discover
- * the option. Status is mirrored from usePlan: idle → clickable; loading
- * → disabled with ellipsis; ready → checkmark, disabled (we already have
- * the AI plan); fallback → clickable retry.
- */
-function AiPlanButton({
-  status,
-  onGenerate,
-}: {
-  status: "idle" | "loading" | "ready" | "fallback";
-  onGenerate: () => void;
-}) {
-  const label =
-    status === "loading"
-      ? "✦ ai…"
-      : status === "ready"
-        ? "✦ ai ✓"
-        : status === "fallback"
-          ? "✦ ai retry"
-          : "✦ ai plan";
-  const disabled = status === "loading" || status === "ready";
-  const title =
-    status === "ready"
-      ? "AI plan loaded — switch changesets to regenerate"
-      : status === "loading"
-        ? "Claude is reading the diff…"
-        : "Send the diff to Claude for a richer plan. The diff will leave your machine.";
-  return (
-    <button
-      className={`topbar__btn topbar__btn--ai topbar__btn--ai-${status}`}
-      onClick={onGenerate}
-      disabled={disabled}
-      title={title}
-    >
-      {label}
-    </button>
-  );
-}

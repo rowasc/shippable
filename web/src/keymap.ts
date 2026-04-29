@@ -80,7 +80,7 @@ export const KEYMAP: KeyEntry[] = [
   { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK" },
   { key: "r", label: "reply to AI note on current line",     group: "review", action: "START_REPLY",   when: "lineHasAiNote" },
   { key: "c", label: "start a new comment on current line",  group: "review", action: "START_COMMENT" },
-  { key: "e", label: "run selected diff text in code runner", group: "review", action: "RUN_SELECTION" },
+  { key: "e", label: "run current hunk (or block selection) in code runner", group: "review", action: "RUN_SELECTION" },
   { key: "M", shift: true, label: "sign off on current file (toggle)", group: "review", action: "TOGGLE_FILE_REVIEWED" },
 
   // ── guide ───────────────────────────────────────────────────────────────────
