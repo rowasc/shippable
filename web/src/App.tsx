@@ -10,6 +10,7 @@ import { StatusBar } from "./components/StatusBar";
 import { GuidePrompt } from "./components/GuidePrompt";
 import { HelpOverlay } from "./components/HelpOverlay";
 import { Inspector } from "./components/Inspector";
+import { KeySetup } from "./components/KeySetup";
 import { LoadModal } from "./components/LoadModal";
 import { ReviewPlanView } from "./components/ReviewPlanView";
 import { CodeRunner } from "./components/CodeRunner";
@@ -19,6 +20,7 @@ import type { SymbolIndex } from "./symbols";
 import type { ChangeSet, Cursor, EvidenceRef } from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import { KEYMAP } from "./keymap";
+import { useApiKey } from "./useApiKey";
 import { useTheme } from "./useTheme";
 import {
   buildDiffViewModel,
@@ -48,6 +50,7 @@ export default function App() {
       cursor: { changesetId: target.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 },
     };
   });
+  const apiKey = useApiKey();
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
@@ -415,6 +418,14 @@ export default function App() {
         freeOpen={freeRunnerOpen}
         onFreeClose={() => setFreeRunnerOpen(false)}
       />
+      {(apiKey.status.kind === "missing" ||
+        apiKey.status.kind === "saved-pending-restart") && (
+        <KeySetup
+          onSave={apiKey.save}
+          onSkip={apiKey.skip}
+          saved={apiKey.status.kind === "saved-pending-restart"}
+        />
+      )}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showLoad && (
         <LoadModal
