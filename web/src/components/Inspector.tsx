@@ -400,9 +400,9 @@ function NoteCard({
         </span>
       </div>
       {row.detail && (
-        <p className="ainote__detail">
+        <div className="ainote__detail">
           <RichText text={row.detail} symbols={symbols} onJump={onJump} />
-        </p>
+        </div>
       )}
       <ReplyThread
         replies={row.replies}
@@ -453,9 +453,9 @@ function HunkSummarySection({
         onClick={cardClick(() => onJump(jumpTarget))}
         title="click to jump to the top of this hunk"
       >
-        <p className="inspector__summary">
+        <div className="inspector__summary">
           <RichText text={summary} symbols={symbols} onJump={onJump} />
-        </p>
+        </div>
         <ReplyThread
           replies={replies}
           isDrafting={isDrafting}
@@ -505,9 +505,9 @@ function TeammateSection({
           </span>
         </div>
         {teammate.note && (
-          <p className="ainote__detail">
+          <div className="ainote__detail">
             <RichText text={teammate.note} symbols={symbols} onJump={onJump} />
-          </p>
+          </div>
         )}
         <ReplyThread
           replies={teammate.replies}
