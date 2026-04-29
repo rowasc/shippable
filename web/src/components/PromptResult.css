@@ -1,0 +1,101 @@
+.promptresults {
+  position: fixed;
+  right: 12px;
+  bottom: 32px;
+  width: min(560px, calc(100vw - 24px));
+  max-height: 70vh;
+  background: var(--bg-2);
+  border: 1px solid var(--border-active);
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  z-index: 18;
+  font-size: 12px;
+}
+.promptresults__h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.promptresults__h-label {
+  color: var(--accent);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.promptresults__h-count {
+  color: var(--fg-mute);
+  font-size: 11px;
+}
+.promptresults__list {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+.promptresult-card {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+.promptresult-card:last-child {
+  border-bottom: none;
+}
+.promptresult-card__h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border-bottom: 1px dashed var(--border);
+}
+.promptresult-card__h-name {
+  color: var(--fg);
+  font-size: 12px;
+}
+.promptresult-card__status {
+  margin-left: auto;
+  color: var(--fg-mute);
+  font-size: 11px;
+}
+.promptresult-card__status--streaming {
+  color: var(--accent);
+}
+.promptresult-card__status--error {
+  color: var(--red);
+}
+.promptresult-card__close {
+  background: transparent;
+  border: none;
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.promptresult-card__close:hover {
+  color: var(--fg);
+}
+.promptresult-card__body {
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  color: var(--fg);
+  line-height: 1.45;
+  max-height: 360px;
+  overflow: auto;
+}
+.promptresult-card__body--empty {
+  color: var(--fg-mute);
+  font-style: italic;
+}
+.promptresult-card__err {
+  padding: 8px 12px;
+  border-top: 1px solid var(--red);
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: 12px;
+  white-space: pre-wrap;
+}

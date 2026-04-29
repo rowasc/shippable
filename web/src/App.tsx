@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import "./App.css";
 import { CHANGESETS } from "./fixtures";
 import { initialState, reducer, changesetCoverage, reviewedFilesCount } from "./state";
@@ -15,6 +15,10 @@ import { LoadModal } from "./components/LoadModal";
 import { ReviewPlanView } from "./components/ReviewPlanView";
 import { CodeRunner } from "./components/CodeRunner";
 import { ThemePicker } from "./components/ThemePicker";
+import { PromptPicker } from "./components/PromptPicker";
+import { PromptResultsStack, type PromptRunView } from "./components/PromptResult";
+import { buildAutoFillContext, type Prompt } from "./promptStore";
+import { runPrompt } from "./promptRun";
 import { buildSymbolIndex } from "./symbols";
 import type { SymbolIndex } from "./symbols";
 import type { ChangeSet, Cursor, EvidenceRef } from "./types";
@@ -64,6 +68,12 @@ export default function App() {
   // (Esc or the close button) leaves the entry intact, so reopening
   // restores the in-progress text. Submitting clears the entry.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [showPicker, setShowPicker] = useState(false);
+  const [runs, setRuns] = useState<PromptRunView[]>([]);
+  // One AbortController per in-flight run, keyed by run id. Lives in a ref
+  // so we can abort without re-rendering and so prior runs survive when a
+  // new run starts.
+  const runControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
@@ -87,6 +97,9 @@ export default function App() {
       // or open help reach the app handler. Entry-point clicks still work
       // because those go through the button's own onClick.
       if (showPlan && !["p", "?", "Escape"].includes(e.key)) return;
+      // Picker overlay swallows everything except Escape; the picker handles
+      // its own internal input focus.
+      if (showPicker && e.key !== "Escape") return;
 
       // Let the browser own keys while the user has a text selection or is
       // typing into an input/textarea — don't steal shift+arrow, cmd+c, etc.
@@ -108,6 +121,7 @@ export default function App() {
         lineHasAiNote: !!line?.aiNote,
         hasSelection: !!state.selection,
         hasPlan: showPlan,
+        hasPicker: showPicker,
       };
 
       // Find the matching keymap entry (key + optional shift requirement +
@@ -218,6 +232,12 @@ export default function App() {
         case "OPEN_RUNNER":
           setFreeRunnerOpen(true);
           break;
+        case "OPEN_PROMPT_PICKER":
+          setShowPicker((v) => !v);
+          break;
+        case "CLOSE_PROMPT_PICKER":
+          setShowPicker(false);
+          break;
         case "PREV_CHANGESET":
           dispatch({
             type: "SWITCH_CHANGESET",
@@ -234,7 +254,7 @@ export default function App() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, showPlan, state.cursor, state.changesets, state.selection, suggestion, line]);
+  }, [showHelp, showPlan, showPicker, state.cursor, state.changesets, state.selection, suggestion, line]);
 
   const readCoverage = changesetCoverage(cs, state.readLines);
   const reviewedFiles = reviewedFilesCount(cs, state.reviewedFiles);
@@ -243,6 +263,41 @@ export default function App() {
   const guideViewModel = suggestion
     ? buildGuidePromptViewModel(suggestion, symbolIndex, cs.id)
     : null;
+
+  function startPromptRun(prompt: Prompt, rendered: string) {
+    const id = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const controller = new AbortController();
+    runControllersRef.current.set(id, controller);
+    // New runs go to the top so the most recent is most visible.
+    setRuns((prev) => [
+      { id, promptName: prompt.name, text: "", status: "streaming" },
+      ...prev,
+    ]);
+    setShowPicker(false);
+    const patchRun = (patch: (r: PromptRunView) => PromptRunView) =>
+      setRuns((prev) => prev.map((r) => (r.id === id ? patch(r) : r)));
+    runPrompt(
+      { text: rendered, signal: controller.signal },
+      {
+        onText: (chunk) =>
+          patchRun((r) => ({ ...r, text: r.text + chunk })),
+        onDone: () => {
+          runControllersRef.current.delete(id);
+          patchRun((r) => ({ ...r, status: "done" }));
+        },
+        onError: (msg) => {
+          runControllersRef.current.delete(id);
+          patchRun((r) => ({ ...r, status: "error", error: msg }));
+        },
+      },
+    );
+  }
+
+  function closePromptRun(id: string) {
+    runControllersRef.current.get(id)?.abort();
+    runControllersRef.current.delete(id);
+    setRuns((prev) => prev.filter((r) => r.id !== id));
+  }
 
   return (
     <div className="app">
@@ -435,6 +490,14 @@ export default function App() {
           saved={apiKey.status.kind === "saved-pending-restart"}
         />
       )}
+      {showPicker && (
+        <PromptPicker
+          context={buildAutoFillContext(cs, file, hunk, state.selection)}
+          onClose={() => setShowPicker(false)}
+          onSubmit={(prompt, rendered) => startPromptRun(prompt, rendered)}
+        />
+      )}
+      <PromptResultsStack runs={runs} onClose={closePromptRun} />
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showLoad && (
         <LoadModal

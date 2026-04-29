@@ -1,0 +1,141 @@
+.picker__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 360px;
+  overflow: auto;
+}
+.picker__item {
+  padding: 8px 14px;
+  border-bottom: 1px dashed var(--border);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.picker__search-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.picker__item-edit {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 10px;
+  padding: 1px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.picker__item-edit:hover {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
+.picker__item:last-child {
+  border-bottom: none;
+}
+.picker__item:hover,
+.picker__item--active {
+  background: var(--bg-3, var(--bg));
+}
+.picker__item-name {
+  color: var(--fg);
+  font-size: 13px;
+}
+.picker__item-badge {
+  color: var(--fg-mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.picker__item-desc {
+  grid-column: 1 / -1;
+  color: var(--fg-mute);
+  font-size: 11px;
+}
+.picker__empty {
+  padding: 14px;
+  color: var(--fg-mute);
+  font-size: 12px;
+}
+.picker__search {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.picker__search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.picker__form-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.picker__form-name {
+  color: var(--fg);
+  font-size: 13px;
+}
+.picker__form-desc {
+  color: var(--fg-mute);
+  font-size: 11px;
+  margin: 4px 0 8px;
+}
+.picker__arg {
+  margin-bottom: 8px;
+}
+.picker__arg-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.picker__arg-required {
+  color: var(--accent);
+}
+.picker__arg-input,
+.picker__arg-textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.picker__arg-textarea {
+  resize: vertical;
+  min-height: 90px;
+  white-space: pre;
+  font-family: var(--mono, monospace);
+}
+.picker__arg-input:focus,
+.picker__arg-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.picker__arg-hint {
+  color: var(--fg-mute);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.picker__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+}

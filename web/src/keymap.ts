@@ -34,13 +34,16 @@ export type ActionId =
   | "PREV_CHANGESET"
   | "NEXT_CHANGESET"
   | "OPEN_LOAD"
-  | "OPEN_RUNNER";
+  | "OPEN_RUNNER"
+  | "OPEN_PROMPT_PICKER"
+  | "CLOSE_PROMPT_PICKER";
 
 export type ContextPredicate =
   | "hasSuggestion"
   | "lineHasAiNote"
   | "hasSelection"
-  | "hasPlan";
+  | "hasPlan"
+  | "hasPicker";
 
 export type KeyGroup = "navigation" | "review" | "guide" | "ui" | "testing";
 
@@ -93,6 +96,8 @@ export const KEYMAP: KeyEntry[] = [
   { key: "Escape", label: "close help",          group: "ui", action: "CLOSE_HELP" },
   { key: "L", shift: true, label: "load a changeset (URL / file / paste)", group: "ui", action: "OPEN_LOAD" },
   { key: "R", shift: true, label: "open the free code runner", group: "ui", action: "OPEN_RUNNER" },
+  { key: "/", shift: false, label: "run a prompt on the current selection", group: "ui", action: "OPEN_PROMPT_PICKER" },
+  { key: "Escape", when: "hasPicker", label: "close prompt picker", group: "ui", action: "CLOSE_PROMPT_PICKER" },
 
   // ── testing ─────────────────────────────────────────────────────────────────
   { key: "[", label: "previous sample changeset", group: "testing", action: "PREV_CHANGESET" },

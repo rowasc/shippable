@@ -1,5 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { generatePlan } from "./plan.ts";
+import * as library from "./library.ts";
+import * as prompts from "./prompts.ts";
+import { streamReview } from "./review.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -41,6 +44,15 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/api/plan") {
       return handlePlan(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/review") {
+      return handleReview(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/library/refresh") {
+      return handleLibraryRefresh(req, res, origin);
+    }
+    if (req.method === "GET" && req.url === "/api/library/prompts") {
+      return handleListPrompts(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -98,6 +110,121 @@ async function handlePlan(
     const ms = Date.now() - started;
     console.error(`[server]   → err in ${ms}ms:`, err);
     const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+// Per-IP fixed-window limiter on the streaming endpoint. A stolen session
+// shouldn't be able to drain the API budget; this is the cheapest brake.
+const REVIEW_RATE_LIMIT = Number(process.env.SHIPPABLE_REVIEW_RATE_LIMIT ?? 30);
+const REVIEW_RATE_WINDOW_MS = 60_000;
+const reviewRequestLog = new Map<string, number[]>();
+
+function checkReviewRateLimit(ip: string): { allowed: true } | { allowed: false; resetSec: number } {
+  const now = Date.now();
+  const live = (reviewRequestLog.get(ip) ?? []).filter(
+    (t) => now - t < REVIEW_RATE_WINDOW_MS,
+  );
+  if (live.length >= REVIEW_RATE_LIMIT) {
+    reviewRequestLog.set(ip, live);
+    const resetSec = Math.ceil((REVIEW_RATE_WINDOW_MS - (now - live[0])) / 1000);
+    return { allowed: false, resetSec };
+  }
+  live.push(now);
+  reviewRequestLog.set(ip, live);
+  return { allowed: true };
+}
+
+async function handleReview(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const ip = req.socket.remoteAddress ?? "unknown";
+  const gate = checkReviewRateLimit(ip);
+  if (!gate.allowed) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(429, {
+      "Content-Type": "application/json",
+      "Retry-After": gate.resetSec.toString(),
+    });
+    res.end(
+      JSON.stringify({
+        error: `rate limit exceeded — try again in ${gate.resetSec}s (${REVIEW_RATE_LIMIT} requests / 60s)`,
+      }),
+    );
+    return;
+  }
+  const body = await readBody(req);
+  writeCorsHeaders(res, origin);
+  await streamReview(body, req, res);
+}
+
+async function handleListPrompts(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  try {
+    const list = await prompts.list();
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ prompts: list }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[server] /api/library/prompts err:", err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleLibraryRefresh(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const adminToken = process.env.SHIPPABLE_ADMIN_TOKEN?.trim();
+  const devMode = process.env.SHIPPABLE_DEV_MODE === "1";
+  if (!devMode) {
+    if (!adminToken) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "library refresh requires SHIPPABLE_ADMIN_TOKEN" }));
+      return;
+    }
+    const provided = req.headers["x-admin-token"];
+    if (provided !== adminToken) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid admin token" }));
+      return;
+    }
+  }
+
+  const started = Date.now();
+  try {
+    const source = await library.sync();
+    const ms = Date.now() - started;
+    const ref = source.kind === "git" ? await library.currentRef() : null;
+    console.log(
+      `[server] /api/library/refresh kind=${source.kind} root=${source.root} ms=${ms}`,
+    );
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        kind: source.kind,
+        root: source.root,
+        ref,
+      }),
+    );
+  } catch (err) {
+    const ms = Date.now() - started;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[server] /api/library/refresh err in ${ms}ms:`, err);
     writeCorsHeaders(res, origin);
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));

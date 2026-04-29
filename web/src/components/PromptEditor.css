@@ -1,0 +1,127 @@
+.editor__banner {
+  color: var(--fg-mute);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.editor__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.editor__row--end {
+  justify-content: flex-end;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+.editor__label {
+  width: 80px;
+  flex-shrink: 0;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+.editor__hint {
+  margin-left: 88px;
+  color: var(--fg-mute);
+  font-size: 10px;
+  margin-bottom: 8px;
+}
+.editor__hint code {
+  color: var(--fg-dim);
+  font-family: var(--mono, monospace);
+  font-size: 10px;
+}
+.editor__sec-h {
+  color: var(--fg-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 12px 0 4px;
+}
+.editor__empty {
+  color: var(--fg-mute);
+  font-size: 11px;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.editor__arg {
+  display: grid;
+  grid-template-columns: 120px 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.editor__arg-name {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+}
+.editor__arg-auto {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 11px;
+}
+.editor__arg-auto:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.editor__arg-req {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+.editor__arg-rm {
+  padding: 0 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+.editor__body {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 6px 8px;
+  font: inherit;
+  font-family: var(--mono, monospace);
+  font-size: 12px;
+  resize: vertical;
+  white-space: pre;
+  box-sizing: border-box;
+}
+.editor__body:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.editor__preview {
+  background: var(--bg);
+  color: var(--fg-dim);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 6px 8px;
+  font: inherit;
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  margin: 0 0 8px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.editor__delete {
+  color: var(--red);
+  border-color: var(--red);
+}
+.editor__delete:hover {
+  color: var(--fg);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
+.editor__spacer {
+  flex: 1;
+}
