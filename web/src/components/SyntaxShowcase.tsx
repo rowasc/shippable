@@ -15,9 +15,9 @@ export function SyntaxShowcase({ snippets }: Props) {
   return (
     <section className="syntax-showcase">
       <header className="syntax-showcase__head">
-        <div className="syntax-showcase__title">Shiki preview</div>
+        <div className="syntax-showcase__title">Syntax preview</div>
         <div className="syntax-showcase__meta">
-          GitHub light and dark themes across the languages we care about now
+          Light and dark code rendering across the languages we care about now
         </div>
       </header>
       <div className="syntax-showcase__modes">
