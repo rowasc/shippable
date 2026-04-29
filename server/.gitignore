@@ -8,3 +8,6 @@ dist/
 
 # Bun crash dumps.
 bun-debug-*.log
+
+# Bun --compile temp staging files left behind by interrupted builds.
+.*.bun-build

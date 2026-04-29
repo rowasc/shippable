@@ -2,6 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { planReview } from "./plan";
 import type { ChangeSet, ReviewPlan } from "./types";
 
+// Resolves the URL for the AI plan endpoint.
+//
+// In browser dev mode (vite dev server, no Tauri), we POST to /api/plan and
+// vite proxies to the standalone server on :3001 — same as before.
+//
+// Inside the bundled Tauri app the sidecar binary is spawned by Rust on a
+// random local port. The Rust side exposes that port via the get_sidecar_port
+// command; we read it once on first call and cache the resulting URL. If the
+// sidecar didn't spawn (e.g. no Anthropic key in Keychain), get_sidecar_port
+// returns null and we throw — the caller falls back to the rule-based plan.
+async function resolvePlanUrl(): Promise<string> {
+  const isTauri =
+    typeof window !== "undefined" &&
+    Boolean((window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+  if (!isTauri) return "/api/plan";
+
+  const { invoke } = await import("@tauri-apps/api/core");
+  const port = await invoke<number | null>("get_sidecar_port");
+  if (port == null) {
+    throw new Error("Sidecar not available (no Anthropic key in Keychain)");
+  }
+  return `http://127.0.0.1:${port}/api/plan`;
+}
+
 export type PlanStatus = "idle" | "loading" | "ready" | "fallback";
 
 export interface UsePlanResult {
@@ -52,11 +76,14 @@ export function usePlan(cs: ChangeSet): UsePlanResult {
     const targetCs = csRef.current;
     setStatus("loading");
     setError(undefined);
-    fetch("/api/plan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ changeset: targetCs }),
-    })
+    resolvePlanUrl()
+      .then((url) =>
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ changeset: targetCs }),
+        }),
+      )
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.text();

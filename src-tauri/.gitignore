@@ -2,3 +2,8 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# Bun-compiled sidecar binaries — built by `bun run build:sidecar` in
+# server/, bundled into the .app at `tauri build` time. Output filenames
+# follow Tauri's <name>-<rust-target-triple> convention.
+/binaries/
