@@ -15,7 +15,7 @@ Write a PR description for the following diff. Aim for what a senior engineer wo
 - A 2–4 line **Summary** that says *why* this change exists, not just what it does.
 - A short **Notes** section only if there are non-obvious decisions, follow-ups, or things a reviewer should know.
 
-No filler. No "this PR" preamble. No emoji.
+Avoid filler words, emoji, hype, and preamble.
 
 Diff:
 
