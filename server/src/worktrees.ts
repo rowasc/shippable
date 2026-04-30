@@ -2,16 +2,38 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 
 // PROTOTYPE: thin wrapper around `git worktree list --porcelain` and
 // `git show`. Production hardening is needed before this ships outside dev:
-//   - tighter path validation (symlink-following, allowed roots),
+//   - tighter path validation (realpath + allowed-roots list),
 //   - per-IP rate limits,
 //   - a max-output cap on `git show` (very large commits could OOM),
 //   - explicit user consent / picker for the directory rather than a free-form
 //     text input.
 
 const execFileAsync = promisify(execFile);
+
+// Resolve `git` once at module load so a later $PATH change can't redirect us
+// to a different binary. Falls back to bare "git" if the lookup fails.
+const GIT = resolveGit();
+
+function resolveGit(): string {
+  const envPath = process.env.PATH ?? "";
+  for (const dir of envPath.split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, "git");
+    try {
+      const st = fsSync.statSync(candidate);
+      if (!st.isFile()) continue;
+      fsSync.accessSync(candidate, fsSync.constants.X_OK);
+      return candidate;
+    } catch {
+      // try next entry
+    }
+  }
+  return "git";
+}
 
 export interface Worktree {
   path: string;
@@ -81,7 +103,7 @@ async function assertGitDir(dir: string): Promise<void> {
 export async function listWorktrees(dir: string): Promise<ListResult> {
   await assertGitDir(dir);
   const { stdout } = await execFileAsync(
-    "git",
+    GIT,
     ["worktree", "list", "--porcelain"],
     { cwd: dir, maxBuffer: 4 * 1024 * 1024 },
   );
@@ -132,7 +154,12 @@ export async function changesetFor(
 ): Promise<ChangesetResult> {
   await assertGitDir(worktreePath);
   // Restrict ref to a conservative shape: HEAD, HEAD~N, branch names, sha.
-  // Refuses anything with shell metacharacters or whitespace.
+  // Refuses anything with shell metacharacters or whitespace. The leading-`-`
+  // check is a belt-and-suspenders guard against option-as-ref attacks; the
+  // `--end-of-options` separator below is the primary defense.
+  if (ref.startsWith("-")) {
+    throw new Error(`ref must not start with '-': ${ref}`);
+  }
   if (!/^[A-Za-z0-9_./~^@-]{1,200}$/.test(ref)) {
     throw new Error(`invalid ref: ${ref}`);
   }
@@ -142,8 +169,8 @@ export async function changesetFor(
   const SEP = "<<<SHIPPABLE-WT-SEP>>>";
   const fmt = `%H%n%s%n%an <%ae>%n%aI%n${SEP}`;
   const { stdout } = await execFileAsync(
-    "git",
-    ["show", `--format=${fmt}`, "--patch", ref],
+    GIT,
+    ["show", `--format=${fmt}`, "--patch", "--end-of-options", ref],
     { cwd: worktreePath, maxBuffer: 32 * 1024 * 1024 },
   );
 
@@ -161,7 +188,7 @@ export async function changesetFor(
   let branch: string | null = null;
   try {
     const { stdout: br } = await execFileAsync(
-      "git",
+      GIT,
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd: worktreePath },
     );
