@@ -480,9 +480,9 @@ function FrameStage({
     }
   }, [frame.overlay]);
 
-  // Prompt-result stack — real Claude streams from picker submits land here,
-  // and frame 10 also seeds a fake-streaming demo run so the surface looks
-  // populated even without a backend.
+  // Prompt runs — real Claude streams from picker submits land here, and
+  // frame 10 also seeds a fake-streaming demo run so the surface looks
+  // populated even without a backend. Rendered in the sidebar panel.
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());

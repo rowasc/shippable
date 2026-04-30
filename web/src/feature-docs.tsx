@@ -530,6 +530,7 @@ function App() {
               onClose={() => {}}
               wide={false}
               onToggleWide={() => {}}
+              initialExpandedIds={["run-2"]}
             />
           </aside>
         </div>

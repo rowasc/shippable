@@ -17,10 +17,19 @@ interface Props {
   onClose: (id: string) => void;
   wide: boolean;
   onToggleWide: () => void;
+  initialExpandedIds?: string[];
 }
 
-export function PromptRunsPanel({ runs, onClose, wide, onToggleWide }: Props) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+export function PromptRunsPanel({
+  runs,
+  onClose,
+  wide,
+  onToggleWide,
+  initialExpandedIds,
+}: Props) {
+  const [expanded, setExpanded] = useState<Set<string>>(
+    () => new Set(initialExpandedIds ?? []),
+  );
   if (runs.length === 0) return null;
   const toggle = (id: string) =>
     setExpanded((prev) => {

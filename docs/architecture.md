@@ -4,7 +4,7 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 
 ## Packages
 
-- `web/` — React + Vite, Node 22, TypeScript. Three entry points: `/` (live app), `/gallery.html` (screen catalog driven by canned fixtures), `?cs=<id>` (jumps to a sample ChangeSet).
+- `web/` — React + Vite, Node 22, TypeScript. Four HTML entry points: `/` (live app), `/gallery.html` (screen catalog driven by canned fixtures), `/demo.html` (scripted demo route), `/feature-docs.html` (per-feature fixture viewer). The live app also accepts `?cs=<id>` to jump to a sample ChangeSet.
 - `server/` — tiny Node http server, `tsx watch` in dev. Optional: without it the UI falls back to a rule-based plan.
 - `src-tauri/` — Tauri 2 shell. Wraps the web app for the desktop build. The server is compiled to a standalone binary via `bun build --compile` and bundled as a sidecar.
 - `library/prompts/` — markdown prompts (`explain-this-hunk`, `security-review`, `suggest-tests`, `summarise-for-pr`).
@@ -35,7 +35,17 @@ macOS Keychain at `service=shippable, account=ANTHROPIC_API_KEY`. Same entry ser
 
 ## UI surfaces
 
-`web/src/components/`: DiffView, Sidebar, Inspector, StatusBar, ReviewPlanView, GuidePrompt, ReplyThread, PromptPicker, PromptEditor, PromptResult, CodeRunner, Reference, KeySetup, LoadModal, HelpOverlay, ThemePicker, SyntaxBlock/Showcase, plus Gallery and Demo (internal — not part of the user-facing product).
+`web/src/components/`: DiffView, Sidebar, Inspector, StatusBar, ReviewPlanView, GuidePrompt, ReplyThread, PromptPicker, PromptEditor, PromptRunsPanel, CodeRunner, CodeText, CopyButton, RichText, Reference, KeySetup, LoadModal, HelpOverlay, ThemePicker, SyntaxBlock/Showcase, plus Gallery and Demo (internal — not part of the user-facing product).
+
+## Other front-end modules
+
+Beyond components, the load-bearing modules in `web/src/`:
+
+- `promptRun.ts` + `promptStore.ts` — prompt-run state machine and persistence; what `PromptRunsPanel` renders.
+- `symbols.ts` — symbol metadata attached to hunks; basis for the symbol-navigation work tracked in `docs/plan-symbols.md`.
+- `feature-docs.tsx` — entry point for `/feature-docs.html`, paired with per-feature markdown under `docs/features/`.
+- `parseDiff.ts`, `highlight.ts`, `tokens.ts` — diff parsing and Shiki-based highlighting feeding `DiffView`.
+- `persist.ts` — localStorage round-trip for `ReviewState`.
 
 ## Themes
 
