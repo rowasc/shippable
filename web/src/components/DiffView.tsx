@@ -9,14 +9,21 @@ import type {
   FullFileLineViewModel,
   HunkViewModel,
 } from "../view";
+import { MarkdownView } from "./MarkdownView";
 
 interface Props {
   viewModel: DiffViewModel;
   onSetExpandLevel: (hunkId: string, dir: "above" | "below", level: number) => void;
   onToggleExpandFile: (fileId: string) => void;
+  onTogglePreviewFile: (fileId: string) => void;
 }
 
-export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Props) {
+export function DiffView({
+  viewModel,
+  onSetExpandLevel,
+  onToggleExpandFile,
+  onTogglePreviewFile,
+}: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
 
   // Derive the current hunk id and cursor line idx from the view model for the
@@ -25,9 +32,21 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
   const cursorLineIdx = currentHunk?.lines.findIndex((l) => l.isCursor) ?? -1;
 
   useEffect(() => {
-    if (!viewModel.fileFullyExpanded)
+    if (!viewModel.fileFullyExpanded && !viewModel.filePreviewing)
       cursorRef.current?.scrollIntoView({ block: "nearest" });
-  }, [currentHunk?.id, cursorLineIdx, viewModel.fileId, viewModel.fileFullyExpanded]);
+  }, [
+    currentHunk?.id,
+    cursorLineIdx,
+    viewModel.fileId,
+    viewModel.fileFullyExpanded,
+    viewModel.filePreviewing,
+  ]);
+
+  const mode: "diff" | "fullsource" | "preview" = viewModel.filePreviewing
+    ? "preview"
+    : viewModel.fileFullyExpanded
+      ? "fullsource"
+      : "diff";
 
   return (
     <main className={`diff ${viewModel.isFileReviewed ? "diff--file-reviewed" : ""}`}>
@@ -40,18 +59,38 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
           </span>
         )}
         <span className="diff__spacer" />
-        {viewModel.canExpandFile && (
-          <button
-            className={`diff__expand-file ${viewModel.fileFullyExpanded ? "diff__expand-file--on" : ""}`}
-            onClick={() => onToggleExpandFile(viewModel.fileId)}
-            title="expand / collapse entire file"
-          >
-            {viewModel.fileFullyExpanded ? "↙ collapse to hunks" : "↗ expand entire file"}
-          </button>
+        {viewModel.canPreview ? (
+          <ModeToggle
+            mode={mode}
+            canFullSource={viewModel.canExpandFile}
+            onSelect={(next) => {
+              if (next === mode) return;
+              if (next === "preview") onTogglePreviewFile(viewModel.fileId);
+              else if (next === "fullsource") onToggleExpandFile(viewModel.fileId);
+              else if (mode === "preview") onTogglePreviewFile(viewModel.fileId);
+              else onToggleExpandFile(viewModel.fileId);
+            }}
+          />
+        ) : (
+          viewModel.canExpandFile && (
+            <button
+              className={`diff__expand-file ${viewModel.fileFullyExpanded ? "diff__expand-file--on" : ""}`}
+              onClick={() => onToggleExpandFile(viewModel.fileId)}
+              title="expand / collapse entire file"
+            >
+              {viewModel.fileFullyExpanded ? "↙ collapse to hunks" : "↗ expand entire file"}
+            </button>
+          )
         )}
       </header>
 
-      {viewModel.fileFullyExpanded ? (
+      {viewModel.filePreviewing ? (
+        <MarkdownView
+          source={viewModel.previewSource}
+          basePath={viewModel.path}
+          imageAssets={viewModel.imageAssets}
+        />
+      ) : viewModel.fileFullyExpanded ? (
         <FullFileView
           path={viewModel.path}
           language={viewModel.language}
@@ -69,6 +108,47 @@ export function DiffView({ viewModel, onSetExpandLevel, onToggleExpandFile }: Pr
         ))
       )}
     </main>
+  );
+}
+
+function ModeToggle({
+  mode,
+  canFullSource,
+  onSelect,
+}: {
+  mode: "diff" | "fullsource" | "preview";
+  canFullSource: boolean;
+  onSelect: (next: "diff" | "fullsource" | "preview") => void;
+}) {
+  return (
+    <div className="diff__mode" role="tablist" aria-label="View mode">
+      <button
+        role="tab"
+        aria-selected={mode === "diff"}
+        className={`diff__mode-btn ${mode === "diff" ? "diff__mode-btn--on" : ""}`}
+        onClick={() => onSelect("diff")}
+      >
+        Diff
+      </button>
+      {canFullSource && (
+        <button
+          role="tab"
+          aria-selected={mode === "fullsource"}
+          className={`diff__mode-btn ${mode === "fullsource" ? "diff__mode-btn--on" : ""}`}
+          onClick={() => onSelect("fullsource")}
+        >
+          Source
+        </button>
+      )}
+      <button
+        role="tab"
+        aria-selected={mode === "preview"}
+        className={`diff__mode-btn ${mode === "preview" ? "diff__mode-btn--on" : ""}`}
+        onClick={() => onSelect("preview")}
+      >
+        Preview
+      </button>
+    </div>
   );
 }
 

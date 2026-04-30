@@ -137,6 +137,11 @@ function DiffGalleryItem({ fixture }: { fixture: DiffGalleryFixture }) {
     [],
   );
 
+  const handleTogglePreviewFile = useCallback(
+    (fileId: string) => dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId }),
+    [],
+  );
+
   return (
     <DiffView
       viewModel={buildDiffViewModel({
@@ -153,10 +158,13 @@ function DiffGalleryItem({ fixture }: { fixture: DiffGalleryFixture }) {
         expandLevelAbove: itemState.expandLevelAbove,
         expandLevelBelow: itemState.expandLevelBelow,
         fileFullyExpanded: itemState.fullExpandedFiles.has(file.id),
+        filePreviewing: itemState.previewedFiles.has(file.id),
+        imageAssets: cs.imageAssets,
         selection: itemState.selection,
       })}
       onSetExpandLevel={handleSetExpandLevel}
       onToggleExpandFile={handleToggleExpandFile}
+      onTogglePreviewFile={handleTogglePreviewFile}
     />
   );
 }

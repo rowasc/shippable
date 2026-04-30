@@ -1,0 +1,49 @@
+/* github-markdown light/dark variants are loaded at runtime by MarkdownView
+ * with their `.markdown-body` selector rescoped under
+ * `[data-md-scheme="light|dark"] .markdown-body`, so that a single page can
+ * show either palette regardless of the OS prefers-color-scheme. */
+
+.md-preview {
+  padding: 24px 32px;
+  overflow: auto;
+  background: var(--bg-2);
+}
+
+.md-preview .markdown-body {
+  background: transparent;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.md-preview__shiki {
+  display: block;
+}
+
+.md-preview__shiki .shiki {
+  border-radius: 6px;
+  padding: 16px;
+  overflow: auto;
+  font-size: 85%;
+  line-height: 1.45;
+}
+
+.md-preview__code-fallback {
+  background: var(--bg-3);
+  padding: 16px;
+  border-radius: 6px;
+  overflow: auto;
+  font-family: var(--font-mono);
+}
+
+/* GitHub's `.markdown-body .highlight pre, .markdown-body pre` styling clashes
+   with Shiki's own <pre>, which already sets background + padding. Reset to
+   let Shiki render unaltered. */
+.md-preview .markdown-body .md-preview__shiki pre {
+  background: inherit;
+  padding: 0;
+  margin: 0;
+}
+
+/* GitHub Alerts (>[!NOTE], etc.) — remark-github-blockquote-alert renders
+   blockquote.markdown-alert with header span.markdown-alert-title; the
+   github-markdown css already styles those, so nothing extra here. */

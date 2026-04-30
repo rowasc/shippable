@@ -341,10 +341,12 @@ function WorkspaceFrame({
               expandLevelAbove: state.expandLevelAbove,
               expandLevelBelow: state.expandLevelBelow,
               fileFullyExpanded: state.fullExpandedFiles.has(file.id),
+              filePreviewing: state.previewedFiles.has(file.id),
               selection: state.selection,
             })}
             onSetExpandLevel={() => {}}
             onToggleExpandFile={() => {}}
+            onTogglePreviewFile={() => {}}
           />
           {showInspector && (
             <Inspector

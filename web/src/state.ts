@@ -17,6 +17,7 @@ export function initialState(seed: ChangeSet[]): ReviewState {
     expandLevelAbove: {},
     expandLevelBelow: {},
     fullExpandedFiles: new Set(),
+    previewedFiles: new Set(),
     selection: null,
   };
 }
@@ -56,6 +57,7 @@ export type Action =
   | { type: "DELETE_REPLY"; targetKey: string; replyId: string }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
+  | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
   | { type: "TOGGLE_FILE_REVIEWED"; fileId: string };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
@@ -161,8 +163,24 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         [field]: { ...state[field], [action.hunkId]: Math.max(0, action.level) },
       };
     }
-    case "TOGGLE_EXPAND_FILE":
-      return { ...state, fullExpandedFiles: togglein(state.fullExpandedFiles, action.fileId) };
+    case "TOGGLE_EXPAND_FILE": {
+      const next = togglein(state.fullExpandedFiles, action.fileId);
+      const turningOn = next.has(action.fileId);
+      return {
+        ...state,
+        fullExpandedFiles: next,
+        previewedFiles: turningOn ? removeFrom(state.previewedFiles, action.fileId) : state.previewedFiles,
+      };
+    }
+    case "TOGGLE_PREVIEW_FILE": {
+      const next = togglein(state.previewedFiles, action.fileId);
+      const turningOn = next.has(action.fileId);
+      return {
+        ...state,
+        previewedFiles: next,
+        fullExpandedFiles: turningOn ? removeFrom(state.fullExpandedFiles, action.fileId) : state.fullExpandedFiles,
+      };
+    }
     case "TOGGLE_FILE_REVIEWED":
       return { ...state, reviewedFiles: togglein(state.reviewedFiles, action.fileId) };
   }
@@ -172,6 +190,13 @@ function togglein(set: Set<string>, key: string): Set<string> {
   const next = new Set(set);
   if (next.has(key)) next.delete(key);
   else next.add(key);
+  return next;
+}
+
+function removeFrom(set: Set<string>, key: string): Set<string> {
+  if (!set.has(key)) return set;
+  const next = new Set(set);
+  next.delete(key);
   return next;
 }
 

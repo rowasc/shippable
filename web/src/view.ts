@@ -123,6 +123,14 @@ export interface DiffViewModel {
   fullFileLines: FullFileLineViewModel[];
   /** Per-hunk view models (empty when fileFullyExpanded is true). */
   hunks: HunkViewModel[];
+  /** True when the file is currently in rendered-preview mode (markdown only). */
+  filePreviewing: boolean;
+  /** True when this file's language can be rendered as markdown preview. */
+  canPreview: boolean;
+  /** Post-change source string for the markdown preview, when previewing. */
+  previewSource: string;
+  /** Repo-relative image asset map, threaded from the changeset. */
+  imageAssets?: Record<string, string>;
 }
 
 // ─── Builder ─────────────────────────────────────────────────────────────────
@@ -140,6 +148,12 @@ export interface BuildDiffViewModelArgs {
   expandLevelAbove: Record<string, number>;
   expandLevelBelow: Record<string, number>;
   fileFullyExpanded: boolean;
+  filePreviewing: boolean;
+  /**
+   * Image assets the markdown preview can resolve relative paths against.
+   * Threaded through from the enclosing ChangeSet.
+   */
+  imageAssets?: Record<string, string>;
   /** Active shift-extended selection, or null. */
   selection?: LineSelection | null;
 }
@@ -155,13 +169,23 @@ export function buildDiffViewModel({
   expandLevelAbove,
   expandLevelBelow,
   fileFullyExpanded,
+  filePreviewing,
+  imageAssets,
   selection,
 }: BuildDiffViewModelArgs): DiffViewModel {
   const canExpandFile = !!file.fullContent;
+  const canPreview = file.language === "markdown" && !!file.fullContent;
+  const previewing = filePreviewing && canPreview;
+  const previewSource = previewing
+    ? (file.fullContent ?? [])
+        .filter((line) => line.kind !== "del")
+        .map((line) => line.text)
+        .join("\n")
+    : "";
 
   // Pre-compute full-file lines only when needed.
   const fullFileLines: FullFileLineViewModel[] =
-    fileFullyExpanded && file.fullContent
+    fileFullyExpanded && !previewing && file.fullContent
       ? file.fullContent.map((line) => ({
           kind: line.kind,
           text: line.text,
@@ -173,7 +197,7 @@ export function buildDiffViewModel({
       : [];
 
   // Build hunk view models.
-  const hunks: HunkViewModel[] = fileFullyExpanded
+  const hunks: HunkViewModel[] = fileFullyExpanded || previewing
     ? []
     : file.hunks.map((hunk) => {
         const isCurrent = hunk.id === currentHunkId;
@@ -291,9 +315,13 @@ export function buildDiffViewModel({
     fileId: file.id,
     isFileReviewed,
     canExpandFile,
-    fileFullyExpanded,
+    fileFullyExpanded: fileFullyExpanded && !previewing,
     fullFileLines,
     hunks,
+    filePreviewing: previewing,
+    canPreview,
+    previewSource,
+    imageAssets,
   };
 }
 

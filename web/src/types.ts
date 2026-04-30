@@ -77,6 +77,12 @@ export interface ChangeSet {
   createdAt: string;
   description: string;
   files: DiffFile[];
+  /**
+   * Repo-relative path → URL (typically a data URL) for binary assets that
+   * the markdown preview should resolve. Keys must match the path computed
+   * from a markdown file's directory plus its relative image reference.
+   */
+  imageAssets?: Record<string, string>;
 }
 
 export interface Cursor {
@@ -129,6 +135,11 @@ export interface ReviewState {
   expandLevelAbove: Record<string, number>;
   expandLevelBelow: Record<string, number>;
   fullExpandedFiles: Set<string>;
+  /**
+   * File ids the reviewer has switched into rendered-preview mode (markdown
+   * files only). Mutually exclusive with `fullExpandedFiles`.
+   */
+  previewedFiles: Set<string>;
   /** Active shift-extended selection; null when the cursor is a single line. */
   selection: LineSelection | null;
 }

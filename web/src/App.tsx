@@ -479,6 +479,8 @@ export default function App() {
             expandLevelAbove: state.expandLevelAbove,
             expandLevelBelow: state.expandLevelBelow,
             fileFullyExpanded: state.fullExpandedFiles.has(file.id),
+            filePreviewing: state.previewedFiles.has(file.id),
+            imageAssets: cs.imageAssets,
             selection: state.selection,
           })}
           onSetExpandLevel={(hunkId, dir, level) =>
@@ -486,6 +488,9 @@ export default function App() {
           }
           onToggleExpandFile={(fileId) =>
             dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
+          }
+          onTogglePreviewFile={(fileId) =>
+            dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId })
           }
         />
         {showInspector && (

@@ -880,6 +880,8 @@ function FrameStage({
             expandLevelAbove: state.expandLevelAbove,
             expandLevelBelow: state.expandLevelBelow,
             fileFullyExpanded: state.fullExpandedFiles.has(file.id),
+            filePreviewing: state.previewedFiles.has(file.id),
+            imageAssets: cs.imageAssets,
             selection: state.selection,
           })}
           onSetExpandLevel={(hunkId, dir, level) =>
@@ -887,6 +889,9 @@ function FrameStage({
           }
           onToggleExpandFile={(fileId) =>
             dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
+          }
+          onTogglePreviewFile={(fileId) =>
+            dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId })
           }
         />
         {showInspector && (
