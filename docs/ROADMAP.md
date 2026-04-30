@@ -1,10 +1,44 @@
 # Roadmap
 
-We're aiming to put a first alpha (0.1.0) out by **May 16, 2026**. This is what will make the cut for the release.
+The goal of this app is an exceptional review experience that gets you from idea to shippable code faster.
 
+The following are some loosely set plans for our first alpha release, and what will come next.
 
 ## Release 0.1.0 - local-first review tooling
 
+We are focusing on the core of the idea and experience; how to make the review experience itself as good as it can be, with a focus on locally available diffs first.
+
+### Local reviews
+
+- you can point it to any URL .diff 
+- you can point it to any two branches in your filesystem
+- you can paste any diff
+
+### Runners as first-class citizens
+
+- Code runner; select-to-run, write-your own. Wasm enabled runners for JS, PHP, and TS. More options to come later :) 
+
+### Reporter
+
+- Collects all the tests for a method, shows them inline - what's covered, what isn't, if there's a cov report we can also even use it, but if not, can be inferred with AI and static analysis
+
+- "Does this test do anything?" mode - avoid useless tests
+
+### AI-enabled review UX
+
+- Select code to send to an AI to review from a prompt library, mantain your own.
+
+- Review-while-they-work workflows - as your agents work, you review your worktrees based on the last changeset committed. It uses your agent's context and chat, and you can feed your review back to the agent with feedback to continue after it wraps up the next task, or to a new agent.
+    - can we send feedback to a live session, too,? That'd be excellent, to steer the session live.
+    - we should test the results a bit, or give the user the option between live and non-live operations mode 
+
+- AI Inspector - "Claude, review this diff" results in a much easier to inspect experience, with comments inlined into the web UI, symbols highlighted and reachable, and one-click verification/fixup workflows for potential bugs.
+
+### LSP
+
+Click-through definition at a minimum
+
+### Basics
 - A macOS `.dmg` we'd be happy handing to a teammate to use.
 - Tests and CI, so we're not the bottleneck for every release.
 - AI reviewer integration. Initially only Anthropic APIs are supported.
@@ -16,16 +50,10 @@ We're aiming to put a first alpha (0.1.0) out by **May 16, 2026**. This is what 
 ## Release 0.2.0 - connectivity
 
 - Connect with any MCP.
-- Bring-your-own-key for whichever model you want to use. We will add support for various popular APIs and models.
+- Bring-your-own-key for whichever model you want to use. We will add support for various popular APIs and models, prioritizing OpenAI.
 - Send reviews to GitHub / view reviews from GitHub.
 
 ## Shipping first
-
-**Block-level review as a primitive.** Right now review happens at two grains: the line you just passed and the file you signed off on. Most actual review work lives in the middle — "this 12-line helper looks wrong," "I want a second opinion on this regex," "let an agent verify this loop while I keep moving." We're making that middle a real object.
-
-A block is a contiguous range you select and then act on: hand it to an agent for a focused pass, attach a comment thread, flag it as needing another pair of eyes, or pin it as an entry point in the plan. Blocks stick around as you keep moving, so anything you delegated is still there when the agent comes back. Routing those asks to an actual teammate's machine is a backend problem and lives in the next phase.
-
-**Release plumbing.** Tests for the parts that hurt when they break — the diff parser, the plan-evidence invariant, the runner sandbox, the origin allowlist. CI on every push. Signing and notarisation if we can land the certificate work in time; otherwise unsigned with a known first-launch step and signing as the first follow-up.
 
 ## Coming right after
 
@@ -35,9 +63,9 @@ A block is a contiguous range you select and then act on: hand it to an agent fo
 
 **Micro-skills / contextual skill loaders.** Auto-pull a skill into the active set when the diff matches its scope — a Gutenberg block, a new plugin's config. The skill machinery is in place; we need the matching layer on top.
 
-## Later
+**Spend caps and monitoring** - Don't spend more than X/day or Y/review
 
-**Hosted backend and shared reviews.** Reviews you can pick up from another machine, or that a teammate can keep working on. A8c-only at first.
+**Hosted backend and shared reviews.** Reviews you can pick up from another machine, or that a teammate can keep working on. This is still a maybe.
 
 **GitHub two-way.** Post review threads back as PR comments. Pairs with the hosted backend.
 
@@ -47,4 +75,4 @@ A block is a contiguous range you select and then act on: hand it to an agent fo
 
 - We're not building our own PR system or diff format.
 - We're not chasing IDE integrations. Web and desktop are enough surface for now.
-- We're not adding cloud-anything before the local product is something we'd actually want to use ourselves.
+- We're not adding cloud-anything before the local product is something we actually use day to day.
