@@ -13,18 +13,6 @@ export const CS_09: ChangeSet = {
   createdAt: "2026-04-23T09:00:00Z",
   description:
     "New `lib/money.php` with format/parse/add helpers backed by a tiny locale table. Replaces ad-hoc number_format() calls scattered across the cart.",
-  skills: [
-    {
-      id: "php-i18n",
-      label: "review PHP i18n",
-      reason: "money formatting depends on locale + currency tables",
-    },
-    {
-      id: "input-validation",
-      label: "review input validation",
-      reason: "parse_money parses untrusted strings",
-    },
-  ],
   files: [
     // ─── lib/money.php (new file) ────────────────────────────────────────
     {

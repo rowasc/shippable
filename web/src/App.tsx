@@ -80,7 +80,6 @@ export default function App() {
       readLines: persisted.readLines,
       reviewedFiles: persisted.reviewedFiles,
       dismissedGuides: persisted.dismissedGuides,
-      activeSkills: persisted.activeSkills,
       ackedNotes: persisted.ackedNotes,
       // initialState seeds replies with SEED_REPLIES; merge those with
       // any user replies/comments the persisted session captured.
@@ -404,11 +403,6 @@ export default function App() {
           {cs.branch} → {cs.base}
         </span>
         <span className="topbar__spacer" />
-        <ActiveSkillChips
-          skills={cs.skills}
-          active={state.activeSkills}
-          onDeactivate={(id) => dispatch({ type: "TOGGLE_SKILL", skillId: id })}
-        />
         <span className="topbar__author">@{cs.author}</span>
         <ThemePicker value={themeId} onChange={setThemeId} />
         <button
@@ -447,11 +441,9 @@ export default function App() {
         <Sidebar
           viewModel={buildSidebarViewModel({
             files: cs.files,
-            skills: cs.skills,
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
-            activeSkills: state.activeSkills,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId)!;
@@ -465,7 +457,6 @@ export default function App() {
               },
             });
           }}
-          onToggleSkill={(id) => dispatch({ type: "TOGGLE_SKILL", skillId: id })}
         />
         <DiffView
           viewModel={buildDiffViewModel({
@@ -743,35 +734,3 @@ function PlanChip({
   );
 }
 
-/**
- * Active skill chips — make the toggle observable. Without this, the
- * sidebar checkbox flips and nothing else changes; the chip surfaces
- * the active state in the global topbar and gives a fast click-to-
- * deactivate path.
- */
-function ActiveSkillChips({
-  skills,
-  active,
-  onDeactivate,
-}: {
-  skills: { id: string; label: string; reason: string }[];
-  active: Set<string>;
-  onDeactivate: (id: string) => void;
-}) {
-  const activeSkills = skills.filter((s) => active.has(s.id));
-  if (activeSkills.length === 0) return null;
-  return (
-    <span className="topbar__skills">
-      {activeSkills.map((s) => (
-        <button
-          key={s.id}
-          className="topbar__skill"
-          onClick={() => onDeactivate(s.id)}
-          title={`${s.reason} — click to deactivate`}
-        >
-          {s.label} <span className="topbar__skill-x">×</span>
-        </button>
-      ))}
-    </span>
-  );
-}

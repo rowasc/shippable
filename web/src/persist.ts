@@ -24,7 +24,6 @@ interface PersistedSnapshot {
   readLines: Record<string, number[]>;
   reviewedFiles: string[];
   dismissedGuides: string[];
-  activeSkills: string[];
   ackedNotes: string[];
   replies: Record<string, Reply[]>;
   drafts: Record<string, string>;
@@ -40,7 +39,6 @@ export interface HydratedSession {
     | "readLines"
     | "reviewedFiles"
     | "dismissedGuides"
-    | "activeSkills"
     | "ackedNotes"
     | "replies"
   > | null;
@@ -66,7 +64,6 @@ export function buildSnapshot(
     readLines,
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
     dismissedGuides: Array.from(state.dismissedGuides).sort(),
-    activeSkills: Array.from(state.activeSkills).sort(),
     ackedNotes: Array.from(state.ackedNotes).sort(),
     replies: state.replies,
     drafts,
@@ -140,7 +137,6 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
       readLines,
       reviewedFiles: new Set(parsed.reviewedFiles.filter((id) => validFileIds.has(id))),
       dismissedGuides: new Set(parsed.dismissedGuides),
-      activeSkills: new Set(parsed.activeSkills),
       ackedNotes: new Set(parsed.ackedNotes),
       replies: filterRepliesByHunk(parsed.replies, validHunkIds),
     },
@@ -159,7 +155,6 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
     typeof o.readLines === "object" &&
     Array.isArray(o.reviewedFiles) &&
     Array.isArray(o.dismissedGuides) &&
-    Array.isArray(o.activeSkills) &&
     Array.isArray(o.ackedNotes) &&
     typeof o.replies === "object" &&
     typeof o.drafts === "object"

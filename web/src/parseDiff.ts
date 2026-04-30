@@ -46,7 +46,6 @@ export function parseDiff(
     base: meta.base ?? "base",
     createdAt: new Date().toISOString(),
     description: "",
-    skills: [],
     files,
   };
 }

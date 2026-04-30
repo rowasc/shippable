@@ -317,16 +317,8 @@ export interface SidebarFileItem {
   isCurrent: boolean;
 }
 
-export interface SidebarSkillItem {
-  id: string;
-  label: string;
-  reason: string;
-  active: boolean;
-}
-
 export interface SidebarViewModel {
   files: SidebarFileItem[];
-  skills: SidebarSkillItem[];
 }
 
 function fileStatusChar(s: string): string {
@@ -341,20 +333,16 @@ function fileStatusChar(s: string): string {
 
 export interface BuildSidebarViewModelArgs {
   files: Array<{ id: string; path: string; status: FileStatus; hunks: { id: string; lines: unknown[] }[] }>;
-  skills: Array<{ id: string; label: string; reason: string }>;
   currentFileId: string;
   readLines: Record<string, Set<number>>;
   reviewedFiles: Set<string>;
-  activeSkills: Set<string>;
 }
 
 export function buildSidebarViewModel({
   files,
-  skills,
   currentFileId,
   readLines,
   reviewedFiles,
-  activeSkills,
 }: BuildSidebarViewModelArgs): SidebarViewModel {
   const fileItems: SidebarFileItem[] = files.map((f) => {
     const readCoverage = fileCoverage(f, readLines);
@@ -376,14 +364,7 @@ export function buildSidebarViewModel({
     };
   });
 
-  const skillItems: SidebarSkillItem[] = skills.map((s) => ({
-    id: s.id,
-    label: s.label,
-    reason: s.reason,
-    active: activeSkills.has(s.id),
-  }));
-
-  return { files: fileItems, skills: skillItems };
+  return { files: fileItems };
 }
 
 // ─── StatusBar view model ─────────────────────────────────────────────────────

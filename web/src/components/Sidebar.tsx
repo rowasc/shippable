@@ -4,10 +4,9 @@ import type { SidebarViewModel } from "../view";
 interface Props {
   viewModel: SidebarViewModel;
   onPickFile: (fileId: string) => void;
-  onToggleSkill: (skillId: string) => void;
 }
 
-export function Sidebar({ viewModel, onPickFile, onToggleSkill }: Props) {
+export function Sidebar({ viewModel, onPickFile }: Props) {
   return (
     <aside className="sidebar">
       <section className="panel">
@@ -37,26 +36,6 @@ export function Sidebar({ viewModel, onPickFile, onToggleSkill }: Props) {
                   {f.statusChar}
                 </span>
                 <span className="row__label">{f.path}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="panel">
-        <header className="panel__h">
-          Skills <span className="panel__sub">contextual</span>
-        </header>
-        <ul className="panel__list">
-          {viewModel.skills.map((s) => (
-            <li key={s.id}>
-              <button
-                className={`row ${s.active ? "row--skill-on" : ""}`}
-                onClick={() => onToggleSkill(s.id)}
-                title={s.reason}
-              >
-                <span className="row__checkbox">{s.active ? "[x]" : "[ ]"}</span>
-                <span className="row__label">{s.label}</span>
               </button>
             </li>
           ))}

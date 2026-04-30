@@ -15,18 +15,6 @@ export const CS_31: ChangeSet = {
   createdAt: "2026-04-26T08:15:00Z",
   description:
     "Three string utilities the blog list view needs: slugify (URL paths), truncate (card previews), and excerpt (the first N words). Replaces the inline regex'ing currently in BlogCard.tsx.",
-  skills: [
-    {
-      id: "unicode",
-      label: "review unicode handling",
-      reason: "string utilities silently drop or mangle non-ASCII unless you check",
-    },
-    {
-      id: "boundary-conditions",
-      label: "review boundary conditions",
-      reason: "off-by-one in truncate / excerpt is the classic bug here",
-    },
-  ],
   files: [
     {
       id: "cs-31/src/utils/text.ts",
