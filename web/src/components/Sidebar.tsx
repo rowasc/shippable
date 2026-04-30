@@ -1,14 +1,32 @@
 import "./Sidebar.css";
 import type { SidebarViewModel } from "../view";
+import { PromptRunsPanel, type PromptRunView } from "./PromptRunsPanel";
 
 interface Props {
   viewModel: SidebarViewModel;
   onPickFile: (fileId: string) => void;
+  runs: PromptRunView[];
+  onCloseRun: (id: string) => void;
+  wide: boolean;
+  onToggleWide: () => void;
 }
 
-export function Sidebar({ viewModel, onPickFile }: Props) {
+export function Sidebar({
+  viewModel,
+  onPickFile,
+  runs,
+  onCloseRun,
+  wide,
+  onToggleWide,
+}: Props) {
   return (
     <aside className="sidebar">
+      <PromptRunsPanel
+        runs={runs}
+        onClose={onCloseRun}
+        wide={wide}
+        onToggleWide={onToggleWide}
+      />
       <section className="panel">
         <header className="panel__h">Files</header>
         <ul className="panel__list">

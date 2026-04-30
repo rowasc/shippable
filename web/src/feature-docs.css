@@ -35,7 +35,11 @@
 
 .feature-docs__results {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
+  min-height: 500px;
+}
+.feature-docs__results-sidebar {
+  width: 320px;
   min-height: 500px;
 }
 

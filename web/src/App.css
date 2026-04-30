@@ -102,6 +102,12 @@ body,
 .main--with-inspector {
   grid-template-columns: 320px 1fr 340px;
 }
+.main--wide-sidebar {
+  grid-template-columns: 520px 1fr;
+}
+.main--wide-sidebar.main--with-inspector {
+  grid-template-columns: 520px 1fr 340px;
+}
 
 /* kbd --------------------------------------------------------------------- */
 /* Used inline in help overlays and hint text across multiple presenters. */

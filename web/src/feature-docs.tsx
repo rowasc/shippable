@@ -41,9 +41,9 @@ import { KeySetup } from "./components/KeySetup";
 import { PromptPicker } from "./components/PromptPicker";
 import { PromptEditor } from "./components/PromptEditor";
 import {
-  PromptResultsStack,
+  PromptRunsPanel,
   type PromptRunView,
-} from "./components/PromptResult";
+} from "./components/PromptRunsPanel";
 import { ReviewPlanView } from "./components/ReviewPlanView";
 
 type View =
@@ -322,6 +322,10 @@ function WorkspaceFrame({
               reviewedFiles: state.reviewedFiles,
             })}
             onPickFile={() => {}}
+            runs={[]}
+            onCloseRun={() => {}}
+            wide={false}
+            onToggleWide={() => {}}
           />
           <DiffView
             viewModel={buildDiffViewModel({
@@ -520,7 +524,14 @@ function App() {
     return (
       <div className="feature-docs">
         <div className="feature-docs__stage feature-docs__results">
-          <PromptResultsStack runs={RUNS} onClose={() => {}} />
+          <aside className="sidebar feature-docs__results-sidebar">
+            <PromptRunsPanel
+              runs={RUNS}
+              onClose={() => {}}
+              wide={false}
+              onToggleWide={() => {}}
+            />
+          </aside>
         </div>
       </div>
     );

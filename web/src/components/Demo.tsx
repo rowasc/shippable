@@ -17,7 +17,7 @@ import { HelpOverlay } from "./HelpOverlay";
 import { LoadModal } from "./LoadModal";
 import { CodeRunner } from "./CodeRunner";
 import { PromptPicker } from "./PromptPicker";
-import { PromptResultsStack, type PromptRunView } from "./PromptResult";
+import { type PromptRunView } from "./PromptRunsPanel";
 import { ThemePicker } from "./ThemePicker";
 import {
   buildDiffViewModel,
@@ -484,6 +484,7 @@ function FrameStage({
   // and frame 10 also seeds a fake-streaming demo run so the surface looks
   // populated even without a backend.
   const [runs, setRuns] = useState<PromptRunView[]>([]);
+  const [sidebarWide, setSidebarWide] = useState(false);
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
   useEffect(() => {
     if (frame.overlay.kind !== "promptPicker") return;
@@ -807,7 +808,11 @@ function FrameStage({
         </button>
       </header>
 
-      <div className={`main ${showInspector ? "main--with-inspector" : ""}`}>
+      <div
+        className={`main ${showInspector ? "main--with-inspector" : ""} ${
+          sidebarWide ? "main--wide-sidebar" : ""
+        }`}
+      >
         <Sidebar
           viewModel={buildSidebarViewModel({
             files: cs.files,
@@ -828,6 +833,10 @@ function FrameStage({
               },
             });
           }}
+          runs={runs}
+          onCloseRun={closePromptRun}
+          wide={sidebarWide}
+          onToggleWide={() => setSidebarWide((v) => !v)}
         />
         <DiffView
           viewModel={buildDiffViewModel({
@@ -983,7 +992,6 @@ function FrameStage({
           onSubmit={(prompt, rendered) => startPromptRun(prompt, rendered)}
         />
       )}
-      <PromptResultsStack runs={runs} onClose={closePromptRun} />
       <CodeRunner
         currentFilePath={file.path}
         freeOpen={freeRunnerOpen}

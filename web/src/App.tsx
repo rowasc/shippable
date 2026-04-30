@@ -16,7 +16,7 @@ import { ReviewPlanView } from "./components/ReviewPlanView";
 import { CodeRunner } from "./components/CodeRunner";
 import { ThemePicker } from "./components/ThemePicker";
 import { PromptPicker } from "./components/PromptPicker";
-import { PromptResultsStack, type PromptRunView } from "./components/PromptResult";
+import { type PromptRunView } from "./components/PromptRunsPanel";
 import { buildAutoFillContext, type Prompt } from "./promptStore";
 import { runPrompt } from "./promptRun";
 import { buildSymbolIndex } from "./symbols";
@@ -112,6 +112,7 @@ export default function App() {
   );
   const [showPicker, setShowPicker] = useState(false);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
+  const [sidebarWide, setSidebarWide] = useState(false);
 
   // Debounced session save. Every state/drafts change schedules a write
   // 300ms out; rapid edits coalesce so j/k navigation doesn't thrash
@@ -437,7 +438,11 @@ export default function App() {
         </button>
       </header>
 
-      <div className={`main ${showInspector ? "main--with-inspector" : ""}`}>
+      <div
+        className={`main ${showInspector ? "main--with-inspector" : ""} ${
+          sidebarWide ? "main--wide-sidebar" : ""
+        }`}
+      >
         <Sidebar
           viewModel={buildSidebarViewModel({
             files: cs.files,
@@ -457,6 +462,10 @@ export default function App() {
               },
             });
           }}
+          runs={runs}
+          onCloseRun={closePromptRun}
+          wide={sidebarWide}
+          onToggleWide={() => setSidebarWide((v) => !v)}
         />
         <DiffView
           viewModel={buildDiffViewModel({
@@ -604,7 +613,6 @@ export default function App() {
           onSubmit={(prompt, rendered) => startPromptRun(prompt, rendered)}
         />
       )}
-      <PromptResultsStack runs={runs} onClose={closePromptRun} />
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
       {showLoad && (
         <LoadModal
