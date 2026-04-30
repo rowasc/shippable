@@ -22,15 +22,15 @@ What it explicitly does *not* try to do, at least not yet:
 
 Staged. Each one stands on its own and unblocks the next.
 
-**(a) MVP — list worktrees, load HEAD.** A subagent is scaffolding this in parallel right now. You give the reviewer a directory path; the server runs `git worktree list --porcelain` (or scans for nested `.git` files) and returns `{ path, branch, head }` per worktree. Pick one, the server diffs `HEAD~1..HEAD` for that worktree, returns a `ChangeSet`, and the existing review UI takes it from there. *Done when:* you can open a directory, click a worktree, and end up in the diff view. *Blocking next:* the worktree concept needs a stable identity (path? branch?) so we can remember things about it.
+**(a) MVP — list worktrees, load HEAD.** You give the reviewer a directory path; the server runs `git worktree list --porcelain` (or scans for nested `.git` files) and returns `{ path, branch, head }` per worktree. Pick one, the server diffs `HEAD~1..HEAD` for that worktree, returns a `ChangeSet`, and the existing review UI takes it from there. *Done when:* you can open a directory, click a worktree, and end up in the diff view. *Blocking next:* the worktree concept needs a stable identity (path? branch?) so we can remember things about it.
 
 **(b) Per-worktree commit picker.** HEAD is fine for "what just landed" but not for "let me review the last three commits." Add a small commit list per worktree with a range selector — `HEAD~N..HEAD`, or `<sha>..HEAD`. *Done when:* you can scroll back through a worktree's recent history and load any range. *Blocking next:* once you can pick ranges, you need to remember where you stopped.
 
 **(c) "What's new since I last reviewed."** Track a per-worktree review cursor (a sha) in localStorage, same shape as the existing `ReviewState`. When you reopen a worktree, the default range is `<last-reviewed-sha>..HEAD` and there's a "you reviewed up to here" marker. *Done when:* coming back to a worktree feels like coming back to an inbox, not a stale view. *Blocking next:* now that you have a cursor, "send feedback to the agent that did this work" becomes a meaningful gesture.
 
-**(d) Agent-feedback loop (async).** Once you've reviewed a worktree's last commit, surface a "send feedback to the agent" affordance. v1 is async: write the feedback into a file the agent will pick up next time it's invoked (or into its `CLAUDE.md` / a queue). This is the easy half of the user's vision — no live-session plumbing, just a handoff file. *Done when:* you can review, hit "send feedback," and the next `claude-auto` run on that worktree sees it.
+**(d) Agent-feedback loop (async).** Once you've reviewed a worktree's last commit, surface a "send feedback to the agent" affordance. v1 is async: write the feedback into a file the agent will pick up next time it's invoked (or into its `CLAUDE.md` / a queue). This is the easy half of the vision — no live-session plumbing, just a handoff file. *Done when:* you can review, hit "send feedback," and the next `claude-auto` run on that worktree sees it.
 
-**(e) Live-session steering.** The user's open question, quoted: *"can we send feedback to a live session, too? That'd be excellent, to steer the session live. We should test the results a bit, or give the user the option between live and non-live operations mode."* This is the speculative slice. Plausible mechanisms: writing into the agent's session inbox, an MCP tool the agent polls, or a sidecar that injects a user message into the running CLI. All of these need testing before we commit. *Done when:* there's an experiment that demonstrates one of these reliably steering an in-flight session. May not happen in 0.1.0.
+**(e) Live-session steering.** a big deal in terms of usability and speed when you are still needing to check the code closely. Plausible mechanisms: writing into the agent's session inbox, an MCP tool the agent polls, or a sidecar that injects a user message into the running CLI. All of these need testing before we commit. *Done when:* there's an experiment that demonstrates one of these reliably steering an in-flight session. May not happen in 0.1.0 but we are trying to make it fit as much of this feature into the core of 0.1.0 due to its importance.
 
 **(f) AI Inspector inline comments.** Connection point with the broader "AI Inspector" roadmap item. Once a worktree's latest changeset is loaded, the same prompt-library / select-to-review machinery that already exists in the product applies — but anchored to a real-on-disk worktree, with paths the agent can actually act on. *Done when:* the inspector's comments and the worktree's commits are addressing the same files, and "fix this" can hand the fix back to an agent in that worktree.
 
@@ -103,7 +103,7 @@ The shape of these will probably move as we build (a) and (b).
 - Multi-repo workspaces. One directory, the worktrees inside it, period.
 - Real-time file watching / inotify / FSEvents. The reviewer pulls when you ask it to. Auto-refresh is a nice-to-have, not table stakes.
 - Reviewing uncommitted working-tree changes. Maybe slice (b.5) eventually; not MVP.
-- Posting reviews back to GitHub. 0.2.0 territory.
+- Posting reviews to GitHub. 0.2.0 territory.
 
 ## Files of interest
 
