@@ -1,3 +1,6 @@
+// Entry-point file — bootstraps the docs page via createRoot below. Fast
+// refresh isn't meaningful here, so colocate the inline frame components.
+/* eslint-disable react-refresh/only-export-components */
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./App.css";
@@ -72,7 +75,6 @@ const USER_FILE = CS.files[0];
 const STORAGE_FILE = CS.files[1];
 const PREF_FILE = CS.files[2];
 const USER_HUNK = USER_FILE.hunks[0];
-const STORAGE_HUNK_1 = STORAGE_FILE.hunks[0];
 const PREF_HUNK = PREF_FILE.hunks[0];
 
 const PROMPTS = [

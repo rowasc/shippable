@@ -60,9 +60,15 @@ export function CodeRunner({
   // The detected language seeds the runner; the user can override it via the
   // header selector when detection's wrong (e.g. a JS snippet quoted in a
   // markdown file) or absent. `manualLang` resets when the file changes so
-  // each file starts from detection again.
+  // each file starts from detection again — done via the React-canonical
+  // "adjust state when a prop changes" pattern (setState during render).
   const detectedLang: Lang | null = detectLang(currentFilePath);
   const [manualLang, setManualLang] = useState<Lang | null>(null);
+  const [trackedFile, setTrackedFile] = useState(currentFilePath);
+  if (trackedFile !== currentFilePath) {
+    setTrackedFile(currentFilePath);
+    setManualLang(null);
+  }
   const lang: Lang = manualLang ?? detectedLang ?? "ts";
 
   const [open, setOpen] = useState<OpenState | null>(null);
@@ -70,10 +76,6 @@ export function CodeRunner({
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
-
-  useEffect(() => {
-    setManualLang(null);
-  }, [currentFilePath]);
 
   // Re-parse on every source change. Cheap (regex-based) so it's fine to
   // run inline; the editor benefits from live shape detection.

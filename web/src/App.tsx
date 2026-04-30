@@ -341,7 +341,7 @@ export default function App() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [showHelp, showPlan, showPicker, state.cursor, state.changesets, state.selection, suggestion, line]);
+  }, [showHelp, showPlan, showPicker, state.cursor, state.changesets, state.selection, suggestion, line, draftingKey, hunk.id, hunk.lines]);
 
   const readCoverage = changesetCoverage(cs, state.readLines);
   const reviewedFiles = reviewedFilesCount(cs, state.reviewedFiles);

@@ -252,7 +252,7 @@ function buildFrames(): Frame[] {
 // ── component ─────────────────────────────────────────────────────────────
 
 export function Demo() {
-  const frames = useMemo(buildFrames, []);
+  const frames = useMemo(() => buildFrames(), []);
   const [idx, setIdx] = useState(0);
   // Demo opens paused so a recorder can frame the shot before hitting Play —
   // matches the gallery's play mode.
@@ -270,17 +270,26 @@ export function Demo() {
   const themeDemoIdx = frames.length - 1;
 
   // Theme reacts to the active frame *only while playing*. When paused the
-  // viewer can change themes manually without us snapping back. The final
-  // frame is the theme showcase: animate light → dollhouse mid-frame.
-  useEffect(() => {
-    if (!playing) return;
-    if (idx === themeDemoIdx) {
-      setThemeId("light");
-      const t = setTimeout(() => setThemeId("dollhouse"), 3000);
-      return () => clearTimeout(t);
+  // viewer can change themes manually without us snapping back. Done via
+  // the during-render "adjust state when prop changes" pattern so we don't
+  // cascade renders through an effect.
+  const [trackedFrame, setTrackedFrame] = useState({ playing, idx });
+  if (trackedFrame.playing !== playing || trackedFrame.idx !== idx) {
+    setTrackedFrame({ playing, idx });
+    if (playing) {
+      if (idx === themeDemoIdx) setThemeId("light");
+      else if (current.themeId) setThemeId(current.themeId);
     }
-    if (current.themeId) setThemeId(current.themeId);
-  }, [idx, playing, current.themeId, themeDemoIdx]);
+  }
+
+  // The dollhouse animation on the theme-showcase frame still needs an
+  // effect because it schedules a setTimeout — the setState inside the
+  // callback is async, not a synchronous cascade.
+  useEffect(() => {
+    if (!playing || idx !== themeDemoIdx) return;
+    const t = setTimeout(() => setThemeId("dollhouse"), 3000);
+    return () => clearTimeout(t);
+  }, [playing, idx, themeDemoIdx]);
 
   useEffect(() => {
     applyThemeToRoot(document.documentElement, themeId);
@@ -469,23 +478,47 @@ function FrameStage({
 
   // Inline-runner request — populated when the frame seeds an inline runner,
   // and re-populated by the `e` keybinding (see RUN_SELECTION below).
+  // Switched to during-render setState (gated on overlay-reference change)
+  // so we don't cascade renders through an effect.
   const [runRequest, setRunRequest] = useState<{
     tick: number;
     source: string;
     inputs?: Record<string, string>;
   } | null>(null);
-  useEffect(() => {
+  const [trackedRunOverlay, setTrackedRunOverlay] = useState(frame.overlay);
+  if (trackedRunOverlay !== frame.overlay) {
+    setTrackedRunOverlay(frame.overlay);
     if (frame.overlay.kind === "runnerInline") {
-      setRunRequest({ tick: Date.now(), source: frame.overlay.source });
+      // tick value is unused beyond ≠0; CodeRunner re-fires on every new
+      // request object reference, so a constant non-zero tick is fine.
+      setRunRequest({ tick: 1, source: frame.overlay.source });
     }
-  }, [frame.overlay]);
+  }
 
   // Prompt runs — real Claude streams from picker submits land here, and
   // frame 10 also seeds a fake-streaming demo run so the surface looks
   // populated even without a backend. Rendered in the sidebar panel.
+  // Seed during render (canonical prop-change pattern); the streaming
+  // interval lives in its own effect below.
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const [trackedPickerKind, setTrackedPickerKind] = useState(
+    frame.overlay.kind,
+  );
+  if (trackedPickerKind !== frame.overlay.kind) {
+    setTrackedPickerKind(frame.overlay.kind);
+    if (frame.overlay.kind === "promptPicker") {
+      setRuns([
+        {
+          id: "demo-run",
+          promptName: "review-this-hunk",
+          text: "",
+          status: "streaming",
+        },
+      ]);
+    }
+  }
   useEffect(() => {
     if (frame.overlay.kind !== "promptPicker") return;
     const id = "demo-run";
@@ -494,9 +527,6 @@ function FrameStage({
       "1. DEFAULTS is declared inline — if SSR ever needs these you'll want a shared config module.\n" +
       "2. The useEffect runs after mount, so the first paint flashes the default theme before loadPrefs() resolves.\n" +
       "3. The form has no onSubmit handler — pressing Enter inside the select triggers a full-page submit.";
-    setRuns([
-      { id, promptName: "review-this-hunk", text: "", status: "streaming" },
-    ]);
     let i = 0;
     const t = window.setInterval(() => {
       i = Math.min(full.length, i + 14);
