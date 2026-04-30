@@ -3,6 +3,7 @@ import { generatePlan } from "./plan.ts";
 import * as library from "./library.ts";
 import * as prompts from "./prompts.ts";
 import { streamReview } from "./review.ts";
+import * as worktrees from "./worktrees.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -53,6 +54,12 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "GET" && req.url === "/api/library/prompts") {
       return handleListPrompts(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/list") {
+      return handleWorktreesList(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
+      return handleWorktreesChangeset(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -227,6 +234,79 @@ async function handleLibraryRefresh(
     console.error(`[server] /api/library/refresh err in ${ms}ms:`, err);
     writeCorsHeaders(res, origin);
     res.writeHead(502, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesList(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { dir?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const dir = typeof parsed.dir === "string" ? parsed.dir : "";
+  if (!dir) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { dir: string }" }));
+    return;
+  }
+  try {
+    const result = await worktrees.listWorktrees(dir);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/list err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesChangeset(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; ref?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const ref = typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : "HEAD";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string, ref?: string }" }));
+    return;
+  }
+  try {
+    const result = await worktrees.changesetFor(wtPath, ref);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/changeset err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
   }
 }
