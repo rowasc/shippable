@@ -536,6 +536,13 @@ export default function App() {
             onDeleteReply={(key, replyId) =>
               dispatch({ type: "DELETE_REPLY", targetKey: key, replyId })
             }
+            onVerifyAiNote={(recipe) => {
+              setRunRequest((prev) => ({
+                tick: (prev?.tick ?? 0) + 1,
+                source: recipe.source,
+                inputs: recipe.inputs,
+              }));
+            }}
           />
         )}
       </div>

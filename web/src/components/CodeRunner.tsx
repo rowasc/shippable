@@ -13,12 +13,17 @@ interface Props {
   freeOpen: boolean;
   onFreeClose: () => void;
   /**
-   * Bumps whenever the user presses `e`. The parent supplies the snippet
-   * (built from the keyboard cursor / block selection in the diff state),
-   * so we don't depend on a live browser text selection — the gesture is
-   * keyboard-driven, not mouse-driven.
+   * Bumps whenever the user opens the runner with a specific snippet —
+   * either via `e` (cursor / block selection) or via a `▷ verify`
+   * button on an AI note. When `inputs` is provided, the slot map is
+   * pre-filled — parent only supplies it for AI verifies; `e` leaves
+   * it undefined and the runner starts with an empty input map.
    */
-  runRequest: { tick: number; source: string } | null;
+  runRequest: {
+    tick: number;
+    source: string;
+    inputs?: Record<string, string>;
+  } | null;
 }
 
 type Mode = "guided" | "edit";
@@ -95,6 +100,10 @@ export function CodeRunner({
     });
     setMode("guided");
     setResult(null);
+    // Pre-fill the slot map when the request brought inputs (AI verify).
+    // Plain `e` requests omit `inputs` and we leave the existing sticky
+    // map alone — the user may have typed values for the previous run.
+    if (runRequest.inputs) setInputs(runRequest.inputs);
   }, [runRequest, detectedLang]);
   /* eslint-enable react-hooks/set-state-in-effect */
 

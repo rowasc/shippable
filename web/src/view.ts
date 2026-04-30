@@ -571,6 +571,14 @@ export interface AiNoteRowItem {
   isDrafting: boolean;
   /** Jump target that lands on this note's line. */
   jumpTarget: Cursor;
+  /**
+   * Pre-flighted recipe for the runner — drives the `▷ verify` button.
+   * Undefined when the AI note has no recipe attached.
+   */
+  runRecipe?: {
+    source: string;
+    inputs: Record<string, string>;
+  };
 }
 
 /** A single user-started comment thread row. */
@@ -715,6 +723,7 @@ export function buildInspectorViewModel({
       replies: replies[rkey] ?? [],
       isDrafting: draftingKey === rkey,
       jumpTarget: { ...cursor, hunkId: hunk.id, lineIdx: i },
+      runRecipe: note.runRecipe,
     };
   });
 

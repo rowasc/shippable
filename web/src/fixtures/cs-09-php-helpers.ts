@@ -58,6 +58,28 @@ export const CS_09: ChangeSet = {
                 summary: "JPY/KRW have no minor unit",
                 detail:
                   "Hard-coding /100 means 1234 JPY would render as ¥12.34. Move the divisor into the currency table.",
+                // The runner sandbox doesn't see other files in the diff,
+                // so the recipe inlines `currency_symbol` alongside
+                // `format_money` and ends with an `echo` so stdout shows
+                // the actual rendered string. Inputs match the AI's
+                // claim: 1234 cents in JPY should *not* divide by 100.
+                runRecipe: {
+                  source: [
+                    "function currency_symbol($code) {",
+                    "  $table = ['USD' => '$', 'EUR' => '€', 'GBP' => '£', 'JPY' => '¥'];",
+                    "  return $table[$code] ?? $code . ' ';",
+                    "}",
+                    "",
+                    "function format_money($cents, $currency = 'USD') {",
+                    "  $sym = currency_symbol($currency);",
+                    "  $amount = number_format($cents / 100, 2);",
+                    "  return $sym . $amount;",
+                    "}",
+                    "",
+                    "echo format_money($cents, $currency);",
+                  ].join("\n"),
+                  inputs: { cents: "1234", currency: "JPY" },
+                },
               },
             },
             { kind: "add", text: "  $sym = currency_symbol($currency);", newNo: 6 },

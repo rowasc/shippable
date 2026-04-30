@@ -14,6 +14,19 @@ export interface AiNote {
   severity: AiNoteSeverity;
   summary: string;
   detail?: string;
+  /**
+   * Optional one-click verifier for the claim above. When present, the
+   * inspector renders a `▷ verify` button on the note that opens the
+   * runner with `source` already loaded and the `inputs` slot map
+   * pre-filled. Lang is inferred from the enclosing file. The recipe
+   * needs to be self-contained — the runner sandbox can't see other
+   * files in the diff, so any helpers the snippet calls must live in
+   * the source string.
+   */
+  runRecipe?: {
+    source: string;
+    inputs: Record<string, string>;
+  };
 }
 
 export interface Hunk {

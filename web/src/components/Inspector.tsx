@@ -52,6 +52,12 @@ interface Props {
   /** Delete a reply by id within the given thread. UI gates this to
    *  user-authored entries; the reducer enforces no other contracts. */
   onDeleteReply: (key: string, replyId: string) => void;
+  /**
+   * Open the runner for a given AI note's `runRecipe`. Wired to the
+   * `▷ verify` button rendered on notes that have a recipe attached;
+   * notes without one don't render the button.
+   */
+  onVerifyAiNote: (recipe: { source: string; inputs: Record<string, string> }) => void;
 }
 
 export function Inspector({
@@ -66,6 +72,7 @@ export function Inspector({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onVerifyAiNote,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -148,6 +155,9 @@ export function Inspector({
                 onDeleteReply={(replyId) =>
                   onDeleteReply(row.replyKey, replyId)
                 }
+                onVerify={() => {
+                  if (row.runRecipe) onVerifyAiNote(row.runRecipe);
+                }}
               />
             ))}
           </ul>
@@ -387,6 +397,7 @@ function NoteCard({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onVerify,
 }: {
   row: AiNoteRowItem;
   symbols: SymbolIndex;
@@ -401,6 +412,11 @@ function NoteCard({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  /**
+   * Open the runner pre-loaded with this note's recipe. Only invoked
+   * when row.runRecipe is defined; the button is hidden otherwise.
+   */
+  onVerify: () => void;
 }) {
   return (
     <li
@@ -424,6 +440,15 @@ function NoteCard({
           <RichText text={row.summary} symbols={symbols} onJump={onJump} />
         </span>
         <span className="ainote__actions">
+          {row.runRecipe && (
+            <button
+              className="ainote__verify"
+              onClick={onVerify}
+              title="open the runner with this snippet and the AI's suggested inputs pre-filled"
+            >
+              ▷ verify
+            </button>
+          )}
           <button className="ainote__ack" onClick={onStartDraft} title="reply">
             reply
           </button>

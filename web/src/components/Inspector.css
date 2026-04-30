@@ -193,6 +193,23 @@
   cursor: pointer;
   white-space: nowrap;
 }
+/* Verify button — pre-loads the runner with the AI's recipe. Renders
+   only when the note carries one, so its presence already signals
+   "this claim has a one-click test." Magenta to match the AI brand. */
+.ainote__verify {
+  background: rgba(203, 166, 247, 0.08);
+  border: 1px solid var(--magenta);
+  color: var(--magenta);
+  font: inherit;
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ainote__verify:hover {
+  background: rgba(203, 166, 247, 0.18);
+}
 .ainote__ack:hover {
   border-color: var(--fg-dim);
   color: var(--fg);
