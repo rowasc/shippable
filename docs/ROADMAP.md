@@ -1,17 +1,25 @@
 # Roadmap
 
-We're aiming to put a real, signed `.dmg` of Shippable in people's hands on **May 16, 2026**. This is the cut for that release, and what we plan to do next.
+We're aiming to put a first alpha (0.1.0) out by **May 16, 2026**. This is what will make the cut for the release.
 
-## What v1 means
 
-- A macOS `.dmg` we'd be happy handing to a teammate. Signed and notarised is the bar we want; if the certificate paperwork isn't sorted by the 16th we'll ship unsigned with clear "right-click → Open" instructions and chase signing right after.
+## Release 0.1.0 - local-first review tooling
+
+- A macOS `.dmg` we'd be happy handing to a teammate to use.
 - Tests and CI, so we're not the bottleneck for every release.
-- Reviews still live on your machine. No login, no sync, no shared state — that comes later.
-- Bring-your-own-key for whichever model you want to use.
+- AI reviewer integration. Initially only Anthropic APIs are supported.
+- Local-only human review workflows, with local storage mechanisms (SQLite)
+- Review any file or diff.
+- .diff URL ingest (no auth support) - paste a .diff and we fetch it for you
 
-## Shipping by May 16
 
-**Multi-provider model picker.** Claude is the default (Sonnet 4.6). Add GPT and a local Ollama option. Keys live in the macOS Keychain — same pattern we already use for `ANTHROPIC_API_KEY`, just one entry per provider. Picker lives in settings; no per-prompt switching.
+## Release 0.2.0 - connectivity
+
+- Connect with any MCP.
+- Bring-your-own-key for whichever model you want to use. We will add support for various popular APIs and models.
+- Send reviews to GitHub / view reviews from GitHub.
+
+## Shipping first
 
 **Block-level review as a primitive.** Right now review happens at two grains: the line you just passed and the file you signed off on. Most actual review work lives in the middle — "this 12-line helper looks wrong," "I want a second opinion on this regex," "let an agent verify this loop while I keep moving." We're making that middle a real object.
 
@@ -33,9 +41,7 @@ A block is a contiguous range you select and then act on: hand it to an agent fo
 
 **GitHub two-way.** Post review threads back as PR comments. Pairs with the hosted backend.
 
-**Persistent storage that isn't a browser tab.** SQLite inside the Tauri shell is the obvious fit; the exact call gets easier once the hosted backend has shape.
-
-**TUI mode.** On the wishlist, not on the runway.
+**TUI mode.** On the wishlist.
 
 ## What we're not doing
 
