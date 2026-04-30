@@ -126,7 +126,14 @@
               vars: serializedVars,
             });
           } catch (e) {
-            self.postMessage({ ok: false, logs, error: e && e.stack ? e.stack : String(e) });
+            // WebKit's e.stack omits the error class/message — Chrome includes
+            // it. Build a full description so the runner UI shows the actual
+            // failure type, not just frames.
+            const msg = e && (e.message || String(e));
+            const name = e && e.name;
+            const head = name && msg ? name + ": " + msg : (msg || String(e));
+            const error = e && e.stack ? head + "\\n" + e.stack : head;
+            self.postMessage({ ok: false, logs, error });
           }
         });
       `;
