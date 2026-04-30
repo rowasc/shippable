@@ -100,7 +100,7 @@ export async function runPhp(
       return {
         ok: false,
         logs: [],
-        error: "Couldn't load the PHP runtime: " + (r.error ?? "unknown error"),
+        error: r.error ?? "unknown error",
       };
     }
     const out = parseStdout(r.stdout ?? "");
