@@ -2,6 +2,7 @@ import "./LoadModal.css";
 import { useRef, useState } from "react";
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   onLoad: (cs: ChangeSet) => void;
@@ -157,7 +158,12 @@ export function LoadModal({ onLoad, onClose }: Props) {
           </div>
         </section>
 
-        {err && <div className="modal__err">{err}</div>}
+        {err && (
+          <div className="modal__err errrow">
+            <span className="errrow__msg">{err}</span>
+            <CopyButton text={err} />
+          </div>
+        )}
       </div>
     </div>
   );

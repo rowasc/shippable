@@ -11,6 +11,7 @@ import {
   saveUserPrompt,
   slugifyId,
 } from "../promptStore";
+import { CopyButton } from "./CopyButton";
 
 const AUTO_OPTIONS = [
   { value: "", label: "(none)" },
@@ -214,7 +215,12 @@ export function PromptEditor({
       <div className="editor__sec-h">preview (rendered against current selection)</div>
       <pre className="editor__preview">{previewText || " "}</pre>
 
-      {error && <div className="modal__err">{error}</div>}
+      {error && (
+        <div className="modal__err errrow">
+          <span className="errrow__msg">{error}</span>
+          <CopyButton text={error} />
+        </div>
+      )}
 
       <div className="picker__actions">
         {isEditing && onDeleted && (

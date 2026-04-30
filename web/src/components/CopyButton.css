@@ -1,0 +1,39 @@
+.copybtn {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  border-radius: 3px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+.copybtn:hover {
+  opacity: 1;
+}
+.copybtn--ok {
+  opacity: 1;
+  color: var(--green);
+}
+.copybtn--fail {
+  opacity: 1;
+}
+
+/* Shared error-row layout used by every error surface that hosts a copybtn. */
+.errrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.errrow__msg {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

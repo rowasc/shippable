@@ -9,6 +9,7 @@ import {
   resolveAuto,
 } from "../promptStore";
 import { PromptEditor } from "./PromptEditor";
+import { CopyButton } from "./CopyButton";
 
 type View =
   | { kind: "list" }
@@ -187,7 +188,12 @@ function PromptList({
         </div>
       </section>
       <section className="modal__sec">
-        {error && <div className="modal__err">{error}</div>}
+        {error && (
+          <div className="modal__err errrow">
+            <span className="errrow__msg">{error}</span>
+            <CopyButton text={error} />
+          </div>
+        )}
         {loading && <div className="picker__empty">loading prompts…</div>}
         {!loading && !error && prompts.length === 0 && (
           <div className="picker__empty">no prompts match.</div>

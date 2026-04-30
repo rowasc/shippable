@@ -240,7 +240,7 @@
 
 .coderunner__logs,
 .coderunner__return,
-.coderunner__err {
+.coderunner__err-msg {
   margin: 0;
   font-family: inherit;
   font-size: 12px;
@@ -249,7 +249,17 @@
   color: var(--fg);
 }
 .coderunner__return { color: var(--green); }
-.coderunner__err { color: var(--red); }
+.coderunner__err {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--red);
+}
+.coderunner__err-msg {
+  flex: 1;
+  min-width: 0;
+  color: var(--red);
+}
 
 .coderunner__label {
   display: inline-block;

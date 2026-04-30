@@ -1,4 +1,5 @@
 import "./PromptResult.css";
+import { CopyButton } from "./CopyButton";
 
 export type PromptRunStatus = "streaming" | "done" | "error";
 
@@ -43,7 +44,10 @@ export function PromptResultCard({ run, onClose }: Props) {
         <div className="promptresult-card__body">{run.text}</div>
       )}
       {run.status === "error" && run.error && (
-        <div className="promptresult-card__err">{run.error}</div>
+        <div className="promptresult-card__err errrow">
+          <span className="errrow__msg">{run.error}</span>
+          <CopyButton text={run.error} />
+        </div>
       )}
     </article>
   );

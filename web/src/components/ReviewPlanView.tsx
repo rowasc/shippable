@@ -8,6 +8,7 @@ import type {
   StructureMapFile,
 } from "../types";
 import { Reference } from "./Reference";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   plan: ReviewPlan;
@@ -60,8 +61,11 @@ export function ReviewPlanView({
           <div className="plan__h-status">Claude is reading the diff…</div>
         )}
         {status === "fallback" && (
-          <div className="plan__h-status plan__h-status--err">
-            AI plan failed — showing rule-based fallback{error ? `: ${error}` : ""}
+          <div className="plan__h-status plan__h-status--err errrow">
+            <span className="errrow__msg">
+              AI plan failed — showing rule-based fallback{error ? `: ${error}` : ""}
+            </span>
+            {error && <CopyButton text={error} />}
           </div>
         )}
       </header>

@@ -5,6 +5,7 @@ import type { Lang } from "../runner/parseInputs";
 import { runJs } from "../runner/executeJs";
 import type { RunResult } from "../runner/executeJs";
 import { runPhp } from "../runner/executePhp";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   currentFilePath: string;
@@ -337,9 +338,12 @@ export function CodeRunner({
               </div>
             )}
             {result.error && (
-              <pre className="coderunner__err">
-                <span className="coderunner__label">error</span> {result.error}
-              </pre>
+              <div className="coderunner__err">
+                <pre className="coderunner__err-msg">
+                  <span className="coderunner__label">error</span> {result.error}
+                </pre>
+                <CopyButton text={result.error} />
+              </div>
             )}
             {result.ok &&
               result.logs.length === 0 &&

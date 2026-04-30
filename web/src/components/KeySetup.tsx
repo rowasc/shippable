@@ -1,5 +1,6 @@
 import { useState } from "react";
 import "./KeySetup.css";
+import { CopyButton } from "./CopyButton";
 
 interface Props {
   /** Persists the key to Keychain. Throws on failure. */
@@ -78,7 +79,12 @@ export function KeySetup({ onSave, onSkip, saved }: Props) {
             autoComplete="off"
           />
         </div>
-        {error && <p className="key-setup__error">{error}</p>}
+        {error && (
+          <p className="key-setup__error errrow">
+            <span className="errrow__msg">{error}</span>
+            <CopyButton text={error} />
+          </p>
+        )}
         <div className="key-setup__actions">
           <button
             className="key-setup__save"
