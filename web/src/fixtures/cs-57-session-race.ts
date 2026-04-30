@@ -10,13 +10,6 @@ export const CS_57: ChangeSet = {
   createdAt: "2026-04-22T09:10:00Z",
   description:
     "Auth middleware could run before the session store finished hydrating on cold boot. Adds ensureSessionReady().",
-  skills: [
-    {
-      id: "concurrency",
-      label: "review concurrency / race conditions",
-      reason: "introduces a mutex-style ready promise",
-    },
-  ],
   files: [
     {
       id: "cs-57/shared/types.ts",

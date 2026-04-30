@@ -76,32 +76,6 @@ body,
   color: var(--red);
   border-color: var(--red);
 }
-/* Active skill chips — small clickable pills in the right cluster.
-   Only renders when at least one skill is on; otherwise the cluster
-   is invisible. The visible chip is what makes the sidebar toggle
-   feel like it does anything. */
-.topbar__skills {
-  display: inline-flex;
-  gap: 4px;
-  margin-right: 4px;
-}
-.topbar__skill {
-  background: rgba(166, 227, 161, 0.08);
-  border: 1px solid var(--green);
-  color: var(--green);
-  font: inherit;
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-.topbar__skill:hover {
-  background: rgba(166, 227, 161, 0.16);
-}
-.topbar__skill-x {
-  color: var(--fg-mute);
-  margin-left: 2px;
-}
 /* Plan chip — sits next to the title; reads as part of the changeset
    metadata. Brighter when the modal is open so the user knows where
    the visible plan came from. */

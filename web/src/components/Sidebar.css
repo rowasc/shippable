@@ -18,12 +18,6 @@
   font-size: 11px;
   letter-spacing: 0.08em;
 }
-.panel__sub {
-  color: var(--fg-mute);
-  text-transform: none;
-  letter-spacing: 0;
-  margin-left: 4px;
-}
 .panel__list {
   margin: 0;
   padding: 0;
@@ -82,19 +76,9 @@
 .row--file-reviewed .row__check {
   color: var(--green);
 }
-.row--skill-on {
-  color: var(--green);
-  font-weight: 600;
-}
 .row__label {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.row__checkbox {
-  color: var(--fg-dim);
-}
-.row--skill-on .row__checkbox {
-  color: var(--green);
 }
 .row__status {
   width: 14px;

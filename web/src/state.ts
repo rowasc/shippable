@@ -12,7 +12,6 @@ export function initialState(seed: ChangeSet[]): ReviewState {
     readLines: addLine({}, hunk.id, 0),
     reviewedFiles: new Set(),
     dismissedGuides: new Set(),
-    activeSkills: new Set(),
     ackedNotes: new Set(),
     replies: { ...SEED_REPLIES },
     expandLevelAbove: {},
@@ -51,7 +50,6 @@ export type Action =
   | { type: "COLLAPSE_SELECTION" }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
   | { type: "LOAD_CHANGESET"; changeset: ChangeSet }
-  | { type: "TOGGLE_SKILL"; skillId: string }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
@@ -120,12 +118,6 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         selection: null,
         readLines: addLine(state.readLines, hunk.id, 0),
       };
-    }
-    case "TOGGLE_SKILL": {
-      const next = new Set(state.activeSkills);
-      if (next.has(action.skillId)) next.delete(action.skillId);
-      else next.add(action.skillId);
-      return { ...state, activeSkills: next };
     }
     case "DISMISS_GUIDE": {
       const next = new Set(state.dismissedGuides);

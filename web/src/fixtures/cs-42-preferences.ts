@@ -14,18 +14,6 @@ export const CS_42: ChangeSet = {
   createdAt: "2026-04-21T14:22:00Z",
   description:
     "Adds a preferences panel backed by localStorage. New loadPrefs/savePrefs helpers live in utils/storage.",
-  skills: [
-    {
-      id: "react-accessibility",
-      label: "review React accessibility",
-      reason: "touches new form controls in PreferencesPanel",
-    },
-    {
-      id: "browser-storage",
-      label: "review browser storage usage",
-      reason: "introduces localStorage read/write in utils/storage",
-    },
-  ],
   files: [
     {
       id: "cs-42/src/types/user.ts",

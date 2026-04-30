@@ -15,13 +15,6 @@ export const CS_21: ChangeSet = {
   createdAt: "2026-04-25T10:30:00Z",
   description:
     "New `src/utils/numbers.ts` with clamp / lerp / mapRange / roundTo. The chart axis code currently does these inline four different ways; consolidating before adding the log-scale axis next sprint.",
-  skills: [
-    {
-      id: "edge-cases",
-      label: "review math edge cases",
-      reason: "NaN, Infinity, divide-by-zero, negative ranges all matter here",
-    },
-  ],
   files: [
     {
       id: "cs-21/src/utils/numbers.ts",

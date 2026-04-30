@@ -68,12 +68,6 @@ export interface DiffFile {
   fullContent?: DiffLine[];
 }
 
-export interface Skill {
-  id: string;
-  label: string;
-  reason: string;
-}
-
 export interface ChangeSet {
   id: string;
   title: string;
@@ -83,7 +77,6 @@ export interface ChangeSet {
   createdAt: string;
   description: string;
   files: DiffFile[];
-  skills: Skill[];
 }
 
 export interface Cursor {
@@ -128,7 +121,6 @@ export interface ReviewState {
    */
   reviewedFiles: Set<string>;
   dismissedGuides: Set<string>;
-  activeSkills: Set<string>;
   /** keys are `${hunkId}:${lineIdx}` */
   ackedNotes: Set<string>;
   /** keys are reply-target keys; see replyKey helpers */
