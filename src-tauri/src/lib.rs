@@ -11,9 +11,13 @@ const ANTHROPIC_KEY_ACCOUNT: &str = "ANTHROPIC_API_KEY";
 
 // Origins the bundled sidecar should accept. Covers the WebView origin Tauri
 // uses on macOS/Linux (`tauri://localhost`) and the equivalent Windows form
-// (`http://tauri.localhost`). The dev-mode origins (`http://localhost:5173`
-// etc.) come from the sidecar's own defaults — Tauri dev doesn't spawn the
-// bundled sidecar, so we don't need to cover that case here.
+// (`http://tauri.localhost`). In debug builds (`cargo tauri dev`) the page is
+// served by Vite, so we also allow the dev origins — without this the
+// preflight from the dev webview gets rejected with 403.
+#[cfg(debug_assertions)]
+const SIDECAR_ALLOWED_ORIGINS: &str =
+    "tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173";
+#[cfg(not(debug_assertions))]
 const SIDECAR_ALLOWED_ORIGINS: &str = "tauri://localhost,http://tauri.localhost";
 
 struct SidecarState {
@@ -68,6 +72,22 @@ pub fn run() {
                         .env("ANTHROPIC_API_KEY", key)
                         .env("PORT", port.to_string())
                         .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
+
+                    // The Bun-compiled sidecar binary can't resolve the
+                    // `library/` dir from `import.meta.url` the way `tsx` can,
+                    // so point it at the source repo in dev. Production builds
+                    // need the library bundled as a resource — not wired yet.
+                    #[cfg(debug_assertions)]
+                    let sidecar = {
+                        let library_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .parent()
+                            .unwrap()
+                            .join("library");
+                        sidecar.env(
+                            "SHIPPABLE_LIBRARY_PATH",
+                            library_path.to_string_lossy().to_string(),
+                        )
+                    };
                     match sidecar.spawn() {
                         Ok((mut rx, child)) => {
                             log::info!("sidecar started on 127.0.0.1:{port}");

@@ -26,13 +26,15 @@ function isTauri(): boolean {
  * and exposes save/skip actions for the first-run setup screen.
  */
 export function useApiKey() {
-  const [status, setStatus] = useState<ApiKeyStatus>({ kind: "loading" });
+  // Resolve the browser-vs-Tauri branch synchronously so the effect doesn't
+  // need to call setStatus on its first pass; only the async keychain probe
+  // updates state.
+  const [status, setStatus] = useState<ApiKeyStatus>(() =>
+    isTauri() ? { kind: "loading" } : { kind: "browser" },
+  );
 
   useEffect(() => {
-    if (!isTauri()) {
-      setStatus({ kind: "browser" });
-      return;
-    }
+    if (!isTauri()) return;
     (async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");

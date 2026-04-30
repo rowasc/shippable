@@ -40,8 +40,8 @@ export default function App() {
   // Read the persisted session once at boot. We need the result both for
   // the reducer init (state hydration) and for restoring drafts below;
   // calling loadSession twice would re-validate and re-walk the
-  // changeset tree, so cache the result in a ref.
-  const hydratedRef = useRef(loadSession(CHANGESETS));
+  // changeset tree, so cache the result in lazy useState.
+  const [hydrated] = useState(() => loadSession(CHANGESETS));
   const [state, dispatch] = useReducer(reducer, CHANGESETS, (changesets) => {
     const initial = initialState(changesets);
 
@@ -72,19 +72,19 @@ export default function App() {
       }
     }
 
-    const hydrated = hydratedRef.current.state;
-    if (!hydrated) return initial;
+    const persisted = hydrated.state;
+    if (!persisted) return initial;
     return {
       ...initial,
-      cursor: hydrated.cursor,
-      readLines: hydrated.readLines,
-      reviewedFiles: hydrated.reviewedFiles,
-      dismissedGuides: hydrated.dismissedGuides,
-      activeSkills: hydrated.activeSkills,
-      ackedNotes: hydrated.ackedNotes,
+      cursor: persisted.cursor,
+      readLines: persisted.readLines,
+      reviewedFiles: persisted.reviewedFiles,
+      dismissedGuides: persisted.dismissedGuides,
+      activeSkills: persisted.activeSkills,
+      ackedNotes: persisted.ackedNotes,
       // initialState seeds replies with SEED_REPLIES; merge those with
       // any user replies/comments the persisted session captured.
-      replies: { ...initial.replies, ...hydrated.replies },
+      replies: { ...initial.replies, ...persisted.replies },
     };
   });
   const apiKey = useApiKey();
@@ -107,9 +107,9 @@ export default function App() {
   // Composer drafts persist across open/close. Closing the composer
   // (Esc or the close button) leaves the entry intact, so reopening
   // restores the in-progress text. Submitting clears the entry.
-  // Hydrated from localStorage on boot (see hydratedRef above).
+  // Hydrated from localStorage on boot (see `hydrated` above).
   const [drafts, setDrafts] = useState<Record<string, string>>(
-    () => hydratedRef.current.drafts,
+    () => hydrated.drafts,
   );
   const [showPicker, setShowPicker] = useState(false);
   const [runs, setRuns] = useState<PromptRunView[]>([]);

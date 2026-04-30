@@ -1,3 +1,4 @@
+import { apiUrl } from "./apiUrl";
 import type { ChangeSet, DiffFile, Hunk, LineSelection } from "./types";
 
 export interface PromptArg {
@@ -39,7 +40,7 @@ export function refreshLibrary(): void {
 async function loadLibrary(): Promise<Prompt[]> {
   if (libraryCache) return libraryCache;
   libraryCache = (async () => {
-    const res = await fetch("/api/library/prompts");
+    const res = await fetch(await apiUrl("/api/library/prompts"));
     if (!res.ok) {
       throw new Error(`failed to load library prompts (${res.status})`);
     }
@@ -98,7 +99,7 @@ export function slugifyId(name: string): string {
 
 function validateDraft(p: PromptDraft): void {
   if (!p.id.trim()) throw new Error("id is required");
-  if (!/^[a-z0-9][a-z0-9\-]*$/.test(p.id)) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(p.id)) {
     throw new Error("id must be lowercase letters, numbers, and dashes");
   }
   if (!p.name.trim()) throw new Error("name is required");
@@ -115,9 +116,8 @@ function validateDraft(p: PromptDraft): void {
   }
 }
 
-function stripSource(p: Prompt): PromptDraft {
-  const { source: _source, ...rest } = p;
-  return rest;
+function stripSource({ id, name, description, args, body }: Prompt): PromptDraft {
+  return { id, name, description, args, body };
 }
 
 function isValidPrompt(p: unknown): p is Omit<Prompt, "source"> {

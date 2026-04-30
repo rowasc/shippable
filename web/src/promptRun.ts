@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiUrl";
+
 // Streams /api/review responses, decoding the SSE frames the server emits.
 // The server's event contract (see server/src/review.ts):
 //   { type: "text", text: string }
@@ -29,7 +31,7 @@ export interface RunOptions {
 export async function runPrompt(opts: RunOptions, handlers: RunHandlers): Promise<void> {
   let res: Response;
   try {
-    res = await fetch("/api/review", {
+    res = await fetch(await apiUrl("/api/review"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: opts.text, ...(opts.system ? { system: opts.system } : {}) }),
