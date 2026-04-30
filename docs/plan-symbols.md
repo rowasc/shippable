@@ -1,12 +1,17 @@
 # Click-through symbol navigation — design plan
 
+## Status: early conceptual draft
+
+⚠️ Very early vibes-driven draft. Needs review, edits, and more reasoning around the design before we can actually do it.
+
 ## Goal
 
 When reviewing a diff, you should be able to click any identifier in the rendered code and jump (or peek) to its definition. The feature must work:
 
-- **Locally** — when a workspace root is configured on the server, definitions resolve against the on-disk project.
-- **Remotely** — when reviewing a GitHub PR, definitions resolve against the repo at that SHA.
+- **Locally** — when a workspace root is configured (the desktop app's sidecar, or a dev server pointed at a checkout) definitions resolve against the on-disk project.
+- **Remotely** — when reviewing a GitHub PR, definitions resolve against the repo at that SHA. With or without a server in the loop.
 - **Across many languages** — the architecture should make adding a new language a small, self-contained change rather than a refactor.
+- **Across deployment shapes that don't all give us the same affordances.** Some users have everything (a local checkout, a clone, an installed LSP); some have only a browser pointed at a GitHub PR; some can't even clone the source to disk due to security posture. v0.1.0 ships the dominant shape; the architecture should not paint itself into a corner on the others.
 
 We accept that each language will need a small per-language module. The architecture's job is to make that module small.
 
@@ -16,9 +21,25 @@ We accept that each language will need a small per-language module. The architec
 - Background project-wide indexing. Resolve on demand, cache results.
 - Editing inline (this is a review surface, not an editor).
 
+## Deployment modes
+
+Two orthogonal properties of the user's environment determine which Tier-1 options are even viable. They live on the `Workspace` (see "The contracts" below) so resolvers branch on them, not on guesses about deployment.
+
+- **Read posture** — `unbounded` (local disk, our server, sidecar) vs. `rate-limited` (GitHub API direct from the browser, where every read counts against a budget).
+- **Materialization** — `disk-allowed` (we can shallow-clone and point an LSP at a temp dir) vs. `memory-only` (security posture forbids source on disk; analysis happens against in-memory file contents only).
+
+The cross product:
+
+|                    | disk-allowed                                                       | memory-only                                                          |
+|--------------------|--------------------------------------------------------------------|----------------------------------------------------------------------|
+| **unbounded**      | **v0.1.0 primary.** Local checkout via sidecar/server. User's LSP or bundled LSP, free reads. | Deferred. Rare but possible (e.g. internal source-streaming service). In-memory analyzer. |
+| **rate-limited**   | **v0.1.0 best-effort.** GitHub PR review where we *can* clone server-side or sidecar-side. Shallow-clone, run LSP. | Deferred. GitHub PR review under tight security posture — can't clone, can't write source to disk. Browser-hosted in-memory analyzer is the only legal option. See "Memory-only PHP analysis (deferred path)" below for the PHP version. |
+
+What v0.1.0 ships: the top row (disk-allowed). What v0.1.0 must *not* preclude: the bottom row, which is why the contracts carry these properties from day one.
+
 ## Architecture overview
 
-Resolvers can run in the browser *or* on the server. The frontend dispatcher tries them in order and takes the first answer. Both sides implement the same `DefinitionResolver` contract.
+Resolvers can run on the user's machine (in the desktop sidecar, in a dev server, or in the browser) or on a hosted backend. They all implement the same `DefinitionResolver` contract. The frontend dispatcher tries them in order and takes the first answer.
 
 ```
 ┌─ Frontend ──────────────────────────────────────────────────┐
@@ -29,7 +50,7 @@ Resolvers can run in the browser *or* on the server. The frontend dispatcher tri
 │   ┌─ Dispatcher ─────────────────────────────────────────┐  │
 │   │  1. browser resolver for this language (if any)      │  │
 │   │  2. POST /api/definition  (server resolver chain)    │  │
-│   │  3. server grep floor                                │  │
+│   │  3. nothing — show "no resolver available"           │  │
 │   └──────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────┬──────────────────┘
                                            │
@@ -37,9 +58,10 @@ Resolvers can run in the browser *or* on the server. The frontend dispatcher tri
        │                                                     │
 ┌──────▼───────────────────────────┐    ┌────────────────────▼──────────────┐
 │   Browser resolvers (Web Worker) │    │   Server resolver chain           │
-│   - TS via @typescript/vfs       │    │   tier-1 LSP / custom             │
-│   - others as available          │    │   tier-2 tree-sitter              │
-│                                  │    │   tier-3 grep (always answers)    │
+│   - TS via @typescript/vfs       │    │   tier-1a user's installed LSP    │
+│   - PHP via @php-wasm/web        │    │   tier-1b bundled LSP (sidecar)   │
+│   - others as available          │    │   tier-2  tree-sitter             │
+│                                  │    │   tier-3  grep (always answers)   │
 └──────────────────┬───────────────┘    └───────────────────┬───────────────┘
                    │                                        │
        ┌───────────▼────────────────┐         ┌─────────────▼──────────────┐
@@ -49,7 +71,9 @@ Resolvers can run in the browser *or* on the server. The frontend dispatcher tri
        └────────────────────────────┘         └────────────────────────────┘
 ```
 
-The frontend doesn't know which resolver answered. The resolvers don't know whether the workspace is local or remote. The workspace doesn't know what's being asked of the files it serves.
+The "server" in the diagram is the same code in both deployments: a Node process running locally (Tauri sidecar in desktop, dev server otherwise) or hosted. The dispatcher doesn't care which.
+
+The frontend doesn't know which resolver answered. The resolvers don't know which deployment mode they're in — they ask the workspace. The workspace doesn't know what's being asked of the files it serves.
 
 ## The contracts
 
@@ -73,7 +97,7 @@ interface Definition {
   range: { startLine: number; startCol: number; endLine: number; endCol: number };
   preview?: string;             // few lines of context for peek view
   precision: "exact" | "fuzzy"; // honest signal for the UI
-  resolvedBy: string;           // "tsserver" | "tree-sitter" | "grep" — for debugging + UI degradation
+  resolvedBy: string;           // "intelephense" | "tree-sitter" | "grep" — for debugging + UI degradation
 }
 ```
 
@@ -86,18 +110,35 @@ interface Workspace {
   kind: "local" | "github";
   id: string;                                       // stable cache key
   readFile(path: string): Promise<string>;
-  // Server-only. Resolvers that need the whole tree on disk (LSP subprocess) call this.
+
+  // What this workspace can promise.
+  readPosture: "unbounded" | "rate-limited";
+  materialization: "disk-allowed" | "memory-only";
+
+  // For rate-limited workspaces, optional hooks the resolver can use:
+  listFiles?(glob: string): Promise<string[]>;     // cheap one-shot enumeration if available
+  searchByName?(name: string): Promise<Hit[]>;      // e.g. GitHub Code Search; the name-floor
+  remainingBudget?(): { reads: number };             // soft signal to the resolver
+
+  // Server-only, and only callable when materialization === "disk-allowed".
+  // Resolvers that need the whole tree on disk (LSP subprocess) call this.
   ensureMaterialized?(): Promise<{ rootDir: string }>;
 }
 ```
 
-Server implementations: `LocalWorkspace` reads from a configured root, `ensureMaterialized` returns that root unchanged. `GitHubWorkspace` reads via the GitHub API and `ensureMaterialized` does a shallow clone at the SHA into a temp dir keyed by `(owner/repo, sha)`, reused across requests.
+Server implementations:
 
-Browser implementations: `BrowserLocalWorkspace` reads via a server endpoint (`GET /api/file?path=…`), or from an in-memory map for fixtures. `BrowserGitHubWorkspace` reads directly via the GitHub API (no server roundtrip needed).
+- `LocalWorkspace` reads from a configured root, declares `unbounded` + `disk-allowed`. `ensureMaterialized` returns that root unchanged.
+- `GitHubWorkspace` reads via the GitHub API and (when permitted) does a shallow clone at the SHA into a temp dir keyed by `(owner/repo, sha)`, reused across requests. The clone behavior is configurable per deployment — if a repository's source isn't allowed to be local, the workspace declares `memory-only` and `ensureMaterialized` is unavailable, so only resolvers that take file content over the wire can answer.
+
+Browser implementations:
+
+- `BrowserLocalWorkspace` reads via a server endpoint (`GET /api/file?path=…`), or from an in-memory map for fixtures. Posture inherits from the server side.
+- `BrowserGitHubWorkspace` reads directly via the GitHub API (no server roundtrip needed). Declares `rate-limited` + `memory-only` — there's no disk to materialize to.
 
 ### Language module
 
-The full per-language footprint. A language can declare a browser-side resolver, a server-side resolver, or both. The dispatcher walks browser → server.
+The full per-language footprint. Each resolver factory is conditional on the workspace properties; the dispatcher only considers resolvers that can run in the workspace's mode.
 
 ```ts
 // languages/typescript.ts
@@ -106,19 +147,27 @@ export default defineLanguage({
   extensions: [".ts", ".tsx", ".mts", ".cts"],
   shikiId: "tsx",
   resolvers: {
+    // Browser-hosted: TS Compiler API in a Web Worker. Works in every workspace mode.
     browser: () => import("./resolvers/ts-vfs").then(m => new m.TsVfsResolver()),
+    // Server-hosted: also works without a sidecar binary; pure JS LSP.
     server:  (ws) => new TsCompilerApiResolver(ws),
   },
 });
 
-// languages/python.ts
+// languages/php.ts
 export default defineLanguage({
-  id: "python",
-  extensions: [".py", ".pyi"],
-  shikiId: "python",
-  clickableScopes: { deny: ["variable.language.self"] },
+  id: "php",
+  extensions: [".php", ".phtml"],
+  shikiId: "php",
   resolvers: {
-    server: (ws) => new LspResolver(ws, { command: "pyright-langserver", args: ["--stdio"] }),
+    server: {
+      // Tier 1a: user's installed LSP, if discovered/configured.
+      discover: () => discoverIntelephense() ?? discoverPhpactor(),
+      // Tier 1b: bundled LSP shipped with the sidecar. Disk-allowed only.
+      bundled: { command: "intelephense", args: ["--stdio"], requires: "disk-allowed" },
+    },
+    // Memory-only fallback; details in "Memory-only PHP analysis" below.
+    browser: () => import("./resolvers/php-wasm").then(m => new m.PhpWasmResolver()),
   },
 });
 
@@ -128,37 +177,45 @@ export default defineLanguage({
   extensions: [".go"],
   shikiId: "go",
   resolvers: {
-    server: (ws) => new LspResolver(ws, { command: "gopls", args: ["serve"] }),
+    server: {
+      discover: () => discoverGopls(),
+      bundled: { command: "gopls", args: ["serve"], requires: "disk-allowed" },
+    },
+    // No browser-hosted Go resolver. In memory-only mode, falls through to Tier 2/3.
   },
 });
 ```
 
-Languages register via a directory scan of `languages/*.ts` at boot. Adding a language with an existing LSP is ~10 lines. Browser resolvers are imported lazily — see "Lazy loading" below.
+Languages register via a directory scan of `languages/*.ts` at boot. Adding a language with an existing LSP is meant to be simple. Browser resolvers are imported lazily — see "Lazy loading" below.
 
 ## Coverage strategy: precision → fuzzy fallback
 
-Three resolver tiers, layered. The dispatcher walks them in order; first non-empty answer wins. The `precision` field tells the UI to degrade gracefully on fuzzy hits.
+Resolvers are layered in tiers; the dispatcher walks them in order; first non-empty answer wins. The `precision` field tells the UI to degrade gracefully on fuzzy hits.
 
-| Tier | Tech | Languages covered | Precision | Per-language cost |
-|------|------|-------------------|-----------|-------------------|
-| 1 | LSP (server-side subprocess, or browser-side if a JS/WASM build exists) | Anything with an LSP | Exact (type-aware, import-aware) | Binary discovery + ~5 lines of config |
-| 2 | tree-sitter + `tags.scm` queries | ~50 languages with parsers | Scope-aware, name-based | Parser package + tags query |
-| 3 | grep-by-symbol-name | Anything textual | Fuzzy (ambiguous on overloads/shadowing) | None |
+| Tier  | Tech                                                                          | Languages covered                                | Precision                              | Per-language cost                            |
+|-------|-------------------------------------------------------------------------------|--------------------------------------------------|----------------------------------------|----------------------------------------------|
+| 1a    | **User's installed LSP** (intelephense, gopls, rust-analyzer, …) via sidecar  | Whatever the user has set up                     | Exact (their PHP version, their vendor) | Per-language discovery probe + ~5 lines of config |
+| 1b    | **Bundled LSP** (server-side subprocess shipped with sidecar / hosted server) | Anything we ship a binary for                    | Exact                                  | Binary discovery + ~5 lines of config        |
+| 1c    | **Browser-hosted analyzer** (TS Compiler API, php-wasm-based PHP analyzer)    | Anything we have a JS/WASM build for             | Exact for some constructs              | Per-language module + bundle weight          |
+| 2     | tree-sitter + `tags.scm` queries                                              | ~50 languages with parsers                       | Scope-aware, name-based                | Parser package + tags query                  |
+| 3     | grep-by-symbol-name                                                           | Anything textual                                 | Fuzzy (ambiguous on overloads)         | None                                         |
 
-**Why all three:** Tier 1 covers languages we've configured. Tier 2 picks up everything tree-sitter parses but where no LSP is set up. Tier 3 ensures the feature *never* feels broken — clicking always does something, even if it's "here are 4 candidates by name." This matters for the GitHub remote case where we may not have an LSP configured for the repo's language.
+**Why the sub-tiers within Tier 1 matter:** The user's installed LSP is the highest fidelity *and* zero shipping cost — it knows their PHP version, their `composer install`'d vendor, their custom config. The bundled LSP is the fallback for users without one configured. The browser-hosted analyzer is the only Tier-1 option when materialization is `memory-only` (no disk to point an LSP at) — for most languages, there is no browser-hosted option and the dispatcher falls to Tier 2.
 
-### Browser-hosted resolver availability
+Tier 2 picks up everything tree-sitter parses but where no Tier-1 resolver applies. Tier 3 ensures the feature *never* feels broken — clicking always does something, even if it's "here are 4 candidates by name."
 
-For Tier 1 specifically, "where the LSP runs" varies by language. This affects bundle size and whether the feature works without a server.
+### Browser-hosted Tier-1c availability
 
-| Language | Browser-hosted | Notes |
-|---|---|---|
-| TypeScript / JavaScript | Yes | `typescript` + `@typescript/vfs`. The TS compiler is plain JS — no WASM. Lazy-loaded; ~few MB on first click. |
-| Python | Possible | Pyright is JS. Sizeable but feasible. Server-first in v1. |
-| Rust | Possible | rust-analyzer has a WASM build (Rust Playground). Server-first in v1. |
-| C / C++ | Possible | clangd WASM builds exist. Server-first in v1. |
-| PHP | Being explored separately | No off-the-shelf browser LSP today, but `@php-wasm/web` is already in the bundle and a PHP-native LSP could plausibly run inside it. Tracked as a separate exploration. |
-| Go, Java, Ruby, Swift, … | No | Server-only via subprocess LSP. |
+Whether a language has a browser-hosted resolver affects the `memory-only` row of the deployment matrix.
+
+| Language                | Browser-hosted Tier-1c                                                                                   |
+|-------------------------|----------------------------------------------------------------------------------------------------------|
+| TypeScript / JavaScript | Yes. `typescript` + `@typescript/vfs`. Pure JS, no WASM. Lazy-loaded.                                    |
+| PHP                     | Yes. `@php-wasm/web` is already in the bundle for the runner; details in "Memory-only PHP analysis (deferred path)" below. |
+| Python                  | Possible (pyright is JS). Server-first.                                                                  |
+| Rust                    | Possible (rust-analyzer has a WASM build). Server-first.                                                 |
+| C / C++                 | Possible (clangd WASM builds exist). Server-first.                                                       |
+| Go, Java, Ruby, Swift, …| No. In `memory-only` mode these fall through to Tier 2.                                                  |
 
 ## Frontend: cross-language identifier detection
 
@@ -201,10 +258,8 @@ Concrete behavior:
    - **Warm:** answer locally. Done. No server request.
    - **Cold:** start lazy-loading the browser resolver *and* fire a server request in parallel. Use whichever returns first; cancel the other. This keeps the multi-MB initial download out of the visible click latency. Once the browser resolver is warm, future clicks in that language stay browser-only.
    - **Failed to load** (worker error, network issue): fall through to the server.
-2. **No browser resolver declared for this language** (Go, Java, etc.): go straight to the server.
+2. **No browser resolver declared for this language** (Go, Java, etc.): go straight to the server. The server picks Tier 1a (user's LSP), 1b (bundled), 2, or 3 based on what's available *and* what's legal in the workspace's mode.
 3. **Server unreachable and no browser answer:** show "no resolver available" in the peek panel. The feature is honest about its limits rather than pretending to work.
-
-The server, when called, walks its own internal chain (Tier-1 LSP/custom → Tier-2 tree-sitter → Tier-3 grep) and returns the best answer it has. The dispatcher just sees a single response.
 
 Two preferences this design intentionally locks in:
 - **Once warm, browser wins** — even if the server could also answer. No "race for the better answer" in steady state.
@@ -214,7 +269,8 @@ Two preferences this design intentionally locks in:
 
 Generic, server-side (written once):
 
-- `LspResolver` — JSON-RPC over stdio, manages `initialize` / `didOpen` / `definition` / shutdown, normalizes `Location` and `LocationLink` results, handles file URIs.
+- `LspResolver` — JSON-RPC over stdio, manages `initialize` / `didOpen` / `definition` / shutdown, normalizes `Location` and `LocationLink` results, handles file URIs. Used by both Tier 1a (user's LSP) and Tier 1b (bundled).
+- `LspDiscovery` — per-language probes for the user's installed LSP (`which`, common npm/composer/cargo install paths, VS Code extension dirs, project-local `vendor/bin`/`node_modules/.bin`). Config-only fallback for users who'd rather declare the path explicitly.
 - `TreeSitterResolver` — parameterized by `(parserPackage, tagsQueryPath)`.
 - `GrepResolver` — language-agnostic floor.
 - `ResolverChain` — walks tiers on the server, returns first non-empty.
@@ -231,21 +287,23 @@ Generic, browser-side (written once):
 Per-language module:
 
 - Extensions, Shiki id, optional scope refinements.
-- One or both resolver factories: `resolvers.browser` and/or `resolvers.server`.
+- Some combination of `resolvers.server.discover`, `resolvers.server.bundled`, `resolvers.browser`. Each is conditional on the workspace's `materialization` and `readPosture`.
 
 ## Decisions to confirm before any code lands
 
 These are cheap to set now and annoying to back out later:
 
 1. **Chain of resolvers, not single-resolver-per-language.** Lets the grep floor always answer. Language modules declare which resolvers exist; the dispatcher walks them.
-2. **Single language registry, shared shape across browser and server.** Both sides need it: the frontend for `shikiId` and clickable-scope rules, the server for resolver factories. To avoid drift, the registry definitions live in one shared `languages/` directory; both bundles import the relevant fields. Where shared isn't possible, the server exposes `GET /api/languages` and the frontend hydrates from it at startup.
-3. **Token annotation carries the file path.** `highlightLines(lines, language)` at `web/src/highlight.ts:114` currently doesn't know what file it's rendering. The call site must pass the workspace-relative path through, baked into a `data-file` attribute on the line container.
-4. **Resolvers are per-workspace, not global.** LSPs want a `rootUri` and watch files; one resolver per (language × workspace). Factory shapes `resolvers.server(workspace)` and `resolvers.browser()` already encode this — browser resolvers are typically per-tab anyway. Server keeps `WeakMap<Workspace, Map<languageId, Resolver>>` and tears down on workspace close.
-5. **Lazy loading is important.** Two flavors:
-   - **Browser resolver bundles:** `import()` the resolver factory only when a click in that language arrives. Otherwise the TS compiler, pyright, etc. all land in the initial bundle and we ship multi-MB of dead weight on every page load.
+2. **Workspace declares `readPosture` and `materialization`; resolvers branch on them.** Resolvers never ask "am I on GitHub?" or "is this the desktop app?" — they ask the workspace what it can promise. v0.1.0 only exercises the disk-allowed cells; the contract is shaped to allow the memory-only cells later without rework.
+3. **User's installed LSP first, bundled LSP second.** When the user already has intelephense / gopls / rust-analyzer set up, we use it — best fidelity, zero shipping cost, respects their config and their PHP/Go/Rust toolchain. Bundled LSP is the fallback for users with nothing configured. Discovery is config-first (a settings field with a path); auto-probing is a follow-up.
+4. **Single language registry, shared shape across browser and server.** Both sides need it: the frontend for `shikiId` and clickable-scope rules, the server for resolver factories. To avoid drift, the registry definitions live in one shared `languages/` directory; both bundles import the relevant fields. Where shared isn't possible, the server exposes `GET /api/languages` and the frontend hydrates from it at startup.
+5. **Token annotation carries the file path.** `highlightLines(lines, language)` at `web/src/highlight.ts:114` currently doesn't know what file it's rendering. The call site must pass the workspace-relative path through, baked into a `data-file` attribute on the line container.
+6. **Resolvers are per-workspace, not global.** LSPs want a `rootUri` and watch files; one resolver per (language × workspace). Factory shapes already encode this — browser resolvers are typically per-tab anyway. Server keeps `WeakMap<Workspace, Map<languageId, Resolver>>` and tears down on workspace close.
+7. **Lazy loading is important.** Two flavors:
+   - **Browser resolver bundles:** `import()` the resolver factory only when a click in that language arrives. Otherwise the TS compiler, php-wasm, etc. all land in the initial bundle and we ship multi-MB of dead weight on every page load.
    - **Server LSP startup:** boot LSP subprocesses on first click in their language, not at server boot. Cache the warming promise to collapse concurrent boots.
    In both cases, the grep floor on the server can answer immediately while the precise resolver loads, so cold-start latency stays out of the UI.
-6. **`precision: "exact" | "fuzzy"` in the response.** Without it, grep and LSP results look identical and users will trust both equally. Worth shipping in v1 even if the UI just adds a subtle marker.
+8. **`precision: "exact" | "fuzzy"` in the response.** Without it, grep and LSP results look identical and users will trust both equally. Worth shipping in v1 even if the UI just adds a subtle marker.
 
 ## Implementation order
 
@@ -255,19 +313,70 @@ Each step is independently shippable and proves out one assumption.
 Annotate Shiki tokens with line/col + scope, add `data-file` on line containers, add a delegated click handler that `console.log`s `{file, line, col, identifier}`. Validates the cross-language identifier-detection approach and the token plumbing before any resolver work.
 
 ### Step 2 — Server resolver chain + grep floor
-Backend: `Workspace`, `LocalWorkspace`, `Resolver`/`ResolverChain` types, `GrepResolver`, `POST /api/definition`. Workspace root configured via `SHIPPABLE_WORKSPACE_ROOT` env var. Frontend: dispatcher (server-only for now), peek panel that opens on click, shows results, handles multi-result. End-to-end working for any language, fuzzy precision.
+Backend: `Workspace`, `LocalWorkspace` (declaring `unbounded` + `disk-allowed`), `Resolver`/`ResolverChain` types, `GrepResolver`, `POST /api/definition`. Workspace root configured via `SHIPPABLE_WORKSPACE_ROOT` env var. Frontend: dispatcher (server-only for now), peek panel that opens on click, shows results, handles multi-result. End-to-end working for any language, fuzzy precision.
 
-### Step 3 — Browser resolver dispatcher + TypeScript via `@typescript/vfs`
+### Step 3 — Server-side `LspResolver` + bundled LSPs (Tier 1b)
+Adds the generic LSP host. Pick two languages with mature LSPs to validate the abstraction — a proven path is intelephense (PHP) and gopls (Go). Each new language is one module file. The sidecar (in desktop) and dev server both run the LSP subprocess; same code path.
+
+### Step 4 — User's LSP discovery (Tier 1a)
+Add `LspDiscovery` and a settings field per language ("path to PHP language server"). Probe order: explicit config → project-local `vendor/bin/` or `node_modules/.bin/` → common global install locations → fall through to bundled. The probe is still the same `LspResolver`; only the binary path differs.
+
+### Step 5 — Browser resolver dispatcher + TypeScript via `@typescript/vfs`
 First browser resolver. Web Worker, lazy-imported on first TS click. TS clicks become exact, locally, with no server roundtrip. Adds the `browser → server` dispatcher walk. Validates that the Workspace shape works on both sides.
 
-### Step 4 — Server-side `LspResolver` + Python (pyright) + Go (gopls)
-Adds the generic LSP host on the server. Python and Go added as proof the abstraction holds — each new language is one module file. Proves the architecture handles languages with no browser-hosted option.
-
-### Step 5 — Tree-sitter Tier-2 resolver (server)
+### Step 6 — Tree-sitter Tier-2 resolver (server)
 Fills the long tail for languages without a configured LSP. Most useful for the remote GitHub path where we won't always have a relevant LSP available.
 
-### Step 6 — `GitHubWorkspace` (both sides)
-Same resolver layer, different file-system implementation. Server: shallow clone at SHA on `ensureMaterialized()` for resolvers that need a tree; direct API reads for the others. Browser: `BrowserGitHubWorkspace` reads via the GitHub API directly so TS clicks on a remote PR work without the server.
+### Step 7 — `GitHubWorkspace` (both sides), disk-allowed
+Same resolver layer, different file-system implementation. Server: shallow clone at SHA on `ensureMaterialized()` for resolvers that need a tree; direct API reads for the others. Browser: `BrowserGitHubWorkspace` reads via the GitHub API directly so TS clicks on a remote PR work without the server. Workspace declares `rate-limited` + `disk-allowed`.
+
+### Step 8 — Memory-only mode (deferred)
+The bottom row of the deployment matrix. Server-side `GitHubWorkspace` honors a deployment flag that disables `ensureMaterialized` (the workspace then declares `memory-only`). Resolvers that require disk become unavailable in this mode and the dispatcher falls through. Browser-hosted Tier-1c is the only Tier-1 option here; for PHP, see "Memory-only PHP analysis (deferred path)" below. For other languages, the user gets Tier 2/3.
+
+## Memory-only PHP analysis (deferred path)
+
+The bottom-right cell of the deployment matrix — GitHub PR review with `memory-only` materialization — is the only place where browser-hosted Tier-1c is the *only* viable Tier-1 option for PHP. This section sketches what we'd build there. It's deferred; nothing in v0.1.0 depends on it.
+
+### Why this path exists at all
+
+The existing `@php-wasm/web-8-3` runtime in `web/src/runner/php-worker.ts:91` already runs PHP in a Web Worker for the code-runner feature. That gives us a sunk-cost PHP environment we can drive for definition resolution at no extra binary-shipping cost — provided we accept its constraints: one-shot `php.run` calls (no native stdio), Web Worker memory limits, no `pcntl_*` / `posix_*`. These constraints rule out hosting a real PHP LSP (intelephense, phpactor) inside the worker; they don't rule out an analyzer that takes file content as input and returns positions.
+
+### Approach: nikic/php-parser as a thin analyzer
+
+A small PHP entrypoint (`analyzer.php`) bundled with the runtime:
+
+1. Loads `nikic/php-parser` from a phar/static asset written to the VFS at worker boot.
+2. Parses each requested file into an AST, builds a per-file symbol index keyed by `{namespace, fqn, kind}` for class/interface/trait/function/method/const declarations.
+3. Resolves the click against the local file's symbols, then `use`-imported names, then a workspace-wide map populated lazily.
+4. Returns `Definition[]` with `precision: "exact"` when uniquely resolved, `"fuzzy"` when only the name matches.
+
+Coverage: function calls, class/interface/trait references, static calls, constants, `use`-imported names. Variable lookups, dynamic dispatch, magic methods, trait merging fall through to Tier 2 / Tier 3.
+
+### The persistent-runtime trick
+
+`@php-wasm/web` exposes `PHP#run({code})` as a one-shot, but the `PHP` instance itself persists across calls — class definitions, opcache, statically-cached PHP-level state all survive. Boot the parser + analyzer *once* (`require 'phar://php-parser.phar/autoload.php'`, `require 'analyzer.php'`); subsequent calls just look up the cached index and resolve. This avoids needing a long-lived stdio loop the runtime can't provide.
+
+### Workspace bridge
+
+The `memory-only` constraint means files never touch disk at all — the worker mounts them in its in-memory VFS. Two-phase fetch: the worker replies `{ status: "needs", files: [...] }` if the analyzer hits a file not yet in the VFS; the main thread fulfils via `Workspace.readFile` and re-issues with the file set attached. Cache lives in the worker keyed by content hash (which, for `rate-limited` workspaces, is effectively SHA-pinned).
+
+The diff files are special: they're already on the page (it's what the user is reviewing). The resolver indexes those for free on every request. **In-diff resolution is therefore the contract floor for this path** — even if every other read fails or the budget is exhausted, clicks within the diff still resolve when the target is also in the diff.
+
+### One worker, separate from the runner
+
+The runner's worker (`web/src/runner/php-worker.ts`) is killable on user-code crashes; the analyzer's worker shouldn't be (rebuilding the symbol index is expensive). They have different mount needs and trust boundaries. Two workers; the analyzer one is lazy-spawned on first PHP click in this mode.
+
+### When this lands
+
+Sub-steps for when the deferred path becomes work:
+
+1. A worker that boots the runtime and proves PHP-level state persists across `php.run` calls.
+2. Bundle `nikic/php-parser` as a phar; prove it parses inside the worker.
+3. In-diff resolution end-to-end (the contract floor).
+4. Cross-file lookup with two-phase fetch and content-hashed cache.
+5. Language-module wiring; dispatcher integration for the `memory-only` cell.
+
+The hard parts (workspace bridge, cache, cold-start UX) are exercised at sub-step 3-4, not later. If real-LSP-grade fidelity becomes interesting eventually, phpactor's RPC mode (request/response JSON, no event loop) can help us deal with the persistent-process limitation.
 
 ## Open questions to revisit
 
@@ -276,3 +385,5 @@ Same resolver layer, different file-system implementation. Server: shallow clone
 - **Cross-language jumps** (e.g., `.tsx` → `.css` module, `.ts` → generated `.graphql` types). Falls out of the contract for free when the LSP knows the mapping; otherwise out of scope for v1.
 - **Generated files / source maps.** Out of scope for v1.
 - **When to invalidate resolver caches on local file changes.** LSPs handle their own watches; the chain just needs to forward `didChange`. Build the watcher with step 4.
+- **Trust model for spawning the user's LSP binary.** We're executing a binary the user pointed us at — not worse than VS Code does, but worth being explicit about. v0.1.0 stance: config-only (no auto-spawn from probed paths until the user confirms once).
+- **How `memory-only` is triggered.** Deployment flag? Per-repository config? User toggle? Probably some combination, but the workspace contract doesn't care — only the place that constructs the workspace does.
