@@ -811,11 +811,9 @@ function FrameStage({
         <Sidebar
           viewModel={buildSidebarViewModel({
             files: cs.files,
-            skills: cs.skills,
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
-            activeSkills: state.activeSkills,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId);
@@ -830,9 +828,6 @@ function FrameStage({
               },
             });
           }}
-          onToggleSkill={(id) =>
-            dispatch({ type: "TOGGLE_SKILL", skillId: id })
-          }
         />
         <DiffView
           viewModel={buildDiffViewModel({
