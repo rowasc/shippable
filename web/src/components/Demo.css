@@ -1,0 +1,154 @@
+/* Demo route — the live app shell renders at full viewport height (.app
+   keeps its own 100vh). Caption and play controls float above the stage so
+   recordings get the full surface. Controls are pinned high enough to sit
+   above any in-app overlay (plan, help, load, code runner, prompt picker). */
+
+.demo {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+
+.demo__app {
+  animation: demo-fade 360ms ease-out;
+}
+
+@keyframes demo-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Caption — bottom-center, only visible while playing. */
+.demo__caption {
+  position: fixed;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  max-width: min(720px, calc(100vw - 48px));
+  padding: 10px 18px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-2) 88%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  pointer-events: none;
+  z-index: 100;
+  animation: demo-caption-in 240ms ease-out;
+}
+
+@keyframes demo-caption-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.demo__caption--paused {
+  border-color: var(--accent);
+}
+
+.demo__paused-hint {
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+
+.demo__caption-num {
+  color: var(--fg-mute);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+
+.demo__caption-text {
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.demo__caption-hint {
+  color: var(--fg-mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Controls — bottom-center, always visible so the user can hit Play. */
+.demo__controls {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-2) 88%, transparent);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  z-index: 100;
+}
+
+.demo__btn {
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--fg-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 3px 10px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+
+.demo__btn:hover:not(:disabled) {
+  color: var(--fg);
+  border-color: var(--accent);
+}
+
+.demo__btn--primary {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.demo__btn--active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.demo__btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-mute);
+  font-size: 14px;
+  padding: 0 8px;
+  margin-left: 4px;
+}
+
+.demo__btn--ghost:hover {
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.demo__counter {
+  font-size: 11px;
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+  min-width: 36px;
+  text-align: center;
+}

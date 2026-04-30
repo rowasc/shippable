@@ -27,6 +27,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         gallery: resolve(__dirname, 'gallery.html'),
+        demo: resolve(__dirname, 'demo.html'),
       },
     },
   },
