@@ -56,17 +56,23 @@ export function CodeRunner({
   onFreeClose,
   runRequest,
 }: Props) {
-  // Detected language drives the runner choice and the placeholder hints.
-  // Free runner falls back to TS when the current file isn't a known
-  // language (so opening the runner from anywhere still works).
+  // The detected language seeds the runner; the user can override it via the
+  // header selector when detection's wrong (e.g. a JS snippet quoted in a
+  // markdown file) or absent. `manualLang` resets when the file changes so
+  // each file starts from detection again.
   const detectedLang: Lang | null = detectLang(currentFilePath);
-  const lang: Lang = detectedLang ?? "ts";
+  const [manualLang, setManualLang] = useState<Lang | null>(null);
+  const lang: Lang = manualLang ?? detectedLang ?? "ts";
 
   const [open, setOpen] = useState<OpenState | null>(null);
   const [mode, setMode] = useState<Mode>("guided");
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
+
+  useEffect(() => {
+    setManualLang(null);
+  }, [currentFilePath]);
 
   // Re-parse on every source change. Cheap (regex-based) so it's fine to
   // run inline; the editor benefits from live shape detection.
@@ -87,7 +93,6 @@ export function CodeRunner({
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!runRequest || runRequest.tick === 0) return;
-    if (!detectedLang) return;
     const trimmed = runRequest.source.trim();
     if (trimmed.length < 2) return;
     setOpen({
@@ -104,7 +109,7 @@ export function CodeRunner({
     // Plain `e` requests omit `inputs` and we leave the existing sticky
     // map alone — the user may have typed values for the previous run.
     if (runRequest.inputs) setInputs(runRequest.inputs);
-  }, [runRequest, detectedLang]);
+  }, [runRequest]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Parent-driven free runner: when freeOpen flips true, open the panel
@@ -176,12 +181,27 @@ export function CodeRunner({
       style={panelStyle}
       onMouseDown={(e) => {
         const t = e.target as HTMLElement;
-        if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA") e.preventDefault();
+        if (t.tagName !== "INPUT" && t.tagName !== "TEXTAREA" && t.tagName !== "SELECT") e.preventDefault();
       }}
     >
       <div className="coderunner__panel">
         <header className="coderunner__head">
-          <span className="coderunner__lang">{parsed.lang}</span>
+          <select
+            className="coderunner__lang"
+            value={lang}
+            onChange={(e) => setManualLang(e.target.value as Lang)}
+            title={
+              manualLang
+                ? `language: ${lang} (manual override)`
+                : detectedLang
+                  ? `language: ${lang} (detected from file)`
+                  : `language: ${lang} (default — pick to override)`
+            }
+          >
+            <option value="ts">ts</option>
+            <option value="js">js</option>
+            <option value="php">php</option>
+          </select>
           <span className="coderunner__shape">
             {open.isFree
               ? "free runner"

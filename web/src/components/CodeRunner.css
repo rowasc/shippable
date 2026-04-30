@@ -57,9 +57,26 @@
 .coderunner__lang {
   background: var(--accent);
   color: var(--bg);
+  border: 1px solid var(--accent);
   border-radius: 3px;
-  padding: 1px 6px;
+  padding: 1px 18px 1px 6px;
   font-weight: 600;
+  font-family: inherit;
+  font-size: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--bg) 50%),
+    linear-gradient(135deg, var(--bg) 50%, transparent 50%);
+  background-position: calc(100% - 9px) 50%, calc(100% - 5px) 50%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.coderunner__lang:focus {
+  outline: 1px solid var(--bg);
+  outline-offset: -3px;
 }
 .coderunner__shape {
   color: var(--fg-dim);
