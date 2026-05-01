@@ -45,9 +45,19 @@ for (const themeId of THEMES) {
     };
   });
 
-  const file = `${OUT}/${themeId}.png`;
-  await page.screenshot({ path: file, fullPage: false });
-  results.push({ themeId, file, ...probe });
+  const galleryFile = `${OUT}/${themeId}-gallery.png`;
+  await page.screenshot({ path: galleryFile, fullPage: false });
+
+  // Also screenshot the live app on a TypeScript-heavy fixture so we can
+  // verify the active theme drives DiffView syntax rendering, not just the
+  // gallery's static showcase.
+  await page.goto(`${BASE}/?cs=42`, { waitUntil: "networkidle" });
+  await page.keyboard.press("Escape").catch(() => {});
+  await page.waitForTimeout(800);
+  const appFile = `${OUT}/${themeId}-app.png`;
+  await page.screenshot({ path: appFile, fullPage: false });
+
+  results.push({ themeId, galleryFile, appFile, ...probe });
 }
 
 await browser.close();
