@@ -203,6 +203,63 @@ export function LoadModal({ onLoad, onClose }: Props) {
           </button>
         </header>
 
+        {/* Worktrees pane: only renders when the local server is reachable.
+         *  In no-server / browser-only modes this section is hidden and the
+         *  three classic loaders below remain fully functional. */}
+        {serverAvailable && (
+          <section className="modal__sec">
+            <div className="modal__sec-h">From a worktrees directory</div>
+            <p className="modal__hint">
+              Absolute path to a directory containing one or more git worktrees
+              (e.g. a repo root, or <code>.claude/worktrees</code>). Reads the
+              latest commit on the worktree you pick.
+            </p>
+            <div className="modal__row">
+              <input
+                className="modal__input"
+                type="text"
+                placeholder="/Users/you/code/my-repo"
+                value={wtDir}
+                onChange={(e) => setWtDir(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && scanWorktrees()}
+              />
+              <button
+                className="modal__btn modal__btn--primary"
+                onClick={scanWorktrees}
+                disabled={wtBusy || !wtDir.trim()}
+              >
+                {wtBusy ? "scanning…" : "scan"}
+              </button>
+            </div>
+            {wtList && wtList.length > 0 && (
+              <ul className="modal__wt-list">
+                {wtList.map((wt) => (
+                  <li key={wt.path}>
+                    <button
+                      type="button"
+                      className="modal__wt-row"
+                      onClick={() => loadFromWorktree(wt)}
+                      disabled={wtLoadingPath !== null}
+                    >
+                      <span className="modal__wt-branch">
+                        {wt.branch ?? "(detached)"}
+                        {wt.isMain && (
+                          <span className="modal__wt-tag"> main</span>
+                        )}
+                      </span>
+                      <span className="modal__wt-path">{wt.path}</span>
+                      <span className="modal__wt-head">
+                        {wt.head.slice(0, 7)}
+                        {wtLoadingPath === wt.path && " · loading…"}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         <section className="modal__sec">
           <div className="modal__sec-h">From URL</div>
           <p className="modal__hint">
@@ -271,63 +328,6 @@ export function LoadModal({ onLoad, onClose }: Props) {
             </button>
           </div>
         </section>
-
-        {/* Worktrees pane: only renders when the local server is reachable.
-         *  In no-server / browser-only modes this section is hidden and the
-         *  three classic loaders above remain fully functional. */}
-        {serverAvailable && (
-          <section className="modal__sec">
-            <div className="modal__sec-h">From a worktrees directory</div>
-            <p className="modal__hint">
-              Absolute path to a directory containing one or more git worktrees
-              (e.g. a repo root, or <code>.claude/worktrees</code>). Reads the
-              latest commit on the worktree you pick.
-            </p>
-            <div className="modal__row">
-              <input
-                className="modal__input"
-                type="text"
-                placeholder="/Users/you/code/my-repo"
-                value={wtDir}
-                onChange={(e) => setWtDir(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && scanWorktrees()}
-              />
-              <button
-                className="modal__btn modal__btn--primary"
-                onClick={scanWorktrees}
-                disabled={wtBusy || !wtDir.trim()}
-              >
-                {wtBusy ? "scanning…" : "scan"}
-              </button>
-            </div>
-            {wtList && wtList.length > 0 && (
-              <ul className="modal__wt-list">
-                {wtList.map((wt) => (
-                  <li key={wt.path}>
-                    <button
-                      type="button"
-                      className="modal__wt-row"
-                      onClick={() => loadFromWorktree(wt)}
-                      disabled={wtLoadingPath !== null}
-                    >
-                      <span className="modal__wt-branch">
-                        {wt.branch ?? "(detached)"}
-                        {wt.isMain && (
-                          <span className="modal__wt-tag"> main</span>
-                        )}
-                      </span>
-                      <span className="modal__wt-path">{wt.path}</span>
-                      <span className="modal__wt-head">
-                        {wt.head.slice(0, 7)}
-                        {wtLoadingPath === wt.path && " · loading…"}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
 
         {err && (
           <div className="modal__err errrow">
