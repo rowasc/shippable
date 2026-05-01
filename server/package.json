@@ -11,7 +11,7 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "build:sidecar": "bun build --compile --minify --sourcemap --target=bun-darwin-arm64 ./src/index.ts --outfile ../src-tauri/binaries/shippable-server-aarch64-apple-darwin"
+    "build:sidecar": "rm -f ../src-tauri/binaries/shippable-server-aarch64-apple-darwin && bun build --compile --minify --sourcemap --target=bun-darwin-arm64 ./src/index.ts --outfile ../src-tauri/binaries/shippable-server-aarch64-apple-darwin"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
