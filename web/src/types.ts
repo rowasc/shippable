@@ -66,6 +66,14 @@ export interface DiffFile {
   hunks: Hunk[];
   /** Full file contents for the "expand entire file" view. */
   fullContent?: DiffLine[];
+  /**
+   * Post-change file content as a single string. The markdown preview uses
+   * this to render the file as it'll look once merged. Backed by the
+   * `fileContents` map the worktree-changeset endpoint returns; fixtures
+   * with `fullContent` already contain the same data, so this is mainly a
+   * carrier for diffs we can't reconstruct from hunks alone.
+   */
+  postChangeText?: string;
 }
 
 export interface ChangeSet {

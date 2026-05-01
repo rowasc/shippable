@@ -163,6 +163,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
             author: string;
             date: string;
             branch: string | null;
+            fileContents?: Record<string, string>;
           }
         | { error: string };
       if (!res.ok || "error" in json) {
@@ -174,6 +175,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
           title: json.subject || `${wt.branch ?? "detached"} @ ${json.sha.slice(0, 7)}`,
           author: json.author,
           head: json.branch ?? json.sha.slice(0, 7),
+          fileContents: json.fileContents,
         });
         if (cs.files.length === 0) {
           setErr("Latest commit produced no parseable diff (empty or merge?).");

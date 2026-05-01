@@ -174,10 +174,14 @@ export function buildDiffViewModel({
   selection,
 }: BuildDiffViewModelArgs): DiffViewModel {
   const canExpandFile = !!file.fullContent;
-  const canPreview = file.language === "markdown" && !!file.fullContent;
+  const canPreview =
+    file.language === "markdown" && (!!file.fullContent || !!file.postChangeText);
   const previewing = filePreviewing && canPreview;
+  // Prefer the explicit post-change string (from worktree-loaded changesets)
+  // over reconstructing from fullContent — same data, no per-line filtering.
   const previewSource = previewing
-    ? (file.fullContent ?? [])
+    ? file.postChangeText ??
+      (file.fullContent ?? [])
         .filter((line) => line.kind !== "del")
         .map((line) => line.text)
         .join("\n")

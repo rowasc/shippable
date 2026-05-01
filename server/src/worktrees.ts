@@ -53,6 +53,15 @@ export interface ChangesetResult {
   author: string;
   date: string;
   branch: string | null;
+  /**
+   * Post-change content for files the frontend can render specially —
+   * currently markdown files for the preview pane. Keys are repo-relative
+   * paths matching the `+++ b/<path>` lines in the diff. Files deleted in
+   * this commit are omitted (no post-change content exists). Files large
+   * enough to fail the per-file maxBuffer are also skipped silently rather
+   * than failing the whole request.
+   */
+  fileContents: Record<string, string>;
 }
 
 /**
@@ -198,5 +207,42 @@ export async function changesetFor(
     branch = null;
   }
 
-  return { diff, sha, subject, author, date, branch };
+  // Pull post-change content for markdown files in the diff so the frontend
+  // preview can render them. Best effort: a single failure (e.g. deleted file
+  // or oversized blob) is logged and skipped rather than aborting the whole
+  // request.
+  const fileContents: Record<string, string> = {};
+  for (const p of extractRenderablePaths(diff)) {
+    try {
+      const { stdout: content } = await execFileAsync(
+        GIT,
+        ["show", "--end-of-options", `${sha}:${p}`],
+        { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+      );
+      fileContents[p] = content;
+    } catch {
+      // File may not exist at this ref (deleted) or content exceeds buffer —
+      // omit and let the frontend fall back to raw-source view.
+    }
+  }
+
+  return { diff, sha, subject, author, date, branch, fileContents };
+}
+
+/**
+ * Pull repo-relative paths of files we want to ship post-change content for
+ * (currently any `.md` file added or modified in the diff). Skips deletions
+ * by ignoring `/dev/null` on the `+++` line.
+ */
+function extractRenderablePaths(diff: string): string[] {
+  const out = new Set<string>();
+  for (const line of diff.split("\n")) {
+    if (!line.startsWith("+++ ")) continue;
+    if (line.includes("/dev/null")) continue;
+    const m = /^\+\+\+ b\/(.+?)(?:\t.*)?$/.exec(line);
+    if (!m) continue;
+    const path = m[1];
+    if (path.endsWith(".md")) out.add(path);
+  }
+  return Array.from(out);
 }

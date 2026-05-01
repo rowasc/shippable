@@ -15,7 +15,20 @@ import type { ChangeSet, DiffFile, DiffLine, FileStatus, Hunk } from "./types";
  */
 export function parseDiff(
   text: string,
-  meta: { id: string; title?: string; author?: string; base?: string; head?: string } = {
+  meta: {
+    id: string;
+    title?: string;
+    author?: string;
+    base?: string;
+    head?: string;
+    /**
+     * Optional repo-relative path → post-change file content. When a parsed
+     * DiffFile's path matches a key here, the content is attached as
+     * `postChangeText` so surfaces like the markdown preview can render the
+     * full file. Files not in the map are unaffected.
+     */
+    fileContents?: Record<string, string>;
+  } = {
     id: "loaded",
   },
 ): ChangeSet {
@@ -31,7 +44,10 @@ export function parseDiff(
       line.startsWith("Index: ")
     ) {
       const { file, next } = parseFile(lines, i, meta.id);
-      if (file) files.push(file);
+      if (file) {
+        const extra = meta.fileContents?.[file.path];
+        files.push(extra ? { ...file, postChangeText: extra } : file);
+      }
       i = next;
     } else {
       i++;
