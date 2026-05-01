@@ -63,8 +63,8 @@ pub fn run() {
 
             match keychain::get(ANTHROPIC_KEY_ACCOUNT) {
                 Ok(Some(key)) => {
-                    let port = find_free_port()
-                        .map_err(|e| format!("port allocation failed: {e}"))?;
+                    let port =
+                        find_free_port().map_err(|e| format!("port allocation failed: {e}"))?;
                     let sidecar = app
                         .shell()
                         .sidecar("shippable-server")
