@@ -8,17 +8,18 @@ import { remarkAlert } from "remark-github-blockquote-alert";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { highlightCode } from "../highlight";
-import { useTheme } from "../useTheme";
-import { THEMES } from "../tokens";
 
 // Inject scoped GitHub markdown styles once on first import. The standalone
 // -light/-dark stylesheets target `.markdown-body`; rescope each under
-// `[data-md-scheme=…] .markdown-body` so a single page can use either palette.
+// `[data-color-scheme=…] .markdown-body` so the variant follows the app's
+// theme. `data-color-scheme` lives on <html> and is kept up-to-date by the
+// global theme code, so swapping themes auto-toggles the preview without
+// MarkdownView holding its own theme state.
 if (typeof document !== "undefined" && !document.getElementById("gh-md-scoped")) {
   const style = document.createElement("style");
   style.id = "gh-md-scoped";
   const scope = (css: string, scheme: "light" | "dark") =>
-    css.replace(/\.markdown-body/g, `[data-md-scheme="${scheme}"] .markdown-body`);
+    css.replace(/\.markdown-body/g, `[data-color-scheme="${scheme}"] .markdown-body`);
   style.textContent = `${scope(githubMarkdownLightCss, "light")}\n${scope(githubMarkdownDarkCss, "dark")}`;
   document.head.appendChild(style);
 }
@@ -40,13 +41,10 @@ interface Props {
 }
 
 export function MarkdownView({ source, basePath, imageAssets }: Props) {
-  const [themeId] = useTheme();
-  const colorScheme = THEMES[themeId].colorScheme;
-
   const baseDir = useMemo(() => dirname(basePath), [basePath]);
 
   return (
-    <section className="md-preview" data-md-scheme={colorScheme}>
+    <section className="md-preview">
       <div className="markdown-body">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkAlert]}

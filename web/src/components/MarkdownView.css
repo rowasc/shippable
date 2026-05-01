@@ -1,7 +1,13 @@
 /* github-markdown light/dark variants are loaded at runtime by MarkdownView
  * with their `.markdown-body` selector rescoped under
- * `[data-md-scheme="light|dark"] .markdown-body`, so that a single page can
- * show either palette regardless of the OS prefers-color-scheme. */
+ * `[data-color-scheme="light|dark"] .markdown-body`. The variant we land on
+ * therefore tracks the app's active theme (set on <html>). On top of that
+ * base, the rules below repaint the major surfaces (bg / fg / borders /
+ * accent) with the app's design tokens so a Dollhouse-pink theme doesn't
+ * suddenly reveal a white GitHub page mid-review.
+ *
+ * Code blocks render through Shiki's own GitHub-light / dark-dimmed palettes
+ * — intentionally left alone since they're meaningful on their own. */
 
 .md-preview {
   padding: 24px 32px;
@@ -9,10 +15,55 @@
   background: var(--bg-2);
 }
 
-.md-preview .markdown-body {
+[data-color-scheme] .md-preview .markdown-body {
   background: transparent;
+  color: var(--fg);
   max-width: 980px;
   margin: 0 auto;
+}
+
+[data-color-scheme] .md-preview .markdown-body a {
+  color: var(--accent);
+}
+
+[data-color-scheme] .md-preview .markdown-body h1,
+[data-color-scheme] .md-preview .markdown-body h2,
+[data-color-scheme] .md-preview .markdown-body h3,
+[data-color-scheme] .md-preview .markdown-body h4,
+[data-color-scheme] .md-preview .markdown-body h5,
+[data-color-scheme] .md-preview .markdown-body h6 {
+  color: var(--fg);
+}
+
+[data-color-scheme] .md-preview .markdown-body h1,
+[data-color-scheme] .md-preview .markdown-body h2 {
+  border-bottom-color: var(--border);
+}
+
+[data-color-scheme] .md-preview .markdown-body hr {
+  background-color: var(--border);
+}
+
+[data-color-scheme] .md-preview .markdown-body blockquote {
+  color: var(--fg-dim);
+  border-left-color: var(--border);
+}
+
+[data-color-scheme] .md-preview .markdown-body code:not(pre code) {
+  background-color: var(--bg-3);
+  color: var(--fg);
+}
+
+[data-color-scheme] .md-preview .markdown-body table th,
+[data-color-scheme] .md-preview .markdown-body table td {
+  border-color: var(--border);
+}
+[data-color-scheme] .md-preview .markdown-body table tr {
+  background-color: transparent;
+  border-top-color: var(--border);
+}
+[data-color-scheme] .md-preview .markdown-body table tr:nth-child(2n) {
+  background-color: var(--bg-3);
 }
 
 .md-preview__shiki {
@@ -38,7 +89,7 @@
 /* GitHub's `.markdown-body .highlight pre, .markdown-body pre` styling clashes
    with Shiki's own <pre>, which already sets background + padding. Reset to
    let Shiki render unaltered. */
-.md-preview .markdown-body .md-preview__shiki pre {
+[data-color-scheme] .md-preview .markdown-body .md-preview__shiki pre {
   background: inherit;
   padding: 0;
   margin: 0;
