@@ -20,13 +20,13 @@ const THEME_LIGHT = "github-light";
 const THEME_DARK = "github-dark-dimmed";
 
 const SHIKI_THEME_BY_ID: Record<string, string> = {
+  ...Object.fromEntries(
+    Object.entries(SHIKI_THEME_MODULES).map(([id, theme]) => [id, getThemeName(theme)]),
+  ),
   dark: THEME_DARK,
   light: THEME_LIGHT,
   dollhouse: THEME_LIGHT,
   dollhouseNoir: THEME_DARK,
-  ...Object.fromEntries(
-    Object.entries(SHIKI_THEME_MODULES).map(([id, theme]) => [id, getThemeName(theme)]),
-  ),
 };
 
 function getThemeName(theme: { name?: string }): string {

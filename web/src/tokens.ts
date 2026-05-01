@@ -157,8 +157,8 @@ const HAND_TUNED_THEMES = {
 } as const satisfies Record<string, ThemeDefinition>;
 
 export const THEMES: Record<string, ThemeDefinition> = {
-  ...HAND_TUNED_THEMES,
   ...SHIKI_ADAPTED_THEMES,
+  ...HAND_TUNED_THEMES,
 };
 
 export type ThemeId = string;
