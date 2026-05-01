@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { setHighlightTheme } from "./highlight";
 import {
   applyThemeToRoot,
   getStoredThemeId,
@@ -12,6 +13,7 @@ export function useTheme() {
   useEffect(() => {
     applyThemeToRoot(document.documentElement, themeId);
     persistThemeId(themeId);
+    setHighlightTheme(themeId);
   }, [themeId]);
 
   return [themeId, setThemeId] as const;

@@ -11,11 +11,39 @@ import tsx from "@shikijs/langs/tsx";
 import typescript from "@shikijs/langs/typescript";
 import githubDarkDimmed from "@shikijs/themes/github-dark-dimmed";
 import githubLight from "@shikijs/themes/github-light";
-import { createHighlighterCore } from "shiki/core";
+import { createHighlighterCore, type ThemeInput } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
+import { SHIKI_THEME_MODULES } from "./shikiThemes";
+import { DEFAULT_THEME_ID, THEMES, type ThemeId } from "./tokens";
 
 const THEME_LIGHT = "github-light";
 const THEME_DARK = "github-dark-dimmed";
+
+const SHIKI_THEME_BY_ID: Record<string, string> = {
+  dark: THEME_DARK,
+  light: THEME_LIGHT,
+  dollhouse: THEME_LIGHT,
+  dollhouseNoir: THEME_DARK,
+  ...Object.fromEntries(
+    Object.entries(SHIKI_THEME_MODULES).map(([id, theme]) => [id, getThemeName(theme)]),
+  ),
+};
+
+function getThemeName(theme: { name?: string }): string {
+  return theme.name ?? "";
+}
+
+function shikiThemeNameFor(themeId: ThemeId): string {
+  const mapped = SHIKI_THEME_BY_ID[themeId];
+  if (mapped) return mapped;
+  return THEMES[themeId]?.colorScheme === "light" ? THEME_LIGHT : THEME_DARK;
+}
+
+let activeThemeId: ThemeId = DEFAULT_THEME_ID;
+
+export function setHighlightTheme(themeId: ThemeId): void {
+  activeThemeId = themeId;
+}
 
 const SUPPORTED_LANGUAGES = [
   "text",
@@ -74,7 +102,7 @@ const LANGUAGE_ALIASES: Record<string, string> = {
 };
 
 const highlighterPromise = createHighlighterCore({
-  themes: [githubLight, githubDarkDimmed],
+  themes: [githubLight, githubDarkDimmed, ...(Object.values(SHIKI_THEME_MODULES) as ThemeInput[])],
   langs: SHIKI_LANGUAGES,
   engine: createJavaScriptRegexEngine(),
 });
@@ -95,13 +123,14 @@ export async function highlightCode(
   language?: string,
 ): Promise<{ html: string; language: string }> {
   const normalized = normalizeHighlightLanguage(language);
-  const key = `${normalized}\u0000${code}`;
+  const themeName = shikiThemeNameFor(activeThemeId);
+  const key = `${themeName}::${normalized}\u0000${code}`;
 
   let htmlPromise = htmlCache.get(key);
   if (!htmlPromise) {
     htmlPromise = normalized === "text"
       ? Promise.resolve(renderPlainBlockHtml(code))
-      : renderHtml(code, normalized);
+      : renderHtml(code, normalized, themeName);
     htmlCache.set(key, htmlPromise);
   }
 
@@ -116,13 +145,14 @@ export async function highlightLines(
   language?: string,
 ): Promise<{ language: string; lines: string[] }> {
   const normalized = normalizeHighlightLanguage(language);
-  const key = `${normalized}\u0000${lines.join("\n")}`;
+  const themeName = shikiThemeNameFor(activeThemeId);
+  const key = `${themeName}::${normalized}\u0000${lines.join("\n")}`;
 
   let linePromise = lineHtmlCache.get(key);
   if (!linePromise) {
     linePromise = normalized === "text"
       ? Promise.resolve(lines.map(renderPlainLineHtml))
-      : renderLineHtml(lines, normalized);
+      : renderLineHtml(lines, normalized, themeName);
     lineHtmlCache.set(key, linePromise);
   }
 
@@ -132,29 +162,21 @@ export async function highlightLines(
   };
 }
 
-async function renderHtml(code: string, language: string): Promise<string> {
+async function renderHtml(code: string, language: string, themeName: string): Promise<string> {
   const highlighter = await highlighterPromise;
   return highlighter.codeToHtml(code, {
     lang: language,
-    themes: {
-      light: THEME_LIGHT,
-      dark: THEME_DARK,
-    },
-    defaultColor: false,
+    theme: themeName,
   });
 }
 
-async function renderLineHtml(lines: string[], language: string): Promise<string[]> {
+async function renderLineHtml(lines: string[], language: string, themeName: string): Promise<string[]> {
   if (lines.length === 0) return [];
 
   const highlighter = await highlighterPromise;
   const tokens = highlighter.codeToTokens(lines.join("\n"), {
     lang: language as never,
-    themes: {
-      light: THEME_LIGHT,
-      dark: THEME_DARK,
-    },
-    defaultColor: false,
+    theme: themeName,
   });
 
   return tokens.tokens.map((lineTokens, i) => {
@@ -185,12 +207,20 @@ function escapeHtml(text: string): string {
 
 function renderTokenSpan(token: {
   content: string;
+  color?: string;
+  bgColor?: string;
+  fontStyle?: number;
   htmlStyle?: Record<string, string>;
 }): string {
   const content = token.content === " " ? "&nbsp;" : escapeHtml(token.content);
-  const styleEntries = Object.entries(token.htmlStyle ?? {});
-  const style = styleEntries.length > 0
-    ? ` style="${styleEntries.map(([key, value]) => `${key}:${value}`).join(";")}"`
-    : "";
+  const styleParts: string[] = [];
+  if (token.color) styleParts.push(`color:${token.color}`);
+  if (token.bgColor) styleParts.push(`background-color:${token.bgColor}`);
+  if (token.htmlStyle) {
+    for (const [key, value] of Object.entries(token.htmlStyle)) {
+      styleParts.push(`${key}:${value}`);
+    }
+  }
+  const style = styleParts.length > 0 ? ` style="${styleParts.join(";")}"` : "";
   return `<span class="shiki-token"${style}>${content}</span>`;
 }

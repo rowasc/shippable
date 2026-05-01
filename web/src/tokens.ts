@@ -1,3 +1,5 @@
+import { SHIKI_ADAPTED_THEMES } from "./shikiThemes";
+
 export interface ThemeDefinition {
   label: string;
   colorScheme: "light" | "dark";
@@ -7,7 +9,7 @@ export interface ThemeDefinition {
 const monoFont =
   '"JetBrains Mono", "Fira Code", "SF Mono", "Menlo", "Consolas", monospace';
 
-export const THEMES = {
+const HAND_TUNED_THEMES = {
   dark: {
     label: "Dark",
     colorScheme: "dark",
@@ -154,19 +156,24 @@ export const THEMES = {
   },
 } as const satisfies Record<string, ThemeDefinition>;
 
-export type ThemeId = keyof typeof THEMES;
+export const THEMES: Record<string, ThemeDefinition> = {
+  ...HAND_TUNED_THEMES,
+  ...SHIKI_ADAPTED_THEMES,
+};
+
+export type ThemeId = string;
 
 export const DEFAULT_THEME_ID: ThemeId = "dark";
 export const THEME_STORAGE_KEY = "shippable:theme";
 
-export const THEME_OPTIONS = (Object.entries(THEMES) as [ThemeId, ThemeDefinition][])
-  .map(([id, theme]) => ({
-    id,
-    label: theme.label,
-  }));
+export const THEME_OPTIONS = Object.entries(THEMES).map(([id, theme]) => ({
+  id,
+  label: theme.label,
+  colorScheme: theme.colorScheme,
+}));
 
 export function isThemeId(value: string | null): value is ThemeId {
-  return value !== null && value in THEMES;
+  return value !== null && Object.prototype.hasOwnProperty.call(THEMES, value);
 }
 
 export function getStoredThemeId(): ThemeId {
