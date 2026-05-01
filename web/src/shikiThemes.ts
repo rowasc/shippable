@@ -1,6 +1,12 @@
 import catppuccinLatte from "@shikijs/themes/catppuccin-latte";
 import catppuccinMocha from "@shikijs/themes/catppuccin-mocha";
 import dracula from "@shikijs/themes/dracula";
+import nord from "@shikijs/themes/nord";
+import oneDarkPro from "@shikijs/themes/one-dark-pro";
+import rosePine from "@shikijs/themes/rose-pine";
+import rosePineDawn from "@shikijs/themes/rose-pine-dawn";
+import solarizedDark from "@shikijs/themes/solarized-dark";
+import solarizedLight from "@shikijs/themes/solarized-light";
 import tokyoNight from "@shikijs/themes/tokyo-night";
 import type { ThemeDefinition } from "./tokens";
 
@@ -29,6 +35,12 @@ const SHIKI_ENTRIES: AdapterEntry[] = [
   { id: "catppuccinLatte", label: "Catppuccin Latte", theme: catppuccinLatte as ShikiTheme },
   { id: "tokyoNight", label: "Tokyo Night", theme: tokyoNight as ShikiTheme },
   { id: "dracula", label: "Dracula", theme: dracula as ShikiTheme },
+  { id: "nord", label: "Nord", theme: nord as ShikiTheme },
+  { id: "oneDarkPro", label: "One Dark Pro", theme: oneDarkPro as ShikiTheme },
+  { id: "rosePine", label: "Rosé Pine", theme: rosePine as ShikiTheme },
+  { id: "rosePineDawn", label: "Rosé Pine Dawn", theme: rosePineDawn as ShikiTheme },
+  { id: "solarizedDark", label: "Solarized Dark", theme: solarizedDark as ShikiTheme },
+  { id: "solarizedLight", label: "Solarized Light", theme: solarizedLight as ShikiTheme },
 ];
 
 export const SHIKI_THEME_MODULES: Record<string, ShikiTheme> = Object.fromEntries(

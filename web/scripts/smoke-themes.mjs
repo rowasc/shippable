@@ -19,6 +19,12 @@ const THEMES = [
   "catppuccinLatte",
   "tokyoNight",
   "dracula",
+  "nord",
+  "oneDarkPro",
+  "rosePine",
+  "rosePineDawn",
+  "solarizedDark",
+  "solarizedLight",
 ];
 
 const browser = await chromium.launch({ channel: "chrome", headless: true });
