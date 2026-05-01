@@ -53,17 +53,36 @@ export function adaptShikiTheme(theme: ShikiTheme, label: string): ThemeDefiniti
 
   const bg = pick("editor.background") ?? (colorScheme === "dark" ? "#1e1e1e" : "#ffffff");
   const fg = pick("editor.foreground", "foreground") ?? (colorScheme === "dark" ? "#d4d4d4" : "#1f2328");
-  const accent = pick("focusBorder", "button.background", "editorCursor.foreground") ?? fg;
-  const border = pick("panel.border", "editorGroup.border", "contrastBorder") ?? mix(fg, bg, 0.18);
-  const borderActive = pick("focusBorder") ?? accent;
+
+  // Border: theme-provided values are inconsistent (Tokyo Night ships #101014,
+  // darker than its bg; Dracula ships its accent purple). Always derive from
+  // mix so the result reads as a subtle separator in our chrome.
+  const border = mix(fg, bg, 0.15);
+
+  // Accent: prefer saturated UI accents, falling back to terminal colors and
+  // tokenColor.keyword. Skips low-saturation candidates so themes whose
+  // focusBorder is muted (Dracula's gray-blue) don't poison the result.
+  const accent = pickSaturated(
+    stripAlpha(pick("button.background")),
+    stripAlpha(pick("focusBorder")),
+    stripAlpha(pick("editorCursor.foreground")),
+    stripAlpha(pick("editorLineNumber.activeForeground")),
+    stripAlpha(pick("terminal.ansiMagenta")),
+    stripAlpha(pick("terminal.ansiBlue")),
+  ) ?? stripAlpha(pick("focusBorder", "button.background")) ?? fg;
+  const borderActive = accent;
 
   const bg2 = stripAlpha(pick("sideBar.background", "editorWidget.background")) ?? mix(fg, bg, 0.04);
   const bg3 = stripAlpha(pick("list.activeSelectionBackground", "editor.lineHighlightBackground")) ??
     mix(fg, bg, 0.08);
   const cursorBg = stripAlpha(pick("editor.lineHighlightBackground", "list.hoverBackground")) ?? mix(fg, bg, 0.06);
 
-  const fgDim = pick("descriptionForeground", "editorLineNumber.activeForeground") ?? mix(fg, bg, 0.55);
-  const fgMute = pick("editorLineNumber.foreground") ?? mix(fg, bg, 0.35);
+  // Always derive dim/mute from a mix of fg and bg. Theme-provided candidates
+  // are unreliable: Catppuccin sets descriptionForeground = foreground;
+  // activeLineNumber is often the accent color; plain lineNumber sometimes
+  // matches accent too. Mix gives a guaranteed-muted gray in the right family.
+  const fgDim = mix(fg, bg, 0.6);
+  const fgMute = mix(fg, bg, 0.4);
 
   const green = pick("terminal.ansiGreen", "terminal.ansiBrightGreen") ?? "#22c55e";
   const red = pick("terminal.ansiRed", "terminal.ansiBrightRed") ?? "#ef4444";
@@ -129,6 +148,27 @@ function stripAlpha(color: string | undefined): string | undefined {
   if (!color) return undefined;
   if (color.length === 9 && color.startsWith("#")) return color.slice(0, 7);
   return color;
+}
+
+function pickSaturated(...candidates: Array<string | undefined>): string | undefined {
+  for (const c of candidates) {
+    if (c && saturation(c) >= 0.3) return c;
+  }
+  return undefined;
+}
+
+function saturation(color: string): number {
+  const rgb = parseHex(color);
+  if (!rgb) return 0;
+  const r = rgb.r / 255;
+  const g = rgb.g / 255;
+  const b = rgb.b / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max === min) return 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  return l > 0.5 ? d / (2 - max - min) : d / (max + min);
 }
 
 function withAlpha(color: string, alpha: number): string {

@@ -23,14 +23,14 @@ export function SyntaxBlock({
   useEffect(() => {
     let cancelled = false;
 
-    void highlightCode(code, language).then(({ html }) => {
+    void highlightCode(code, language, colorMode).then(({ html }) => {
       if (!cancelled) setResult({ key: requestKey, html });
     });
 
     return () => {
       cancelled = true;
     };
-  }, [code, language, requestKey]);
+  }, [code, language, colorMode, requestKey]);
 
   const normalizedLanguage = normalizeHighlightLanguage(language);
   const label = formatLanguageLabel(language, normalizedLanguage);
