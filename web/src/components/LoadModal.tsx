@@ -6,6 +6,11 @@ import { apiUrl } from "../apiUrl";
 import { CopyButton } from "./CopyButton";
 
 interface Props {
+  /**
+   * Worktree-loaded changesets carry `cs.worktreeSource`; URL / paste /
+   * file-upload loads leave it undefined. Downstream code reads the field
+   * directly off the ChangeSet, so this signature stays simple.
+   */
   onLoad: (cs: ChangeSet) => void;
   onClose: () => void;
 }
@@ -163,6 +168,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
             author: string;
             date: string;
             branch: string | null;
+            parentSha: string | null;
             fileContents?: Record<string, string>;
           }
         | { error: string };
@@ -175,12 +181,24 @@ export function LoadModal({ onLoad, onClose }: Props) {
           title: json.subject || `${wt.branch ?? "detached"} @ ${json.sha.slice(0, 7)}`,
           author: json.author,
           head: json.branch ?? json.sha.slice(0, 7),
+          // Topbar shows `<branch> → <base>`. Parent short-sha makes that
+          // meaningful; the literal "base" placeholder we'd inherit otherwise
+          // looks like a bug.
+          base: json.parentSha ?? `${json.sha.slice(0, 7)}^`,
           fileContents: json.fileContents,
         });
         if (cs.files.length === 0) {
           setErr("Latest commit produced no parseable diff (empty or merge?).");
           return;
         }
+        // Stamp provenance directly on the ChangeSet so it travels with the
+        // data through persistence + changeset switches. The redundant
+        // second arg to onLoad is gone — App.tsx reads cs.worktreeSource.
+        cs.worktreeSource = {
+          worktreePath: wt.path,
+          commitSha: json.sha,
+          branch: json.branch ?? null,
+        };
         onLoad(cs);
       } catch (e) {
         setErr(e instanceof Error ? e.message : "parse failed");

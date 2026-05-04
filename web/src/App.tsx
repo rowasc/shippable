@@ -21,8 +21,21 @@ import { buildAutoFillContext, type Prompt } from "./promptStore";
 import { runPrompt } from "./promptRun";
 import { buildSymbolIndex } from "./symbols";
 import type { SymbolIndex } from "./symbols";
-import type { ChangeSet, Cursor, EvidenceRef } from "./types";
+import type {
+  AgentContextSlice,
+  AgentSessionRef,
+  ChangeSet,
+  Cursor,
+  EvidenceRef,
+  WorktreeSource,
+} from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
+import {
+  fetchAgentContextForWorktree,
+  fetchHookStatus,
+  installHook,
+  sendInboxMessage,
+} from "./agentContextClient";
 import { KEYMAP } from "./keymap";
 import { clearSession, loadSession, saveSession } from "./persist";
 import { useApiKey } from "./useApiKey";
@@ -90,6 +103,47 @@ export default function App() {
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
+
+  // Agent-context state. The provenance (worktreePath/commitSha/branch)
+  // travels on the ChangeSet itself (`cs.worktreeSource`), so it survives
+  // page reloads and switching between changesets. The fetched slice and
+  // session list stay as plain useState — they're transient and per-cs.
+  const [agentSlice, setAgentSlice] = useState<AgentContextSlice | null>(null);
+  const [agentSessions, setAgentSessions] = useState<AgentSessionRef[]>([]);
+  const [pinnedSession, setPinnedSession] = useState<string | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentRefreshTick, setAgentRefreshTick] = useState(0);
+  // Hook status is fetched at App mount with retry+backoff. The server's
+  // port briefly disappears during `tsx watch` reload windows, so a single
+  // attempt can hit ECONNREFUSED and leave the banner stuck in "unknown".
+  // After a few retries we give up silently — composer still works.
+  const [hookStatus, setHookStatus] = useState<{ installed: boolean } | null>(
+    null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempt = 0;
+    const tryFetch = () => {
+      fetchHookStatus()
+        .then((s) => {
+          if (!cancelled) setHookStatus(s);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          attempt += 1;
+          if (attempt >= 5) return; // ~31s cumulative, give up
+          const delay = Math.min(1000 * 2 ** attempt, 10000);
+          timer = window.setTimeout(tryFetch, delay);
+        });
+    };
+    tryFetch();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, []);
   const [freeRunnerOpen, setFreeRunnerOpen] = useState(false);
   // Each press of `e` produces a fresh request with the snippet pulled from
   // the diff cursor (or the active block selection). The tick lets the
@@ -132,6 +186,67 @@ export default function App() {
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = buildSymbolIndex(cs);
+
+  // The agent-context panel only renders when the active changeset is the
+  // one we just loaded from a worktree. Switching back to a fixture or to
+  // an older changeset hides the panel — we don't try to remember sources
+  // across changeset switches.
+  // Provenance comes straight off the active ChangeSet. When the cursor
+  // moves to a fixture (no worktreeSource), the panel hides automatically.
+  const activeWorktreeSource: WorktreeSource | null = cs.worktreeSource ?? null;
+  const wtPath = activeWorktreeSource?.worktreePath ?? null;
+  const wtSha = activeWorktreeSource?.commitSha ?? null;
+  const wantedFetchKey =
+    wtPath && wtSha
+      ? `${wtPath}|${wtSha}|${pinnedSession ?? ""}|${agentRefreshTick}`
+      : null;
+
+  // "Adjusting state during render" pattern (mirrors usePlan in this repo):
+  // when the fetch key transitions, flip loading/error synchronously here
+  // so the effect body itself stays free of sync setState.
+  const [lastFetchKey, setLastFetchKey] = useState<string | null>(null);
+  if (lastFetchKey !== wantedFetchKey) {
+    setLastFetchKey(wantedFetchKey);
+    if (wantedFetchKey) {
+      setAgentLoading(true);
+      setAgentError(null);
+    } else {
+      setAgentLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!wantedFetchKey || !wtPath || !wtSha) return;
+    let cancelled = false;
+    fetchAgentContextForWorktree({
+      worktreePath: wtPath,
+      commitSha: wtSha,
+      pinnedSessionFilePath: pinnedSession,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        if (!res) {
+          setAgentSlice(null);
+          setAgentSessions([]);
+        } else {
+          setAgentSlice(res.slice);
+          setAgentSessions(res.candidates);
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setAgentError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setAgentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // wtPath/wtSha/pinnedSession are folded into wantedFetchKey; depending
+    // on the key alone is what we want.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedFetchKey]);
   const {
     plan,
     status: planStatus,
@@ -548,6 +663,37 @@ export default function App() {
                 inputs: recipe.inputs,
               }));
             }}
+            agentContext={
+              activeWorktreeSource
+                ? {
+                    slice: agentSlice,
+                    candidates: agentSessions,
+                    selectedSessionFilePath:
+                      pinnedSession ?? agentSlice?.session.filePath ?? null,
+                    loading: agentLoading,
+                    error: agentError,
+                    hookStatus,
+                    worktreePath: activeWorktreeSource.worktreePath,
+                    onPickSession: (fp) => setPinnedSession(fp),
+                    onRefresh: () => setAgentRefreshTick((t) => t + 1),
+                    onSendToAgent: async (message) => {
+                      await sendInboxMessage({
+                        worktreePath: activeWorktreeSource.worktreePath,
+                        message,
+                      });
+                    },
+                    onInstallHook: async () => {
+                      const r = await installHook();
+                      // Refresh banner state without waiting on a reload.
+                      setHookStatus({ installed: true });
+                      return {
+                        didModify: r.didModify,
+                        backupPath: r.backupPath,
+                      };
+                    },
+                  }
+                : undefined
+            }
           />
         )}
       </div>
@@ -624,6 +770,13 @@ export default function App() {
           onClose={() => setShowLoad(false)}
           onLoad={(newCs) => {
             dispatch({ type: "LOAD_CHANGESET", changeset: newCs });
+            // Clear any prior slice/sessions so the new load never briefly
+            // shows the previous worktree's transcript while the fetch runs.
+            // Provenance lives on cs.worktreeSource and is read directly.
+            setPinnedSession(null);
+            setAgentSlice(null);
+            setAgentSessions([]);
+            setAgentError(null);
             setShowLoad(false);
           }}
         />

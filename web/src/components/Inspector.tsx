@@ -1,5 +1,11 @@
 import "./Inspector.css";
-import type { Cursor, LineSelection, Reply } from "../types";
+import type {
+  AgentContextSlice,
+  AgentSessionRef,
+  Cursor,
+  LineSelection,
+  Reply,
+} from "../types";
 import type { SymbolIndex } from "../symbols";
 import { CodeText } from "./CodeText";
 import type {
@@ -9,8 +15,30 @@ import type {
 } from "../view";
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
+import { AgentContextSection } from "./AgentContextSection";
 import { useEffect, useRef } from "react";
 import type { MouseEvent, RefObject } from "react";
+
+/**
+ * Props for the agent-context section. The whole bundle is optional — when a
+ * changeset wasn't loaded from a worktree (URL ingest, paste, file upload)
+ * the parent passes `undefined` and the section doesn't render.
+ */
+export interface AgentContextProps {
+  slice: AgentContextSlice | null;
+  candidates: AgentSessionRef[];
+  selectedSessionFilePath: string | null;
+  loading: boolean;
+  error: string | null;
+  /** Whether the UserPromptSubmit hook is detected in user settings. */
+  hookStatus: { installed: boolean } | null;
+  /** Absolute worktree path; threaded through for inbox-status polling. */
+  worktreePath: string;
+  onPickSession: (sessionFilePath: string) => void;
+  onRefresh: () => void;
+  onSendToAgent: (message: string) => Promise<void>;
+  onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
+}
 
 /**
  * Wraps a jump action so a card's onClick ignores clicks that originated
@@ -58,6 +86,11 @@ interface Props {
    * notes without one don't render the button.
    */
   onVerifyAiNote: (recipe: { source: string; inputs: Record<string, string> }) => void;
+  /**
+   * Agent-context props bundle. Undefined means "no worktree source for this
+   * changeset" — the section is hidden entirely. See AgentContextProps.
+   */
+  agentContext?: AgentContextProps;
 }
 
 export function Inspector({
@@ -73,6 +106,7 @@ export function Inspector({
   onSubmitReply,
   onDeleteReply,
   onVerifyAiNote,
+  agentContext,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -105,6 +139,24 @@ export function Inspector({
           <kbd>i</kbd> · <kbd>a</kbd> ack · <kbd>r</kbd> reply
         </span>
       </header>
+
+      {agentContext && (
+        <AgentContextSection
+          slice={agentContext.slice}
+          candidates={agentContext.candidates}
+          selectedSessionFilePath={agentContext.selectedSessionFilePath}
+          loading={agentContext.loading}
+          error={agentContext.error}
+          symbols={symbols}
+          hookStatus={agentContext.hookStatus}
+          worktreePath={agentContext.worktreePath}
+          onJump={onJump}
+          onPickSession={agentContext.onPickSession}
+          onRefresh={agentContext.onRefresh}
+          onSendToAgent={agentContext.onSendToAgent}
+          onInstallHook={agentContext.onInstallHook}
+        />
+      )}
 
       <section className="inspector__sec">
         <div className="inspector__loc">{vm.locationLabel}</div>
