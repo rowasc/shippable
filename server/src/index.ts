@@ -4,6 +4,9 @@ import * as library from "./library.ts";
 import * as prompts from "./prompts.ts";
 import { streamReview } from "./review.ts";
 import * as worktrees from "./worktrees.ts";
+import * as agentContext from "./agent-context.ts";
+import * as inbox from "./inbox.ts";
+import * as hookStatus from "./hook-status.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -60,6 +63,24 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return handleWorktreesChangeset(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/sessions") {
+      return handleWorktreesSessions(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/agent-context") {
+      return handleWorktreesAgentContext(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/inbox") {
+      return handleWorktreesInbox(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/inbox-status") {
+      return handleWorktreesInboxStatus(req, res, origin);
+    }
+    if (req.method === "GET" && req.url === "/api/worktrees/hook-status") {
+      return handleWorktreesHookStatus(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/install-hook") {
+      return handleWorktreesInstallHook(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -290,7 +311,8 @@ async function handleWorktreesChangeset(
     return;
   }
   const wtPath = typeof parsed.path === "string" ? parsed.path : "";
-  const ref = typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : "HEAD";
+  const ref =
+    typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : null;
   if (!wtPath) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -298,13 +320,221 @@ async function handleWorktreesChangeset(
     return;
   }
   try {
-    const result = await worktrees.changesetFor(wtPath, ref);
+    // Default: cumulative branch view (committed-since-base + uncommitted +
+    // untracked). Only fall back to the single-commit view when the caller
+    // asks for a specific ref — that's a future "load specific commit" UX,
+    // not what LoadModal does today.
+    const result = ref
+      ? await worktrees.changesetFor(wtPath, ref)
+      : await worktrees.branchChangeset(wtPath);
     writeCorsHeaders(res, origin);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/changeset err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesSessions(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string }" }));
+    return;
+  }
+  try {
+    const sessions = await agentContext.listSessionsForWorktree(wtPath);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ sessions }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/sessions err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesAgentContext(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: {
+    path?: unknown;
+    sessionFilePath?: unknown;
+    commitSha?: unknown;
+  };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const sessionFilePath =
+    typeof parsed.sessionFilePath === "string" ? parsed.sessionFilePath : "";
+  const commitSha =
+    typeof parsed.commitSha === "string" && parsed.commitSha.length > 0
+      ? parsed.commitSha
+      : null;
+  if (!wtPath || !sessionFilePath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "expected { path: string, sessionFilePath: string, commitSha?: string }",
+      }),
+    );
+    return;
+  }
+  try {
+    const slice = await agentContext.agentContextForCommit({
+      worktreePath: wtPath,
+      sessionFilePath,
+      commitSha,
+    });
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ slice }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/agent-context err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesInbox(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; message?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const message = typeof parsed.message === "string" ? parsed.message : "";
+  if (!wtPath || !message) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({ error: "expected { path: string, message: string }" }),
+    );
+    return;
+  }
+  try {
+    const result = await inbox.writeInbox(wtPath, message);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const messageStr = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/inbox err: ${messageStr}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: messageStr }));
+  }
+}
+
+async function handleWorktreesInboxStatus(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string }" }));
+    return;
+  }
+  try {
+    const status = await inbox.inboxStatus(wtPath);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(status));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesHookStatus(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  try {
+    const status = await hookStatus.checkHookStatus();
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(status));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesInstallHook(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  try {
+    const result = await hookStatus.installHook();
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/install-hook err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
