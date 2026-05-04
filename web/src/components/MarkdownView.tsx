@@ -8,6 +8,11 @@ import { remarkAlert } from "remark-github-blockquote-alert";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { highlightCode } from "../highlight";
+import {
+  resolveImageSrc,
+  resolvePath,
+  type ResolvedImageSource,
+} from "./resolveImageSrc";
 
 // Inject scoped GitHub markdown styles once on first import. The standalone
 // -light/-dark stylesheets target `.markdown-body`; rescope each under
@@ -35,7 +40,7 @@ interface Props {
   /**
    * Map from repo-relative file path to a data URL (or any URL the browser
    * can load). MarkdownView resolves relative image references against this
-   * map; references it cannot resolve render as broken images.
+   * map; only references that resolve through this map auto-load.
    */
   imageAssets?: Record<string, string>;
 }
@@ -109,9 +114,10 @@ function ShikiBlock({ code, language }: { code: string; language: string }) {
   );
 }
 
-function ResolvedImg({
+export function ResolvedImg({
   src,
   alt,
+  className,
   baseDir,
   imageAssets,
   ...rest
@@ -119,8 +125,73 @@ function ResolvedImg({
   baseDir: string;
   imageAssets?: Record<string, string>;
 }) {
-  const resolved = resolveImageSrc(src, baseDir, imageAssets);
-  return <img src={resolved} alt={alt ?? ""} {...rest} />;
+  const resolved = useMemo(
+    () => resolveImageSrc(src, baseDir, imageAssets),
+    [src, baseDir, imageAssets],
+  );
+
+  if (!resolved) return null;
+
+  if (resolved.kind === "local") {
+    return <img src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
+  }
+
+  // Key the gate on the resolved identity so React unmounts/remounts (and
+  // resets isEnabled) when the source changes — no setState-in-effect needed.
+  const key = resolved.kind === "blocked" ? resolved.src : resolved.resolvedPath;
+  return (
+    <ResolvedImgGate
+      key={key}
+      resolved={resolved}
+      alt={alt}
+      className={className}
+      {...rest}
+    />
+  );
+}
+
+function ResolvedImgGate({
+  resolved,
+  alt,
+  className,
+  ...rest
+}: React.ImgHTMLAttributes<HTMLImageElement> & {
+  resolved: Exclude<ResolvedImageSource, { kind: "local" }>;
+}) {
+  const [isEnabled, setIsEnabled] = useState(false);
+
+  if (resolved.kind === "blocked" && isEnabled) {
+    return <img src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
+  }
+
+  return (
+    <span
+      className={cx("md-preview__img-gate", className)}
+      role="group"
+      aria-label={alt ?? "Markdown image"}
+      title={resolved.kind === "blocked" ? resolved.src : resolved.resolvedPath}
+    >
+      <span className="md-preview__img-gate-copy">
+        <span className="md-preview__img-gate-title">
+          {resolved.kind === "blocked" ? "Image blocked" : "Repo image unavailable"}
+        </span>
+        <span className="md-preview__img-gate-meta">
+          {resolved.kind === "blocked"
+            ? formatBlockedImageSrc(resolved.src)
+            : resolved.resolvedPath}
+        </span>
+      </span>
+      {resolved.kind === "blocked" ? (
+        <button
+          type="button"
+          className="md-preview__img-gate-btn"
+          onClick={() => setIsEnabled(true)}
+        >
+          Load image
+        </button>
+      ) : null}
+    </span>
+  );
 }
 
 function ResolvedLink({
@@ -148,33 +219,17 @@ function ResolvedLink({
   );
 }
 
-function resolveImageSrc(
-  src: string | undefined,
-  baseDir: string,
-  imageAssets: Record<string, string> | undefined,
-): string | undefined {
-  if (!src) return undefined;
-  if (/^(?:[a-z]+:|\/\/|data:)/i.test(src)) return src;
-  if (!imageAssets) return src;
-  const resolved = resolvePath(baseDir, src);
-  return imageAssets[resolved] ?? src;
-}
-
 function dirname(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
 }
 
-function resolvePath(baseDir: string, rel: string): string {
-  // Strip a leading "./".
-  const stripped = rel.startsWith("./") ? rel.slice(2) : rel;
-  if (stripped.startsWith("/")) return stripped.slice(1);
+function formatBlockedImageSrc(src: string): string {
+  if (/^data:/i.test(src)) return "inline data URL";
+  return src.length > 96 ? `${src.slice(0, 93)}...` : src;
+}
 
-  const baseParts = baseDir ? baseDir.split("/").filter(Boolean) : [];
-  const relParts = stripped.split("/");
-  for (const part of relParts) {
-    if (part === "..") baseParts.pop();
-    else if (part !== "." && part !== "") baseParts.push(part);
-  }
-  return baseParts.join("/");
+function cx(...parts: Array<string | undefined>): string | undefined {
+  const value = parts.filter(Boolean).join(" ");
+  return value || undefined;
 }
