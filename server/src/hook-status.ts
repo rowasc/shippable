@@ -101,10 +101,18 @@ function commandIsOurs(cmd: string): boolean {
 //   - Idempotent: if our hook is already declared, returns immediately
 //     with installed=true and didModify=false.
 //
-// We always edit the canonical `~/.claude/settings.json`. settings.local.json
-// is a user-private override and we don't presume to write there.
+// We edit `~/.claude/settings.local.json` rather than `settings.json`. The
+// hook entry contains an absolute path to the shipped script, which is
+// inherently machine-specific — settings.local.json is the right place for
+// machine-only config. Keeps settings.json clean if the user syncs it via
+// dotfiles. Detection still reads both, so users who registered the hook
+// manually in settings.json continue to work.
 
-const PRIMARY_SETTINGS = path.join(os.homedir(), ".claude", "settings.json");
+const PRIMARY_SETTINGS = path.join(
+  os.homedir(),
+  ".claude",
+  "settings.local.json",
+);
 
 export interface InstallResult {
   installed: true;
