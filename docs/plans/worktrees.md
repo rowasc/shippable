@@ -97,6 +97,21 @@ The shape of these will probably move as we build (a) and (b).
 
 - **What about commits from the user, not from agents?** The whole framing has been agent-centric. But a worktree is a worktree — the same UI works for "I committed to my feature branch and want to look at what I just did." Probably fine; flag it if the agent-centric copy in the UI ever feels weird for human-only worktrees.
 
+## Findings (slice d/e — agent context)
+
+This section records decisions made while scoping the agent-context UX (the "Claude → review window" half of slice d/e). Concept doc: `docs/concepts/agent-context.md`. Feature doc: `docs/features/agent-context-panel.md`.
+
+- **Direction is two-way.** Both "agent → reviewer" (read transcript next to diff) and "reviewer → agent" (send feedback) ship together. They share one panel, one mental model.
+- **Source = Claude Code's own JSONL transcripts** at `~/.claude/projects/<hash>/<session-id>.jsonl`. We do *not* require the sandbox to write a sidecar metadata file. The `.claude/worktrees/index.json` registry option in the open-questions section above remains a future enhancer, not a precondition.
+- **Worktree → session mapping is fuzzy by design.** Match by `cwd` field; on multi-match show a session picker; on no-match offer manual attach. Choice persists per `(repo-root, branch)`.
+- **The unit of agent context is a commit, not a session.** A session can produce many commits; the panel slices the transcript by commit boundary so the narrative stays in lockstep with the diff. This is the most important conceptual move and shaped most of the rest.
+- **"Live" = commit-boundary refresh, not turn streaming.** Poll `/api/worktrees/changeset` while the panel is mounted; when HEAD changes, re-fetch context + changeset together. We deliberately don't stream every transcript turn — keeps the surface aligned with what reviewers do.
+- **Reverse direction = next-turn write via `UserPromptSubmit` hook.** Reviewer's message lands in `<worktree>/.shippable/inbox.md`; a documented hook reads it on the agent's next prompt boundary. We label this honestly as "delivers on next prompt" — no mid-turn interrupt claim. Mid-turn interrupt (slice e/β) stays speculative, behind a future "live mode" toggle.
+- **Inbox is excluded via the shared `info/exclude`, not tracked `.gitignore`.** Modifying the tracked `.gitignore` would dirty `git status`, only propagate to other worktrees on commit, and have the reviewer silently authoring commits. We instead append `.shippable/` to `$(git rev-parse --git-common-dir)/info/exclude` — git's `info/` dir is shared across worktrees, never committed, never pushed. Idempotent on first inbox write. (Discovery cost: `--git-dir` silently no-op'd; `git check-ignore -v` is what surfaced the bug. `--git-common-dir` is the right flag.)
+- **UI placement = a new collapsible section inside `Inspector.tsx`**, above AI concerns. No new tab, no new column, no modal. The Inspector's existing `inspector__sec` pattern was the right shape; forking the layout would have cost more than the section itself.
+- **Symbol links from chat hook into the existing symbol graph.** Backtick-quoted spans only, exact-match against symbols *that the diff also touches* — guards the obvious false-positive. Documented in the concept doc's open questions.
+- **Slice (a) is already built**, so this work layers on top of `/api/worktrees/list` and `/api/worktrees/changeset` without revisiting them.
+
 ## What's deliberately out of scope (for now)
 
 - GitHub PRs. That's a separate ingest path, on the roadmap, not this plan.
