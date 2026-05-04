@@ -52,7 +52,7 @@ for (const themeId of THEMES) {
   });
 
   const galleryFile = `${OUT}/${themeId}-gallery.png`;
-  await page.screenshot({ path: galleryFile, fullPage: false });
+  await page.screenshot({ path: galleryFile, fullPage: false, timeout: 120000 });
 
   // Also screenshot the live app on a TypeScript-heavy fixture so we can
   // verify the active theme drives DiffView syntax rendering, not just the
@@ -61,7 +61,7 @@ for (const themeId of THEMES) {
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(800);
   const appFile = `${OUT}/${themeId}-app.png`;
-  await page.screenshot({ path: appFile, fullPage: false });
+  await page.screenshot({ path: appFile, fullPage: false, timeout: 120000 });
 
   results.push({ themeId, galleryFile, appFile, ...probe });
 }
