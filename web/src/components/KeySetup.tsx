@@ -5,8 +5,10 @@ import { CopyButton } from "./CopyButton";
 interface Props {
   /** Persists the key to Keychain. Throws on failure. */
   onSave: (key: string) => Promise<void>;
-  /** Dismisses the modal without saving — user proceeds with rule-based plans. */
-  onSkip: () => void;
+  /** Dismisses the form without saving. The bundled server still runs and
+   *  the rule-based plan keeps working; only the AI-generated plan + the
+   *  prompt-streaming endpoints are disabled until a key is added. */
+  onSkip?: () => void;
   /** True after a successful save; switches the card to the restart message. */
   saved: boolean;
 }
@@ -60,8 +62,9 @@ export function KeySetup({ onSave, onSkip, saved }: Props) {
         <div className="key-setup__title">set up your anthropic api key</div>
         <p className="key-setup__lead">
           Shippable calls Claude to generate review plans. Paste your key —
-          it's stored in macOS Keychain (service: <code>shippable</code>) and
-          never leaves this machine.
+          it’s stored in macOS Keychain (service: <code>shippable</code>) and
+          never leaves this machine. You can also skip and use the rule-based
+          plan; AI is opt-in.
         </p>
         <div className="key-setup__field">
           <label className="key-setup__label" htmlFor="key-setup-input">
@@ -93,9 +96,15 @@ export function KeySetup({ onSave, onSkip, saved }: Props) {
           >
             {saving ? "Saving…" : "Save"}
           </button>
-          <button className="key-setup__skip" onClick={onSkip} disabled={saving}>
-            Skip — use rule-based only
-          </button>
+          {onSkip && (
+            <button
+              className="key-setup__skip"
+              onClick={onSkip}
+              disabled={saving}
+            >
+              Skip — use rule-based only
+            </button>
+          )}
         </div>
         <p className="key-setup__meta">
           Need a key?{" "}

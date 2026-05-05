@@ -5,7 +5,7 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 ## Packages
 
 - `web/` — React + Vite, Node 22, TypeScript. Four HTML entry points: `/` (live app), `/gallery.html` (screen catalog driven by canned fixtures), `/demo.html` (scripted demo route), `/feature-docs.html` (per-feature fixture viewer). The live app also accepts `?cs=<id>` to jump to a sample ChangeSet.
-- `server/` — tiny Node http server, `tsx watch` in dev. Optional: without it the UI falls back to a rule-based plan.
+- `server/` — tiny Node http server, `tsx watch` in dev. **Required** in every deployment shape: hosts worktree ingest, the prompt library, the streaming review, and the AI plan. The web app refuses to load if `/api/health` doesn't respond.
 - `src-tauri/` — Tauri 2 shell. Wraps the web app for the desktop build. The server is compiled to a standalone binary via `bun build --compile` and bundled as a sidecar.
 - `library/prompts/` — markdown prompts (`explain-this-hunk`, `security-review`, `suggest-tests`, `summarise-for-pr`).
 

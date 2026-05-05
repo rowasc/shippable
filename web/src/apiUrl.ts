@@ -12,8 +12,10 @@
 // sidecar bound. Rust picks a free port at startup and exposes it via the
 // `get_sidecar_port` command; we resolve and cache it on first call.
 //
-// If the sidecar didn't spawn, get_sidecar_port returns null and we throw —
-// callers surface the error to the user.
+// If the sidecar didn't spawn, get_sidecar_port returns null and we throw.
+// ServerHealthGate catches the error at boot and shows "Server unreachable"
+// — worktree ingest and the prompt library both need the sidecar, so the
+// app refuses to load without it.
 
 let cachedBase: Promise<string> | null = null;
 

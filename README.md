@@ -8,7 +8,7 @@ The code itself is a throwaway at this point, meant to explore a concept. Please
 
 ## Running it
 
-There are two packages: `web/` (the React app) and `server/` (a tiny Node backend that calls the Claude API for AI-generated review plans). For the AI plan you need both running; without `server/` the UI falls back to a rule-based plan.
+There are two packages: `web/` (the React app) and `server/` (a tiny Node backend that handles worktree ingestion, the prompt library, and AI-generated review plans). Both are required — the UI shows a “server unreachable” gate at boot if the backend isn’t running.
 
 ### Frontend (`web/`)
 
@@ -25,7 +25,7 @@ npm run preview   # serve the production build
 
 ### Backend (`server/`)
 
-The backend is optional. If it isn't running, the UI falls back to the rule-based plan.
+The backend is required. The web app probes `/api/health` at boot and refuses to load if the server isn’t reachable.
 
 ```
 cd server
@@ -55,7 +55,7 @@ If you want a different browser-origin allowlist, set:
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-The single endpoint is `POST /api/plan` — accepts `{ changeset: ChangeSet }`, returns `{ plan: ReviewPlan }`. The model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
+Endpoints: `GET /api/health`, `POST /api/plan` ({changeset} → {plan}), `POST /api/review` (streaming), `GET /api/library/prompts`, `POST /api/worktrees/list`, `POST /api/worktrees/changeset`. The model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
 
 Three entry points:
 

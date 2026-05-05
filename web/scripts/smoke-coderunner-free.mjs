@@ -6,7 +6,7 @@
 
 import { chromium } from "playwright-core";
 
-const URL = process.env.URL || "http://localhost:5173/";
+const BASE = process.env.BASE ?? "http://localhost:5173";
 
 async function main() {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -15,7 +15,7 @@ async function main() {
   page.on("pageerror", (e) => console.log("[page error]", e.message));
   // Land on a fixture so the app hydrates a `.diff`; the test only
   // needs a mounted page from which to dynamic-import the runner modules.
-  await page.goto(URL + "?cs=09");
+  await page.goto(`${BASE}/?cs=09`);
   await page.waitForSelector(".diff");
 
   const result = await page.evaluate(async () => {

@@ -16,7 +16,7 @@
 
 import { chromium } from "playwright-core";
 
-const URL = process.env.URL || "http://localhost:5173/";
+const BASE = process.env.BASE ?? "http://localhost:5173";
 
 async function main() {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
@@ -30,7 +30,7 @@ async function main() {
   // Cold load: only TS imports. Should not fetch php-wasm. We land on the
   // PHP fixture so the app hydrates a `.diff` (the post-welcome boot needs
   // either a `?cs=` param or a persisted session).
-  await page.goto(URL + "?cs=09");
+  await page.goto(`${BASE}/?cs=09`);
   await page.waitForSelector(".diff");
   await page.waitForTimeout(500);
 

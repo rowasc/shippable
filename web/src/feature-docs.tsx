@@ -555,7 +555,6 @@ function App() {
         <div className="feature-docs__stage">
           <KeySetup
             onSave={async () => {}}
-            onSkip={() => {}}
             saved={view === "key-setup-saved"}
           />
         </div>

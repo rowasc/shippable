@@ -91,14 +91,14 @@ The UI refuses to render a claim without evidence, so anything you see on screen
 
 ## Fallback
 
-If the server is down, the API errors, the model refuses, or the parsed output is null, the React hook falls back to the rule-based plan in `web/src/plan.ts`. The overlay shows a small status line ("AI plan failed — showing rule-based fallback: …") so it's clear which one you're looking at.
+The server is a hard dependency now (`AGENTS.md` → "Deployment modes"), so `/api/health` failures never reach `usePlan` — they're caught by `ServerHealthGate` at boot. What `usePlan` *does* handle is errors *after* the user opts in: API errors, model refusals, or `parsed_output: null`. Those land in `status: "fallback"` with the message preserved, and the plan overlay keeps showing the rule-based plan with a small "AI plan failed — showing rule-based fallback: …" status banner so it's clear which one you're looking at. AI is opt-in per ChangeSet — sending the diff to a third party is a privacy + cost decision, so we don't auto-fire.
 
-This means the app works without an API key. AI is opt-in.
+This means the app works without an API key. The rule-based plan handles the diagram view, the structure map, and rough intent; AI replaces it on demand and provides richer context.
 
 ## Files of interest
 
 - `server/src/plan.ts` — prompt, Zod schema, the Anthropic call, the evidence validator. This is the file to refactor when adding a second provider.
 - `server/src/index.ts` — the `POST /api/plan` HTTP handler.
 - `web/src/usePlan.ts` — the React hook with loading and fallback states.
-- `web/src/plan.ts` — the rule-based plan, used both as the fallback and as the source of `buildStructureMap` (the server imports it directly).
+- `web/src/plan.ts` — the rule-based plan, used as both the default render path and the fallback when AI generation fails. Also the source of `buildStructureMap` (the server imports it directly).
 - `web/src/types.ts` — `ReviewPlan`, `Claim`, `EvidenceRef`. The shared contract between front and back.

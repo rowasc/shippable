@@ -67,16 +67,15 @@ Tauri shell could later replace `/api/worktrees*` with native FS / `git` calls i
 
 ## Deployment-mode matrix
 
-Honest version: most modes don't support this.
+The Node server is always in the loop (see `AGENTS.md` → "Deployment modes"). What varies is whether the host running the server has disk access to a checkout of the code under review.
 
-| Mode                              | Supported?            | Why                                                                 |
-|-----------------------------------|-----------------------|---------------------------------------------------------------------|
-| Browser + local server (dev)      | Yes                   | Server runs `git`, reads disk. The primary target.                  |
-| Tauri desktop (bundled sidecar)   | Yes                   | Sidecar = same server, same path. Could later go fully native.      |
-| Browser only, no server           | No                    | No way to reach disk. The "From a directory" tab should be hidden.  |
-| Can't-clone-to-disk (memory-only) | No                    | Worktrees *are* disk by definition. The tab should be hidden.       |
+| Mode                                   | Supported? | Why                                                                 |
+|----------------------------------------|------------|---------------------------------------------------------------------|
+| Browser + local server (dev)           | Yes        | Server runs `git`, reads disk. The primary target.                  |
+| Tauri desktop (bundled sidecar)        | Yes        | Sidecar = same server, same path. Could later go fully native.      |
+| Server with no disk access (memory-only) | No       | Worktrees *are* disk by definition. The tab should be hidden.       |
 
-Concretely: the modal tab is gated by a capability flag the server (or its absence) advertises. In a no-server / memory-only build, the tab doesn't render at all. We don't show a disabled tab with a sad explanation — we just don't pretend the feature exists.
+The "From a worktrees directory" tab is gated by a capability flag the server advertises. In a memory-only deployment the tab doesn't render at all — we don't show a disabled tab with a sad explanation, we just don't pretend the feature exists.
 
 ## Open questions
 

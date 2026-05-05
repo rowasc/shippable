@@ -33,7 +33,6 @@ import {
 } from "../view";
 import { buildSymbolIndex, type SymbolIndex } from "../symbols";
 import { maybeSuggest } from "../guide";
-import { usePlan } from "../usePlan";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
 import { runPrompt } from "../promptRun";
 import { KEYMAP } from "../keymap";
@@ -696,7 +695,6 @@ function KeySetupStage({ saved }: { saved: boolean }) {
     <div className="demo__app demo__center-stage">
       <KeySetup
         onSave={async () => {}}
-        onSkip={() => {}}
         saved={saved}
       />
     </div>
@@ -941,16 +939,13 @@ function WorkspaceStage({
   const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
-  // Plan overlay: kick off the AI fetch when the plan is opened.
-  const {
-    plan,
-    status: planStatus,
-    error: planError,
-    generate: generatePlan,
-  } = usePlan(cs);
-  useEffect(() => {
-    if (showPlan) generatePlan();
-  }, [showPlan, generatePlan]);
+  // Demo runs without a server, so the plan overlay is seeded from the
+  // rule-based fixture utility (the same path gallery-fixtures uses) and
+  // presented as if Claude had already responded.
+  const plan = useMemo(() => planReview(cs), [cs]);
+  const planStatus = "ready" as const;
+  const planError: string | undefined = undefined;
+  const generatePlan = () => {};
 
   // Inline-runner request — populated when the frame seeds an inline runner,
   // and re-populated by the `e` keybinding (see RUN_SELECTION below).

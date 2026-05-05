@@ -17,7 +17,7 @@ Within each worktree, agents can explore, run things, make commits, test new fea
 ## Layout
 
 - `web/` — React + Vite + TypeScript. The UI, the diff parser, the review state machine. Four entry points: `/`, `/gallery.html` (screen catalog for design work), `/demo.html`, `/feature-docs.html`.
-- `server/` — tiny Node HTTP server. Optional in dev (UI falls back to a rule-based plan); compiled into the desktop sidecar via `bun build --compile`.
+- `server/` — tiny Node HTTP server. Required in every shape; the web app probes `/api/health` at boot via `ServerHealthGate` and refuses to load without it. AI features (plan, streaming review) need an Anthropic key; everything else (worktrees, prompt library, rule-based plan) works without one. Compiled into the desktop sidecar via `bun build --compile`.
 - `src-tauri/` — Tauri 2 shell that wraps the web app + sidecar into a macOS `.dmg`.
 - `library/prompts/` — markdown prompts shipped with the product (`explain-this-hunk`, `security-review`, etc.).
 - `docs/` — architecture, roadmap, plans, per-feature notes (see "Where ideas live" below).
@@ -61,12 +61,14 @@ When you finish a chunk of work that changes how something is built or used, lea
 
 ## Deployment modes (don't forget these exist)
 
-Some features only work in some shapes — `docs/plans/plan-symbols.md` and `docs/plans/worktrees.md` have the full matrix. The constraints worth keeping in mind:
+The local Node backend in `server/` is a **hard dependency** in every shape we ship — dev, the Tauri desktop sidecar, anything else. Worktree ingest, the prompt library, and the AI plan all live there. The web app probes `/api/health` at boot and shows a “server unreachable” gate if it can’t reach it; there is no browser-only fallback. Don’t reintroduce one.
 
-- **No-server / browser-only** builds — the UI must degrade. Worktree ingest, server-backed AI plans, and any disk-touching feature should hide themselves rather than render disabled.
-- **Memory-only / can't-clone-to-disk** — a real near-term constraint, not an edge case. Don't assume a checkout is on disk.
+What still varies, and what plans like `docs/plans/plan-symbols.md` and `docs/plans/worktrees.md` are about, is **how the server reaches the source it’s reviewing**:
 
-Capability flags are how features advertise availability. Don't render a sad disabled tab.
+- **Memory-only / can't-clone-to-disk** — a real near-term constraint, not an edge case. Some deployment contexts (finance/healthcare/defense audit) can't materialise a checkout on the host's disk; the server has to stream content over the wire and analyse in memory. Don't assume a clone is on disk.
+- **No-server-side GitHub clone** — code fetched directly from the GitHub API instead of `git clone`. Same constraint, different reason (rate limits, no host permissions). The server is still in the loop; it just talks to GitHub instead of the filesystem.
+
+Features that depend on a particular workspace mode (worktree ingest needs disk; symbol nav can do either) should hide themselves cleanly via capability flags rather than render disabled. **The flags describe workspace capabilities, not server presence — server presence is assumed.**
 
 ## Things that have bitten us
 

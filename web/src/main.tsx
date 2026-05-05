@@ -2,12 +2,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { ServerHealthGate } from './components/ServerHealthGate'
 import { applyThemeToRoot, getStoredThemeId } from './tokens'
 
 applyThemeToRoot(document.documentElement, getStoredThemeId())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ServerHealthGate>
+      <App />
+    </ServerHealthGate>
   </StrictMode>,
 )

@@ -11,6 +11,9 @@ export type ApiKeyStatus =
   | { kind: "present" }
   | { kind: "missing" }
   | { kind: "saved-pending-restart" }
+  // The user dismissed the first-run prompt. The bundled server still
+  // works (worktrees, prompt library, rule-based plan); only AI plan +
+  // streaming review return 503 until a key is added.
   | { kind: "skipped" }
   | { kind: "error"; message: string };
 

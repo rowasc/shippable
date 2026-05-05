@@ -10,7 +10,6 @@ import { StatusBar } from "./StatusBar";
 import { GuidePrompt } from "./GuidePrompt";
 import { HelpOverlay } from "./HelpOverlay";
 import { Inspector } from "./Inspector";
-import { KeySetup } from "./KeySetup";
 import { LoadModal } from "./LoadModal";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
@@ -43,7 +42,6 @@ import { deriveCommentPayload } from "../agentCommentPayload";
 import { useDeliveredPolling } from "../useDeliveredPolling";
 import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
-import { useApiKey } from "../useApiKey";
 import type { ThemeId } from "../tokens";
 import type { RecentSource } from "../recents";
 import {
@@ -81,7 +79,6 @@ export function ReviewWorkspace({
   setThemeId,
   onLoadChangeset,
 }: Props) {
-  const apiKey = useApiKey();
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
@@ -879,14 +876,6 @@ export function ReviewWorkspace({
         onFreeClose={() => setFreeRunnerOpen(false)}
         runRequest={runRequest}
       />
-      {(apiKey.status.kind === "missing" ||
-        apiKey.status.kind === "saved-pending-restart") && (
-        <KeySetup
-          onSave={apiKey.save}
-          onSkip={apiKey.skip}
-          saved={apiKey.status.kind === "saved-pending-restart"}
-        />
-      )}
       {showPicker && (
         <PromptPicker
           context={buildAutoFillContext(cs, file, hunk, state.selection)}
@@ -1111,14 +1100,13 @@ function PlanChip({
   onToggle,
 }: {
   isOpen: boolean;
-  plan: { entryPoints: { fileId: string }[] };
+  plan: { entryPoints: { fileId: string }[] } | null;
   reviewedFiles: Set<string>;
   onToggle: () => void;
 }) {
-  const total = plan.entryPoints.length;
-  const done = plan.entryPoints.filter((e) =>
-    reviewedFiles.has(e.fileId),
-  ).length;
+  const total = plan?.entryPoints.length ?? 0;
+  const done =
+    plan?.entryPoints.filter((e) => reviewedFiles.has(e.fileId)).length ?? 0;
   const allDone = total > 0 && done === total;
   return (
     <button
