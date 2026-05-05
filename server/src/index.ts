@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { generatePlan } from "./plan.ts";
 import * as library from "./library.ts";
 import * as prompts from "./prompts.ts";
@@ -7,6 +7,9 @@ import * as worktrees from "./worktrees.ts";
 import * as agentContext from "./agent-context.ts";
 import * as inbox from "./inbox.ts";
 import * as hookStatus from "./hook-status.ts";
+import * as agentQueue from "./agent-queue.ts";
+import type { Comment, CommentKind } from "./agent-queue.ts";
+import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -17,14 +20,11 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 const ALLOWED_ORIGINS = loadAllowedOrigins();
 
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error(
-    "[server] ANTHROPIC_API_KEY is not set in the environment. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
-  );
-  process.exit(1);
-}
-
-const server = createServer(async (req, res) => {
+// Server factory. The `.listen()` happens only in `main()` below — when the
+// module is imported by tests we want to bind on an ephemeral port instead
+// of the default 3001.
+export function createApp(): Server {
+  return createServer(async (req, res) => {
   try {
     const check = classifyRequestOrigin(req.headers.origin);
     const fetchSite = classifyFetchSite(req.headers["sec-fetch-site"]);
@@ -82,6 +82,22 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/worktrees/install-hook") {
       return handleWorktreesInstallHook(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/agent/enqueue") {
+      return handleAgentEnqueue(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/agent/pull") {
+      return handleAgentPull(req, res, origin);
+    }
+    if (
+      req.method === "GET" &&
+      req.url &&
+      req.url.startsWith("/api/agent/delivered")
+    ) {
+      return handleAgentDelivered(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/agent/unenqueue") {
+      return handleAgentUnenqueue(req, res, origin);
+    }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -98,7 +114,8 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ error: "internal server error" }));
     }
   }
-});
+  });
+}
 
 async function handlePlan(
   req: IncomingMessage,
@@ -541,6 +558,224 @@ async function handleWorktreesInstallHook(
   }
 }
 
+const COMMENT_KINDS: readonly CommentKind[] = [
+  "line",
+  "block",
+  "reply-to-ai-note",
+  "reply-to-teammate",
+  "reply-to-hunk-summary",
+  "freeform",
+];
+
+function isCommentKind(value: unknown): value is CommentKind {
+  return (
+    typeof value === "string" && COMMENT_KINDS.includes(value as CommentKind)
+  );
+}
+
+async function handleAgentEnqueue(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: {
+    worktreePath?: unknown;
+    commitSha?: unknown;
+    comment?: unknown;
+  };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  const commitSha =
+    typeof parsed.commitSha === "string" ? parsed.commitSha : "";
+  const commentInput = parsed.comment as
+    | {
+        kind?: unknown;
+        file?: unknown;
+        lines?: unknown;
+        body?: unknown;
+        supersedes?: unknown;
+      }
+    | undefined;
+  if (!wtPath || !commitSha || !commentInput || typeof commentInput !== "object") {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "expected { worktreePath: string, commitSha: string, comment: { kind, body, ... } }",
+      }),
+    );
+    return;
+  }
+  if (!isCommentKind(commentInput.kind)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid comment.kind" }));
+    return;
+  }
+  if (typeof commentInput.body !== "string" || commentInput.body.length === 0) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "comment.body must be a non-empty string" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const comment: Omit<Comment, "id" | "enqueuedAt"> = {
+    kind: commentInput.kind,
+    body: commentInput.body,
+    commitSha,
+    supersedes:
+      typeof commentInput.supersedes === "string"
+        ? commentInput.supersedes
+        : null,
+  };
+  if (typeof commentInput.file === "string" && commentInput.file.length > 0) {
+    comment.file = commentInput.file;
+  }
+  if (typeof commentInput.lines === "string" && commentInput.lines.length > 0) {
+    comment.lines = commentInput.lines;
+  }
+  const [id] = agentQueue.enqueue(wtPath, [comment]);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ id }));
+}
+
+async function handleAgentPull(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { worktreePath?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { worktreePath: string }" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const resolved = agentQueue.pullAndAck(wtPath);
+  // Use the earliest-sent comment's sha; in the common case all comments in
+  // one pull share a sha anyway.
+  const earliest = resolved.reduce<Comment | undefined>(
+    (acc, c) => (!acc || c.enqueuedAt < acc.enqueuedAt ? c : acc),
+    undefined,
+  );
+  const commitSha = earliest?.commitSha ?? "";
+  const payload = agentQueue.formatPayload(resolved, commitSha);
+  const ids = resolved.map((c) => c.id);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ payload, ids }));
+}
+
+async function handleAgentDelivered(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  // Read the URL-encoded `path` query param off req.url. Use a dummy base
+  // since req.url is path+query only.
+  const url = new URL(req.url ?? "", "http://localhost");
+  const wtPath = url.searchParams.get("path") ?? "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected ?path=<worktreePath>" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const delivered = agentQueue.listDelivered(wtPath);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ delivered }));
+}
+
+async function handleAgentUnenqueue(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { worktreePath?: unknown; id?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  const id = typeof parsed.id === "string" ? parsed.id : "";
+  if (!wtPath || !id) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({ error: "expected { worktreePath: string, id: string }" }),
+    );
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const unenqueued = agentQueue.unenqueue(wtPath, id);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ unenqueued }));
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -650,8 +885,25 @@ function writeCorsHeaders(res: ServerResponse, origin: string | null) {
   res.setHeader("Vary", "Origin");
 }
 
-server.listen(PORT, HOST, () => {
-  const allowed = ALLOWED_ORIGINS.size > 0 ? [...ALLOWED_ORIGINS].join(", ") : "(none)";
-  console.log(`[server] listening on http://${HOST}:${PORT}`);
-  console.log(`[server] allowed browser origins: ${allowed}`);
-});
+function main() {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error(
+      "[server] ANTHROPIC_API_KEY is not set in the environment. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
+    );
+    process.exit(1);
+  }
+  const server = createApp();
+  server.listen(PORT, HOST, () => {
+    const allowed = ALLOWED_ORIGINS.size > 0 ? [...ALLOWED_ORIGINS].join(", ") : "(none)";
+    console.log(`[server] listening on http://${HOST}:${PORT}`);
+    console.log(`[server] allowed browser origins: ${allowed}`);
+  });
+}
+
+// Only run main when executed directly (not when imported by tests).
+const isEntry =
+  import.meta.url === `file://${process.argv[1]}` ||
+  import.meta.url.endsWith(process.argv[1] ?? "");
+if (isEntry) {
+  main();
+}
