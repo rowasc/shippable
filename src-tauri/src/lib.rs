@@ -124,16 +124,10 @@ fn start_sidecar(app: tauri::AppHandle) {
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(bytes) => {
-                            log::info!(
-                                "[sidecar] {}",
-                                String::from_utf8_lossy(&bytes).trim_end()
-                            );
+                            log::info!("[sidecar] {}", String::from_utf8_lossy(&bytes).trim_end());
                         }
                         CommandEvent::Stderr(bytes) => {
-                            log::warn!(
-                                "[sidecar] {}",
-                                String::from_utf8_lossy(&bytes).trim_end()
-                            );
+                            log::warn!("[sidecar] {}", String::from_utf8_lossy(&bytes).trim_end());
                         }
                         CommandEvent::Terminated(payload) => {
                             log::warn!(
