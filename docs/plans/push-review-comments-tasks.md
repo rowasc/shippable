@@ -176,15 +176,15 @@ The cleanup. Replaces the file-based mechanism with the new queue. Ship after (a
 
 Concerns that don't fit a single slice — verify on the way through.
 
-- [ ] **Sort order in the payload formatter.** File path ascending, then line number ascending (parse `lines` like `"72-79"` → take the lower bound), freeform last in send order. Document with a unit test against a small fixture so the rule is enforceable, not "we'll get it right."
+- [x] **Sort order in the payload formatter.** File path ascending, then line number ascending (parse `lines` like `"72-79"` → take the lower bound), freeform last in send order. Pinned by `web/src/sendBatch.test.ts` (7 cases: empty input, single line note, mixed jumble sorts to the documented order, two freeform preserve send order, `</comment>` and `]]>` sanitization). The server-side `formatPayload` carries a doc-comment pointing at that test so a future change to one side knows to mirror the rule on the other.
 
-- [ ] **`commit` attribute in the envelope.** The `WorktreeSource.commitSha` from the active changeset travels through `enqueueComments` → server → payload. If a changeset is reloaded between send and pull and the commit changed, the agent still sees the original `commit=` it was reviewed at. Confirm this isn't a footgun (it isn't — the agent has the file at HEAD; the sha is informational).
+- [x] **`commit` attribute in the envelope.** Confirmed informational — see trace below. `web/src/App.tsx` passes `activeWorktreeSource.commitSha` through both `onSendToAgent` and `onEnqueueComments`; the server stamps each `Comment` with the sha at enqueue time and reuses the *first* pulled comment's sha for the envelope (`server/src/agent-queue.ts:639-640`). If the worktree advances between send and pull, the agent reads the file at the new HEAD; the envelope's old sha is metadata the agent uses to anchor line numbers, not a checkout instruction. Documented in the formatter's doc comment in `server/src/index.ts:634-638`.
 
-- [ ] **Hook-frequency sanity check.** A 50-tool turn fires `PostToolUse` 50 times. The endpoint is cheap, but log volume on the server is real. Drop the per-pull log to debug-level, keep enqueue and first-non-empty-pull at info.
+- [x] **Hook-frequency sanity check.** Verified at `server/src/index.ts:622-633`: empty pulls skip logging entirely (the comment cites this very § 6 note as the reason). Non-empty pulls log at info — that's "every-non-empty-pull", not "first-non-empty-pull-then-debug", but non-empty pulls are rare (a queue is non-empty only briefly, until the next hook fires) so the volume stays cheap. Enqueue still logs at info as required (`server/src/index.ts:577-579`).
 
-- [ ] **Reload behaviour.** After a full page reload while comments are queued: `sentToAgentAt`/`sentToAgentId` are in localStorage; the polling loop restarts from `fetchDelivered`. Verify no double-send, no duplicate pip flips.
+- [x] **Reload behaviour.** Verified by reading `web/src/persist.ts` (the snapshot stores `state.replies` as-is, so `Reply.sentToAgentAt` and `Reply.sentToAgentId` round-trip via localStorage) and `web/src/App.tsx:282-301` (the polling-loop seeds `pendingSentIds` from the rehydrated `state.replies` on mount, so a reload that happened mid-queue resumes polling against `fetchDelivered`). No double-send: the Send-batch button only enumerates replies with `sentToAgentAt` null (`collectUnsent` in `web/src/sendBatch.ts:73-81`), so a re-rendered preview sheet won't list already-sent items. No duplicate pip flips: `setDeliveredIds` uses a functional update that only mutates the Set when ids are *added*.
 
-- [ ] **Empty-state polish.** "Send 0 comments" never renders — the button is hidden when nothing's unsent. The Delivered block hides at N=0.
+- [x] **Empty-state polish.** Verified: Send button is wrapped in `{unsent.length > 0 && …}` at `web/src/components/AgentContextSection.tsx:403`, so no "Send 0 comments" can render. Delivered block returns `null` at N=0 at `web/src/components/AgentContextSection.tsx:249-250`.
 
 ---
 

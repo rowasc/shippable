@@ -153,6 +153,14 @@ export function listDelivered(worktreePath: string): DeliveredComment[] {
  *     the middle of a body could otherwise confuse the model's parsing of
  *     where one `<comment>` ends and the next begins. We also defensively
  *     strip `]]>` since some pre-processors treat the envelope as XML/CDATA.
+ *
+ * **Drift guard (per § 6 of `docs/plans/push-review-comments-tasks.md`):**
+ * this function is byte-for-byte identical to `renderPreviewPayload` in
+ * `web/src/sendBatch.ts` — the UI's "what the agent will see" toggle has
+ * to render the same string the hook will emit. The contract is pinned by
+ * `web/src/sendBatch.test.ts` (sort order, envelope shape, sanitization
+ * edge cases). If you change the rules here, mirror them there and update
+ * the test fixtures together.
  */
 export function formatPayload(commitSha: string, comments: Comment[]): string {
   if (comments.length === 0) return "";
