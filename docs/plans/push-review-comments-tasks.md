@@ -24,7 +24,7 @@ These already shipped and the v1 work layers on top. Listed so the implementer k
 
 The HTTP endpoint is the main contract; everything else is glue over it. Keep the queue agent-agnostic.
 
-- [ ] **Create `server/src/agent-queue.ts`.**
+- [x] **Create `server/src/agent-queue.ts`.**
   - In-memory `Map<worktreePath, { pending: Comment[]; delivered: DeliveredComment[] }>`.
   - `Comment` shape: `{ id: string; kind: "line"|"block"|"reply-to-ai-note"|"reply-to-teammate"|"reply-to-hunk-summary"|"freeform"; file?: string; lines?: string; body: string; commitSha: string; enqueuedAt: string }`. (`lines` is a string so `"118"` and `"72-79"` both fit.)
   - `DeliveredComment = Comment & { deliveredAt: string }`.
@@ -32,22 +32,22 @@ The HTTP endpoint is the main contract; everything else is glue over it. Keep th
   - **Caveat:** atomicity is per Node event-loop tick; that's enough for the single-process server. Document that two concurrent `pull` calls land "first wins" (see Open Questions in the plan, cross-session disambiguation).
   - **Caveat:** queue grows unbounded if nobody pulls. Cap `delivered` history at e.g. 200 per worktree (drop oldest); pending has no realistic upper bound but is small in practice.
 
-- [ ] **`POST /api/agent/enqueue` in `server/src/index.ts`.**
+- [x] **`POST /api/agent/enqueue` in `server/src/index.ts`.**
   - Body: `{ worktreePath: string; commitSha: string; comments: Array<Omit<Comment, "id"|"enqueuedAt"|"commitSha">> }`.
   - Validation: `worktreePath` absolute, no `..` segments, `.git` entry resolves (reuse the `assertGitDir`-style check from `inbox.ts` — extract to a shared helper).
   - Returns `{ enqueued: number; ids: string[] }`.
 
-- [ ] **`POST /api/agent/pull` in `server/src/index.ts`.**
+- [x] **`POST /api/agent/pull` in `server/src/index.ts`.**
   - Body: `{ worktreePath: string }`.
   - Returns `{ payload: string; ids: string[] }` where `payload` is the `<reviewer-feedback>`-wrapped string the hook prints to stdout (empty string when nothing pending).
   - Marks pulled comments as delivered before returning. **Atomic** in the sense that a second concurrent caller sees an empty queue.
   - **Caveat:** the hook fires per-tool — make sure `pull` is cheap (no disk reads, no `git` invocations).
 
-- [ ] **`GET /api/agent/delivered?path=<worktreePath>` in `server/src/index.ts`.**
+- [x] **`GET /api/agent/delivered?path=<worktreePath>` in `server/src/index.ts`.**
   - Returns `{ delivered: DeliveredComment[] }` ordered newest first.
   - Used by the UI to flip pips and render the Delivered (N) block.
 
-- [ ] **Payload formatter.** Renders the `<reviewer-feedback from="shippable" commit="<sha>">…</reviewer-feedback>` envelope wrapping one `<comment file="…" lines="…" kind="…">…</comment>` per item, sorted by `(file path, line number ascending)` with `freeform` comments at the end in send order.
+- [x] **Payload formatter.** Renders the `<reviewer-feedback from="shippable" commit="<sha>">…</reviewer-feedback>` envelope wrapping one `<comment file="…" lines="…" kind="…">…</comment>` per item, sorted by `(file path, line number ascending)` with `freeform` comments at the end in send order.
   - **Caveat:** comment bodies are markdown — they may contain backticks, angle brackets, etc. Don't HTML-escape them; the model handles raw text fine. Do strip CDATA-breaking sequences (`]]>`) defensively. Keep the format identical to the existing `shippable-inbox-hook` envelope so prior hook installs still produce a parseable shape.
 
 **Acceptance:** unit test (or smoke script) shows enqueue → pull returns the payload, second pull is empty, `delivered` lists the pulled item.

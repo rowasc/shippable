@@ -7,6 +7,8 @@ import * as worktrees from "./worktrees.ts";
 import * as agentContext from "./agent-context.ts";
 import * as inbox from "./inbox.ts";
 import * as hookStatus from "./hook-status.ts";
+import * as agentQueue from "./agent-queue.ts";
+import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -81,6 +83,15 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/api/worktrees/install-hook") {
       return handleWorktreesInstallHook(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/agent/enqueue") {
+      return handleAgentEnqueue(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/agent/pull") {
+      return handleAgentPull(req, res, origin);
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/agent/delivered")) {
+      return handleAgentDelivered(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -539,6 +550,211 @@ async function handleWorktreesInstallHook(
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Agent comment queue (slice (a) of docs/plans/push-review-comments.md)
+// ---------------------------------------------------------------------------
+
+async function handleAgentEnqueue(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: {
+    worktreePath?: unknown;
+    commitSha?: unknown;
+    comments?: unknown;
+  };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  const commitSha =
+    typeof parsed.commitSha === "string" ? parsed.commitSha : "";
+  const rawComments = parsed.comments;
+  if (!wtPath || !commitSha || !Array.isArray(rawComments)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "expected { worktreePath: string, commitSha: string, comments: Array }",
+      }),
+    );
+    return;
+  }
+  const validKinds = new Set<agentQueue.CommentKind>([
+    "line",
+    "block",
+    "reply-to-ai-note",
+    "reply-to-teammate",
+    "reply-to-hunk-summary",
+    "freeform",
+  ]);
+  const inputs: Array<Omit<agentQueue.Comment, "id" | "enqueuedAt">> = [];
+  for (let i = 0; i < rawComments.length; i++) {
+    const item = rawComments[i] as Record<string, unknown> | undefined;
+    if (!item || typeof item !== "object") {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `comments[${i}] must be an object` }));
+      return;
+    }
+    const kind = item.kind;
+    if (
+      typeof kind !== "string" ||
+      !validKinds.has(kind as agentQueue.CommentKind)
+    ) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: `comments[${i}].kind invalid` }));
+      return;
+    }
+    const bodyText = item.body;
+    if (typeof bodyText !== "string" || bodyText.length === 0) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `comments[${i}].body must be a non-empty string`,
+        }),
+      );
+      return;
+    }
+    const file =
+      typeof item.file === "string" && item.file.length > 0
+        ? item.file
+        : undefined;
+    const lines =
+      typeof item.lines === "string" && item.lines.length > 0
+        ? item.lines
+        : undefined;
+    inputs.push({
+      kind: kind as agentQueue.CommentKind,
+      body: bodyText,
+      commitSha,
+      ...(file !== undefined ? { file } : {}),
+      ...(lines !== undefined ? { lines } : {}),
+    });
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const enriched = agentQueue.enqueue(wtPath, inputs);
+  console.log(
+    `[server] /api/agent/enqueue worktree=${wtPath} commit=${commitSha} count=${enriched.length}`,
+  );
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(
+    JSON.stringify({
+      enqueued: enriched.length,
+      ids: enriched.map((c) => c.id),
+    }),
+  );
+}
+
+async function handleAgentPull(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { worktreePath?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { worktreePath: string }" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  // Cheap path: the hook fires per-tool, so this must not touch disk or git.
+  // Map lookup + clear + format only.
+  const pulled = agentQueue.pullAndAck(wtPath);
+  if (pulled.length === 0) {
+    // Per the cross-cutting note in the plan (§ 6, hook-frequency sanity
+    // check), empty pulls are silent — a 50-tool turn would otherwise spam
+    // the log with 50 lines.
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ payload: "", ids: [] }));
+    return;
+  }
+  // The envelope's `commit` attr: pick the first comment's commitSha. In
+  // practice every batch is enqueued at one commit (the changeset's HEAD),
+  // so this matches the intent. If somehow a worktree had multiple enqueue
+  // calls at different commits that haven't been pulled yet, we collapse to
+  // the oldest — informational only; the agent has the file at HEAD anyway.
+  const commitSha = pulled[0].commitSha;
+  const payload = agentQueue.formatPayload(commitSha, pulled);
+  console.log(
+    `[server] /api/agent/pull worktree=${wtPath} delivered=${pulled.length}`,
+  );
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ payload, ids: pulled.map((c) => c.id) }));
+}
+
+async function handleAgentDelivered(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  // Path is parsed manually since the rest of the file uses raw `req.url`
+  // comparisons. Build a URL with a placeholder host so URLSearchParams works.
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const wtPath = url.searchParams.get("path") ?? "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected ?path=<worktreePath>" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const delivered = agentQueue.listDelivered(wtPath);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ delivered }));
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
