@@ -36,7 +36,6 @@ import {
   fetchDelivered,
   fetchHookStatus,
   installHook,
-  sendInboxMessage,
   type HookStatus,
 } from "./agentContextClient";
 import { collectUnsent, type UnsentEntry } from "./sendBatch";
@@ -123,6 +122,15 @@ export default function App() {
   // the SendBatch result panel and the per-thread pip rendering. Re-fetched
   // on remount; not persisted (it's a server-derived view).
   const [deliveredIds, setDeliveredIds] = useState<Set<string>>(new Set());
+  // Slice (e): the freeform composer enqueues a single one-off comment that
+  // isn't part of `state.replies`, so its id needs its own pending tracker
+  // here. The polling loop below unions this with the reply-derived
+  // `pendingSentIds` so a single timer covers both. Cleared whenever the
+  // App-level `deliveredIds` confirms a freeform id is delivered (the
+  // composer's own status flip is independent — see SendToAgent).
+  const [pendingFreeformIds, setPendingFreeformIds] = useState<Set<string>>(
+    new Set(),
+  );
   // Hook status is fetched at App mount with retry+backoff. The server's
   // port briefly disappears during `tsx watch` reload windows, so a single
   // attempt can hit ECONNREFUSED and leave the banner stuck in "unknown".
@@ -203,6 +211,15 @@ export default function App() {
   const activeWorktreeSource: WorktreeSource | null = cs.worktreeSource ?? null;
   const wtPath = activeWorktreeSource?.worktreePath ?? null;
   const wtSha = activeWorktreeSource?.commitSha ?? null;
+  // Track the live worktree path in a ref so async callbacks (e.g. the
+  // freeform-composer enqueue) can detect a worktree switch that happened
+  // while their request was in flight. Closures over `activeWorktreeSource`
+  // see the render-time value; the ref reflects the most recently committed
+  // render's value.
+  const wtPathRef = useRef<string | null>(wtPath);
+  useEffect(() => {
+    wtPathRef.current = wtPath;
+  }, [wtPath]);
   const wantedFetchKey =
     wtPath && wtSha
       ? `${wtPath}|${wtSha}|${pinnedSession ?? ""}|${agentRefreshTick}`
@@ -263,8 +280,10 @@ export default function App() {
     : [];
 
   // Pending sentToAgentIds for the active worktree — anything we've
-  // stamped on a reply but the server hasn't reported delivered yet.
-  // The polling loop below uses this to decide whether to keep ticking.
+  // stamped on a reply (or enqueued from the freeform composer) but the
+  // server hasn't reported delivered yet. The polling loop below uses this
+  // to decide whether to keep ticking; the freeform composer rides on the
+  // same loop via `pendingFreeformIds` so we don't need a second timer.
   const pendingSentIds: string[] = [];
   for (const list of Object.values(state.replies)) {
     for (const r of list) {
@@ -273,8 +292,13 @@ export default function App() {
       }
     }
   }
-  // Stable string for effect dependency.
-  const pendingKey = pendingSentIds.sort().join("|");
+  for (const id of pendingFreeformIds) {
+    if (!deliveredIds.has(id)) pendingSentIds.push(id);
+  }
+  // Stable string for effect dependency. `.toSorted()` to avoid mutating
+  // the array we just built in render — no current consumer reads it
+  // post-mutation, but the in-place sort is a footgun.
+  const pendingKey = pendingSentIds.toSorted().join("|");
 
   // Reset deliveredIds when the active worktree changes — server-derived
   // state shouldn't bleed across worktrees. Uses the "adjust state during
@@ -286,6 +310,7 @@ export default function App() {
   if (deliveredForWtPath !== wtPath) {
     setDeliveredForWtPath(wtPath);
     if (deliveredIds.size > 0) setDeliveredIds(new Set());
+    if (pendingFreeformIds.size > 0) setPendingFreeformIds(new Set());
   }
 
   // Delivered-state polling. Runs whenever there's a queued reply for the
@@ -772,10 +797,32 @@ export default function App() {
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                     onSendToAgent: async (message) => {
-                      await sendInboxMessage({
-                        worktreePath: activeWorktreeSource.worktreePath,
-                        message,
+                      // Slice (e): freeform composer rides the same agent
+                      // queue as the per-thread Send-batch button. The
+                      // returned id is captured in `pendingFreeformIds` so
+                      // the App-level polling loop watches for delivery,
+                      // and handed back to the composer so it can flip
+                      // its own status when `deliveredIds` includes it.
+                      // Capture the worktree at submit time — if the user
+                      // switches worktrees during the in-flight enqueue,
+                      // the composer is unmounted and the id has nowhere
+                      // to land; enrolling it into the new worktree's
+                      // pending set would leak it into the polling loop.
+                      const wtPath = activeWorktreeSource.worktreePath;
+                      const res = await enqueueComments({
+                        worktreePath: wtPath,
+                        commitSha: activeWorktreeSource.commitSha,
+                        comments: [{ kind: "freeform", body: message }],
                       });
+                      const id = res.ids[0];
+                      if (wtPathRef.current === wtPath) {
+                        setPendingFreeformIds((prev) => {
+                          const next = new Set(prev);
+                          next.add(id);
+                          return next;
+                        });
+                      }
+                      return id;
                     },
                     onInstallHook: async () => {
                       const r = await installHook();

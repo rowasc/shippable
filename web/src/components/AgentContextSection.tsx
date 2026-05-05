@@ -9,7 +9,6 @@ import type {
 import type { SymbolIndex } from "../symbols";
 import {
   fetchDelivered,
-  fetchInboxStatus,
   type HookStatus,
 } from "../agentContextClient";
 import type { UnsentEntry } from "../sendBatch";
@@ -41,17 +40,17 @@ interface Props {
   /** Manually re-run the fetch (after an error, or to refresh on demand). */
   onRefresh: () => void;
   /**
-   * Worktree path for inbox-status polling after a send. Same value that
-   * the parent uses to route `onSendToAgent` — passing it explicitly so the
-   * composer can poll without reaching into the slice.
+   * Worktree path; threaded through for the Delivered (N) block's fetch.
+   * Same value that the parent uses to route `onSendToAgent`.
    */
   worktreePath: string;
   /**
-   * Send a message to the agent's inbox. Resolves when the message has
-   * landed in `<worktree>/.shippable/inbox.md`; the agent picks it up on
-   * its next prompt boundary via the UserPromptSubmit hook.
+   * Enqueue a freeform message for the agent. Resolves to the server-assigned
+   * comment id; the composer stores that id in the App-level pending-freeform
+   * tracker so the existing slice-(c) polling loop flips its status to
+   * delivered once the hook acks the pull. See App.tsx for the wiring.
    */
-  onSendToAgent: (message: string) => Promise<void>;
+  onSendToAgent: (message: string) => Promise<string>;
   /**
    * Merge the UserPromptSubmit hook entry into ~/.claude/settings.json.
    * Returns whether the file was actually modified (it's idempotent if our
@@ -79,6 +78,13 @@ interface Props {
    * we don't run a duplicate timer here just to populate read-only history.
    */
   deliveredIdsTick: number;
+  /**
+   * App-level set of server-confirmed delivered comment ids for the active
+   * worktree. The freeform composer watches this set for its own enqueued id
+   * to flip from `◌ queued` → `✓ delivered` — same delivery signal the
+   * per-thread pips use, just observed by id.
+   */
+  deliveredIds: Set<string>;
 }
 
 export function AgentContextSection({
@@ -99,6 +105,7 @@ export function AgentContextSection({
   commitSha,
   onEnqueueComments,
   deliveredIdsTick,
+  deliveredIds,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -181,8 +188,8 @@ export function AgentContextSection({
         onEnqueue={onEnqueueComments}
       />
       <SendToAgent
-        worktreePath={worktreePath}
         onSend={onSendToAgent}
+        deliveredIds={deliveredIds}
         onDelivered={onRefresh}
       />
     </section>
@@ -536,86 +543,96 @@ function clip(s: string, max: number): string {
 type SendStatus =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "queued"; sentAt: number }
-  | { kind: "delivered"; deliveredAt: number; latencyMs: number }
+  | { kind: "queued"; sentAt: number; id: string }
+  | { kind: "delivered"; latencyMs: number }
   | { kind: "error"; message: string };
 
-const POLL_INTERVAL_MS = 2000;
-// Stop polling after this many ms in case the agent never runs again.
-// 5 minutes is generous; the user can re-send to restart the wait.
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
+// Stop waiting after this many ms in case the agent never runs again. The
+// App-level polling loop stays alive on its own cadence, but the composer
+// surfaces a "didn't deliver" hint so the reviewer can re-send. 5 minutes
+// matches the older inbox-file polling timeout this code replaced.
+const DELIVERED_TIMEOUT_MS = 5 * 60 * 1000;
 
+/**
+ * Freeform reviewer→agent composer. Slice (e) migrated this off the
+ * file-based inbox onto the agent queue: `onSend` enqueues a single
+ * `kind: "freeform"` comment, returns the server-assigned id, and the
+ * App-level slice-(c) polling loop flips it from queued → delivered by
+ * watching for that id in the `deliveredIds` set. We deliberately don't
+ * run our own polling timer here — the App loop already polls
+ * `/api/agent/delivered` whenever any pending id is unconfirmed (the
+ * freeform id rides that same loop via the App's `pendingFreeformIds`
+ * tracker; see App.tsx).
+ *
+ * Status flow stays identical to the old composer from the user's seat:
+ * `idle → sending → queued → delivered/error`.
+ */
 function SendToAgent({
-  worktreePath,
   onSend,
+  deliveredIds,
   onDelivered,
 }: {
-  worktreePath: string;
-  onSend: (m: string) => Promise<void>;
+  onSend: (m: string) => Promise<string>;
+  deliveredIds: Set<string>;
   onDelivered: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<SendStatus>({ kind: "idle" });
-  // Surfaces transient poll failures (e.g. server restarting, ECONNREFUSED)
-  // inline. Cleared on the next successful poll. Without this the UI looks
-  // identical to "still queued" while polling is silently failing.
-  const [pollError, setPollError] = useState<string | null>(null);
 
-  // Pull sentAt out before the effect so it's part of the dep array without
-  // tripping the discriminated-union narrowing. null disables the effect.
+  // Watch the App-level deliveredIds set for the id we enqueued. When it
+  // shows up, flip to delivered. The check + setState happen in an effect
+  // through a microtask (queueMicrotask) so the setState fires *after* the
+  // render commits — that satisfies the lint rule against sync setState in
+  // effect bodies and avoids `Date.now()` during render.
+  const queuedId = status.kind === "queued" ? status.id : null;
   const queuedSentAt = status.kind === "queued" ? status.sentAt : null;
-
-  // While in "queued", poll the inbox file. The hook deletes it when it
-  // fires, so disappearance = "delivered to a fresh prompt." Effect body
-  // stays sync-setState-free; the setIntervals are async callbacks.
+  const isDelivered =
+    queuedId !== null && deliveredIds.has(queuedId);
   useEffect(() => {
-    if (queuedSentAt === null) return;
-    const sentAt = queuedSentAt;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      if (Date.now() - sentAt > POLL_TIMEOUT_MS) {
-        // Stop polling; leave status at queued. User can re-send to retry.
-        window.clearInterval(id);
-        return;
-      }
-      try {
-        const s = await fetchInboxStatus(worktreePath);
-        if (cancelled) return;
-        setPollError(null);
-        if (!s.exists) {
-          const now = Date.now();
-          setStatus({
-            kind: "delivered",
-            deliveredAt: now,
-            latencyMs: now - sentAt,
-          });
-          window.clearInterval(id);
-          onDelivered();
-        }
-      } catch (e) {
-        if (cancelled) return;
-        // Surface the failure but keep polling — server probably restarting.
-        const msg = e instanceof Error ? e.message : String(e);
-        setPollError(/ECONNREFUSED|HTTP/.test(msg) ? "server unreachable" : msg);
-      }
-    };
-    const id = window.setInterval(tick, POLL_INTERVAL_MS);
-    void tick(); // immediate first check
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [queuedSentAt, worktreePath, onDelivered]);
+    if (!isDelivered || queuedSentAt === null) return;
+    const latency = Date.now() - queuedSentAt;
+    queueMicrotask(() => {
+      setStatus((cur) =>
+        cur.kind === "queued"
+          ? { kind: "delivered", latencyMs: latency }
+          : cur,
+      );
+      onDelivered();
+    });
+  }, [isDelivered, queuedSentAt, onDelivered]);
+
+  // Idle deadline: if the App-level polling loop hasn't seen the delivery
+  // within 5 minutes, surface a timeout error. The loop keeps running, so
+  // a late delivery still populates the Delivered (N) history block — only
+  // this composer's own status caps out.
+  useEffect(() => {
+    if (queuedId === null || queuedSentAt === null) return;
+    const remaining = Math.max(
+      0,
+      DELIVERED_TIMEOUT_MS - (Date.now() - queuedSentAt),
+    );
+    const t = window.setTimeout(() => {
+      setStatus((cur) =>
+        cur.kind === "queued" && cur.id === queuedId
+          ? {
+              kind: "error",
+              message:
+                "delivery timed out — agent didn't run a tool in 5 minutes.",
+            }
+          : cur,
+      );
+    }, remaining);
+    return () => window.clearTimeout(t);
+  }, [queuedId, queuedSentAt]);
 
   async function submit() {
     const body = draft.trim();
     if (!body) return;
     setStatus({ kind: "sending" });
     try {
-      await onSend(body);
+      const id = await onSend(body);
       setDraft("");
-      setStatus({ kind: "queued", sentAt: Date.now() });
+      setStatus({ kind: "queued", sentAt: Date.now(), id });
     } catch (e) {
       setStatus({
         kind: "error",
@@ -636,7 +653,7 @@ function SendToAgent({
             setStatus({ kind: "idle" });
           }
         }}
-        placeholder="Reply to the agent. Delivered on its next prompt boundary."
+        placeholder="Reply to the agent. Delivered on its next tool call or session start."
         rows={3}
         disabled={status.kind === "sending"}
         onKeyDown={(e) => {
@@ -657,10 +674,7 @@ function SendToAgent({
         <span className="ac__send-status">
           {status.kind === "queued" && (
             <span className="ac__send-queued">
-              ◌ queued — waiting for the agent's next prompt
-              {pollError && (
-                <span className="ac__send-pollerr"> · {pollError}</span>
-              )}
+              ◌ queued — delivers on the agent's next tool call or session start
             </span>
           )}
           {status.kind === "delivered" && (

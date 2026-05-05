@@ -4,9 +4,9 @@ import fs from "node:fs/promises";
 // Shared validation for endpoints that take a `worktreePath` from the
 // browser. Refuses non-strings, relative paths, and `..` traversal; verifies
 // the directory exists and looks like a git repo (has a `.git` entry — file
-// for linked worktrees, dir for the primary). Used by `inbox.ts` and the new
-// `agent-queue.ts` endpoints; extracted here so both share one implementation
-// rather than drifting.
+// for linked worktrees, dir for the primary). Used by the `agent-queue.ts`
+// endpoints; extracted here so callers share one implementation rather than
+// drifting. (The original second caller was the now-deleted `inbox.ts`.)
 
 export async function assertGitDir(dir: string): Promise<void> {
   if (typeof dir !== "string" || dir.length === 0) {

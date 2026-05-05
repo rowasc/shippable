@@ -146,27 +146,27 @@ Small read-only block answering "did the agent see this?"
 
 The cleanup. Replaces the file-based mechanism with the new queue. Ship after (a)–(d) are stable so we can fall back if the new channel surfaces a regression.
 
-- [ ] **Composer enqueues via `enqueueComments`.**
+- [x] **Composer enqueues via `enqueueComments`.**
   - The `SendToAgent` component's `submit()` builds a single `kind: "freeform"` comment (no `file`/`lines`, body = the textarea text) and posts to `/api/agent/enqueue`.
   - Status flow stays identical from the user's perspective: `idle → sending → queued → delivered/error`.
-  - The `delivered` flip uses the same `/api/agent/delivered` polling as slice (c) instead of `/api/worktrees/inbox-status`.
+  - The `delivered` flip uses the same `/api/agent/delivered` polling as slice (c) instead of `/api/worktrees/inbox-status`. App-level `pendingFreeformIds` set unions with the reply-derived `pendingSentIds` in the polling effect; the composer observes `deliveredIds.has(myId)` and flips its own status accordingly.
 
-- [ ] **Delete file-based mechanism.**
-  - Remove `server/src/inbox.ts` (incl. `ensureExclude`, `inboxStatus`, `writeInbox`).
-  - Remove the `/api/worktrees/inbox` and `/api/worktrees/inbox-status` endpoints from `server/src/index.ts`.
-  - Remove `tools/shippable-inbox-hook`.
-  - Remove `fetchInboxStatus` and `sendInboxMessage` from `web/src/agentContextClient.ts`.
-  - Remove the inbox-status polling in `AgentContextSection.tsx` `SendToAgent`.
-  - **Caveat:** any user with a previously-installed `shippable-inbox-hook` reference in their `settings.local.json` will keep working until they remove it manually — but the file it tries to read (`<worktree>/.shippable/inbox.md`) will no longer be created, so it's a benign no-op. Note this in the changelog. The slice (b) install logic is the right place to rewrite legacy entries to the new hook script in-place.
+- [x] **Delete file-based mechanism.**
+  - Removed `server/src/inbox.ts` (incl. `ensureExclude`, `inboxStatus`, `writeInbox`).
+  - Removed the `/api/worktrees/inbox` and `/api/worktrees/inbox-status` endpoints from `server/src/index.ts`.
+  - Removed `tools/shippable-inbox-hook`.
+  - Removed `fetchInboxStatus` and `sendInboxMessage` from `web/src/agentContextClient.ts`.
+  - Removed the inbox-status polling in `AgentContextSection.tsx` `SendToAgent`.
+  - **Migration:** users with a previously-installed `shippable-inbox-hook` reference in their `settings.local.json` will get a missing-file error from CC until they re-run "Install for me" (which rewrites the legacy entry in place). Documented in `docs/concepts/agent-context.md` and `docs/features/agent-context-panel.md`.
 
-- [ ] **Delete the worktree's stale `.shippable/` dir on next composer send.**
-  - Optional. The `info/exclude` line is fine to leave (cheap, invisible). The `.shippable/` dir is empty after the file deletion. If we want the worktree fully clean, the new enqueue endpoint can `rm -rf <worktree>/.shippable/inbox.md` once. Don't touch `info/exclude` — could be edited by the user.
+- [~] **Delete the worktree's stale `.shippable/` dir on next composer send.**
+  - Skipped. Adding a side-effect to the enqueue endpoint just to clean a stale empty dir is overengineering. Users who care can `rm -rf .shippable` themselves.
 
-- [ ] **Doc updates.**
-  - `docs/concepts/agent-context.md`: rewrite § "Two-way: feedback back to the agent" to describe the queue/hook channel; delete § "Why shared `info/exclude`".
-  - `docs/features/agent-context-panel.md`: update Send-to-agent affordance section, hook recipe section (3 events), latency model copy.
-  - `docs/plans/worktrees.md` § Findings: add a note that slice (d)'s file-based approach was superseded — link to `push-review-comments.md`.
-  - `docs/ROADMAP.md`: cross-link this plan from the 0.1.0 row, if not already.
+- [x] **Doc updates.**
+  - `docs/concepts/agent-context.md`: rewrote § "Two-way: feedback back to the agent" to describe the queue/hook channel; deleted § "Why shared `info/exclude`".
+  - `docs/features/agent-context-panel.md`: updated Send-to-agent affordance section, hook recipe section (3 events), latency model copy, files-of-interest list.
+  - `docs/plans/worktrees.md` § Findings: added a note that slice (d)'s file-based approach was superseded — links to `push-review-comments.md`.
+  - `docs/ROADMAP.md`: cross-linked this plan and the worktrees plan from the 0.1.0 row.
 
 **Acceptance:** the composer works end-to-end with `inbox.md` absent from the codebase; `git grep -i inbox` returns only doc/changelog references.
 

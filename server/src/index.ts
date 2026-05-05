@@ -5,7 +5,6 @@ import * as prompts from "./prompts.ts";
 import { streamReview } from "./review.ts";
 import * as worktrees from "./worktrees.ts";
 import * as agentContext from "./agent-context.ts";
-import * as inbox from "./inbox.ts";
 import * as hookStatus from "./hook-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import { assertGitDir } from "./worktree-validation.ts";
@@ -71,12 +70,6 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/api/worktrees/agent-context") {
       return handleWorktreesAgentContext(req, res, origin);
-    }
-    if (req.method === "POST" && req.url === "/api/worktrees/inbox") {
-      return handleWorktreesInbox(req, res, origin);
-    }
-    if (req.method === "POST" && req.url === "/api/worktrees/inbox-status") {
-      return handleWorktreesInboxStatus(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/worktrees/hook-status") {
       return handleWorktreesHookStatus(req, res, origin);
@@ -435,80 +428,6 @@ async function handleWorktreesAgentContext(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/agent-context err: ${message}`);
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: message }));
-  }
-}
-
-async function handleWorktreesInbox(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { path?: unknown; message?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
-  const message = typeof parsed.message === "string" ? parsed.message : "";
-  if (!wtPath || !message) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({ error: "expected { path: string, message: string }" }),
-    );
-    return;
-  }
-  try {
-    const result = await inbox.writeInbox(wtPath, message);
-    writeCorsHeaders(res, origin);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(result));
-  } catch (err) {
-    const messageStr = err instanceof Error ? err.message : String(err);
-    console.warn(`[server] /api/worktrees/inbox err: ${messageStr}`);
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: messageStr }));
-  }
-}
-
-async function handleWorktreesInboxStatus(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { path?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
-  if (!wtPath) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { path: string }" }));
-    return;
-  }
-  try {
-    const status = await inbox.inboxStatus(wtPath);
-    writeCorsHeaders(res, origin);
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify(status));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));

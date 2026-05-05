@@ -50,35 +50,23 @@ The panel is collapsed-by-default for everything except Task and Files-touched, 
 
 ## Two-way: feedback back to the agent
 
-The same panel hosts the reverse direction. A reviewer can type a message ("the symbol resolution in `resolveImports` looks wrong, please redo it without the regex fallback") and the panel writes it to a worktree-local inbox file. A documented `UserPromptSubmit` Claude Code hook reads the inbox at the agent's next prompt boundary and prepends its contents as user input.
+The same panel hosts the reverse direction. A reviewer authors per-thread replies (line notes, block comments, replies to AI notes / teammates / hunk summaries) and a freeform composer message; pressing Send batches the unsent replies onto a per-worktree, in-memory queue on the local server. A documented Claude Code hook fires on the agent's next tool call (or new session start) and pulls the queue, prepending the payload as `additionalContext` for that turn. See `docs/plans/push-review-comments.md` for the full design and `docs/features/agent-context-panel.md` for the user-facing surface.
 
 Concretely:
 
-- **Inbox path:** `<worktree>/.shippable/inbox.md` — single file, last writer wins for now. Excluded from git via the *shared* `$(git rev-parse --git-common-dir)/info/exclude` (auto-appended on first write), *not* via the tracked `.gitignore`. See "Why shared `info/exclude`" below.
-- **Latency model:** "delivers on the agent's next prompt boundary." We say this in the UI. We do *not* claim mid-turn interrupt. That's slice (e/β) — a separate experiment.
-- **Hook recipe:** lives in `docs/features/agent-context-panel.md` so users can copy it into their own `~/.claude/settings.json`.
+- **Queue:** per-worktree, in-memory, single-process. `enqueue` appends; `pull` is atomic (a second concurrent caller sees an empty queue). Delivered comments move to a bounded history list (cap 200 per worktree) so the UI can still display "did the agent see this?" after the pull.
+- **Hook events:** `UserPromptSubmit`, `PostToolUse`, `SessionStart`. Each event fires `tools/shippable-agent-hook`, which POSTs `{ worktreePath: <cwd> }` to the local server's `/api/agent/pull` and prints the returned payload to stdout — Claude Code grafts it onto that turn's context. The three events together mean a queued comment delivers on whichever happens first: the agent's next prompt, its next tool call, or a fresh session opening in the same worktree.
+- **Latency model:** "delivers on the agent's next tool call or session start." We say this in the UI. The only case where it doesn't deliver is an idle session that does nothing — and even then, opening a new session in that worktree pulls the queue. We do *not* claim mid-turn interrupt; that's a separate experiment (a "live mode" toggle), tracked in `docs/plans/push-review-comments.md` § Future channels.
+- **Hook installation:** the panel surfaces an "Install for me" button that idempotently merges all three matchers into `~/.claude/settings.local.json` (atomic write, one-shot backup of the prior file). Detection covers both the new basename `shippable-agent-hook` and the legacy `shippable-inbox-hook`, and the install rewrites legacy entries in place — but a user who hasn't reinstalled since slice (e) will keep a `shippable-inbox-hook` reference in their settings that now points at a deleted script. Claude Code logs the missing-file error and moves on; the next install run rewrites it. Users can also re-run install to clean it up.
+- **Single-process limitation:** the queue lives in the server's memory. A server restart drops anything that hasn't been pulled. The panel surfaces this once below the Send button — surprises are the cost of the simplicity. A SQLite-backed durable queue is on the follow-ups list.
 
-Why a hook instead of writing to `CLAUDE.md` or the session inbox directly: a hook fires deterministically on every prompt, doesn't pollute the long-lived project memory, and works whether or not the original session is the one that picks the message up — a fresh session in the same worktree will also see and consume the inbox.
+Why a hook instead of writing to `CLAUDE.md` or the session inbox directly: hooks fire deterministically on transcript boundaries we control, don't pollute the long-lived project memory, and work whether or not the original session is the one that picks the message up — a fresh session in the same worktree will also see and consume the queue. The earlier file-based mechanism (`<worktree>/.shippable/inbox.md` plus a `.shippable/` line in the shared `info/exclude`) was retired in slice (e) of `docs/plans/push-review-comments.md`; the queue subsumed it cleanly without introducing on-disk state in the worktree.
 
 ## Refresh model
 
 When a new commit lands on the worktree's branch, the slice advances. The reviewer detects this by polling `/api/worktrees/changeset` for the worktree's HEAD on a low cadence (every few seconds while the panel is open). When HEAD changes, we re-fetch the changeset and the agent context together so they stay in lockstep.
 
 We deliberately do not file-watch the JSONL transcripts themselves. The reviewer is interested in *commits*, not *agent keystrokes*. Streaming every tool call into the UI would be noisy, and once we have it the temptation to build "live agent feed" creeps the surface area. Commit-boundary refresh keeps the interface aligned with what reviewers actually do.
-
-### Why shared `info/exclude`
-
-Modifying the tracked `.gitignore` would be wrong in a worktree-heavy workflow:
-
-- It shows up as a modified file in the worktree's `git status`.
-- Other worktrees don't get the rule until someone commits and merges it.
-- The reviewer would be silently authoring commits — a side effect users won't expect.
-
-Instead, on first write to `<worktree>/.shippable/inbox.md`, the server appends `.shippable/` to `$(git rev-parse --git-common-dir)/info/exclude`. The `info/` directory is one of the shared dirs across all worktrees of a repo (`config`, `hooks`, `info`, `objects`, `refs` etc. live in `$GIT_COMMON_DIR`; only `HEAD`, `index`, `logs/HEAD` etc. are per-worktree). So the rule applies to every worktree of the repo automatically — which is what we want, since `.shippable/` is a Shippable-owned convention everywhere we use it.
-
-The exclude file lives inside `.git/`, which is never tracked, never committed, never pushed. The inbox itself therefore can't land in a commit on the happy path. The narrow escape hatches are deliberate user actions: `git add -f`, manually deleting the exclude rule, or committing the file before Shippable ever writes to it.
-
-**Earlier we tried `--git-dir` (the per-worktree gitdir) and it silently no-op'd**: git only reads `info/exclude` from the *common* dir, not the per-worktree one. `git check-ignore -v` is the diagnostic that catches this — if you write to the wrong place, it reports the file as not ignored despite the rule being present. `--git-common-dir` is the correct flag.
 
 ## What this is not
 

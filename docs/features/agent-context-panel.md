@@ -43,29 +43,48 @@ The dropdown is the recovery path. Users who want to view the panel against a di
 
 ## Send-to-agent affordance
 
-A composer at the bottom of the section. One textarea, one "Send to agent" button. Optionally, a "+ attach: this hunk / this file / this comment" picker that prepends a quoted snippet to the message. Behavior:
+Two complementary surfaces inside the section. Both push to the same per-worktree, in-memory queue on the local server (see `docs/plans/push-review-comments.md` for the full design).
 
-1. Submit writes to `<worktree>/.shippable/inbox.md` via `/api/worktrees/inbox`. Last writer wins for v1. On first write the server also appends `.shippable/` to `$(git rev-parse --git-common-dir)/info/exclude` (the *shared* exclude across all worktrees of the repo) so the file is git-ignored *without* touching the tracked `.gitignore` (see `docs/concepts/agent-context.md` § Why shared `info/exclude`).
-2. The UI shows a dismissable "queued — will deliver on the agent's next prompt" line. We do **not** claim mid-turn delivery.
-3. When the next assistant turn arrives in the transcript and the inbox file has been consumed (file deleted by the hook), the queued message becomes a "delivered" entry in the transcript tail and is removed from the inbox.
+1. **Per-thread Send batch.** Every reviewer-authored reply (line note, block comment, reply-to-AI-note, reply-to-teammate, reply-to-hunk-summary) carries a `sentToAgentAt` flag. While at least one reply on the active changeset is unsent, the section shows a `Send N comments` button (singular when N is 1) plus a one-line "Queue is in-memory — server restart drops unpulled comments" hint. Clicking the button opens a preview sheet:
+   - One row per unsent reply, grouped by file path (freeform last). Each row has a default-on checkbox and a one-line clip of the reply body.
+   - A "what the agent will see" toggle reveals the rendered `<reviewer-feedback>` payload as a `<pre>` block — the same string the hook will print to stdout.
+   - Confirm enqueues only the checked rows. The button's status line then reads `queued — delivers on the agent's next tool call or session start.`
+   - Each thread shows a pip (`◌ queued` or `✓ delivered`) once a reply on it has been sent. The `delivered` flip happens when the App-level polling loop sees the comment id reported in `/api/agent/delivered`. Pip state survives a page reload (it lives on the Reply itself in `ReviewState`).
+2. **Freeform composer.** A textarea + Send button at the bottom of the section, for messages that aren't tied to a thread. Submit enqueues a single `kind: "freeform"` comment with the textarea text as the body. The status line cycles `idle → sending → queued → delivered` (or `error`) just like the per-thread Send batch — the composer's id rides on the same App-level polling loop, so there's a single delivery signal across both surfaces. After 5 minutes without a delivery, the status flips to a "delivery timed out" error; the comment stays in the queue, and a fresh session in the worktree will still pick it up.
+3. **Delivered (N) history block.** A collapsed `<details>` block above the Send button surfaces the server's delivered list (newest first, capped at 200). Each row shows `<file>:<lines> · <kind> · <relative timestamp>` and a clipped body — the answer to "did the agent see this?".
+
+We do **not** claim mid-turn delivery. A comment lands on the next event the hook fires on (any tool call, any new session start, the next user prompt). For an idle session that does nothing, the queue waits — opening a fresh session in that worktree drains it via the `SessionStart` hook.
 
 ### Required hook recipe
 
-For the inbox to be picked up, users add this to their Claude Code `settings.json`:
+The hook ships at `tools/shippable-agent-hook`. The "Install for me" button merges three matcher entries into `~/.claude/settings.local.json` (atomic write, one-shot backup at `<file>.shippable.bak`). Manual paste:
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [{
-      "command": "<path-to>/shippable-inbox-hook"
+      "matcher": "",
+      "hooks": [{ "type": "command", "command": "<path-to>/shippable-agent-hook" }]
+    }],
+    "PostToolUse": [{
+      "matcher": "",
+      "hooks": [{ "type": "command", "command": "<path-to>/shippable-agent-hook" }]
+    }],
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [{ "type": "command", "command": "<path-to>/shippable-agent-hook" }]
     }]
   }
 }
 ```
 
-The hook script reads `<cwd>/.shippable/inbox.md`, prepends its contents to the user prompt as `<reviewer-feedback>...</reviewer-feedback>`, and deletes the file. We ship the hook script with Shippable and surface a one-click "copy hook recipe" in the panel's onboarding state.
+The script reads the event JSON from stdin, extracts `cwd`, POSTs `{ worktreePath: cwd }` to `http://127.0.0.1:<server-port>/api/agent/pull`, and prints the response body's `payload` field to stdout (which Claude Code grafts on as `additionalContext`). The server-side install command captures the resolved port and writes a `SHIPPABLE_PORT=<port> /abs/.../shippable-agent-hook` form when the server isn't on the default port; the snippet above shows the bare form for the default-port case. On any non-zero exit (curl error, timeout, server down) the hook is a silent no-op — it must never block the agent.
 
-Until the hook is installed, the composer still works but flags `hook not detected — feedback will sit in inbox until next session reads it`. We detect the hook by looking for the recipe in the user's Claude Code settings (best-effort; can be wrong).
+Until the hook is installed (or while it's only partially installed) the panel surfaces a `set up` hint listing the missing events. The composer and Send batch still work regardless; comments accumulate on the queue until the hook drains them.
+
+### Migration note
+
+Users who installed the legacy `shippable-inbox-hook` before slice (e) will have a stale entry in their `~/.claude/settings.local.json` pointing at a script that no longer ships. Claude Code surfaces a missing-file error and moves on (the hook is non-blocking). Re-running "Install for me" rewrites the legacy entry in place.
 
 ## Empty / error states
 
@@ -80,9 +99,10 @@ Until the hook is installed, the composer still works but flags `hook not detect
 - `web/src/types.ts` — adds `AgentContextSlice`, `AgentSessionRef`, `AgentMessage`, `ToolCallSummary`.
 - `web/src/state.ts` — adds `agentContext?: AgentContextSlice` to `ReviewState` + actions `SET_AGENT_CONTEXT`, `SET_AGENT_SESSION`.
 - `web/src/view.ts` — extends `InspectorViewModel` with the rendered slice.
-- `server/src/agent-context.ts` (new) — JSONL parser, `cwd` matcher, commit-boundary slicer.
-- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/inbox` (write), `POST /api/worktrees/sessions` (list candidates for manual pick).
-- `tools/shippable-inbox-hook` (new) — the `UserPromptSubmit` hook script.
+- `server/src/agent-context.ts` — JSONL parser, `cwd` matcher, commit-boundary slicer.
+- `server/src/agent-queue.ts` — in-memory per-worktree queue and delivered history.
+- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`.
+- `tools/shippable-agent-hook` — the `UserPromptSubmit` / `PostToolUse` / `SessionStart` hook script.
 
 ## Out of scope for this feature
 

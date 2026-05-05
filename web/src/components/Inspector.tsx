@@ -20,6 +20,11 @@ import type { HookStatus } from "../agentContextClient";
 import { useEffect, useRef } from "react";
 import type { MouseEvent, RefObject } from "react";
 
+// Stable empty Set for the "no worktree loaded" case — avoids allocating a
+// fresh Set on every render, which would re-trigger the SendToAgent
+// composer's deliveredIds-watch effect for no useful reason.
+const EMPTY_DELIVERED_IDS: Set<string> = new Set();
+
 /**
  * Props for the agent-context section. The whole bundle is optional — when a
  * changeset wasn't loaded from a worktree (URL ingest, paste, file upload)
@@ -34,7 +39,7 @@ export interface AgentContextProps {
   /** Whether the agent hook is wired into all three CC events; partial state
    *  surfaces the missing events for the install hint. */
   hookStatus: HookStatus | null;
-  /** Absolute worktree path; threaded through for inbox-status polling. */
+  /** Absolute worktree path; threaded through for the Delivered (N) fetch. */
   worktreePath: string;
   /** Active changeset commit sha, used by the Send-batch button. */
   commitSha: string;
@@ -42,7 +47,12 @@ export interface AgentContextProps {
   unsent: import("../sendBatch").UnsentEntry[];
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
-  onSendToAgent: (message: string) => Promise<void>;
+  /**
+   * Enqueue a freeform message and return the assigned comment id.
+   * The composer threads that id through the App-level pending-freeform
+   * tracker so the slice-(c) polling loop flips the status to delivered.
+   */
+  onSendToAgent: (message: string) => Promise<string>;
   onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
   onEnqueueComments: (
     selected: import("../sendBatch").UnsentEntry[],
@@ -183,6 +193,7 @@ export function Inspector({
           commitSha={agentContext.commitSha}
           onEnqueueComments={agentContext.onEnqueueComments}
           deliveredIdsTick={agentContext.deliveredIdsTick}
+          deliveredIds={deliveredIds ?? EMPTY_DELIVERED_IDS}
         />
       )}
 
