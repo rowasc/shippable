@@ -31,12 +31,15 @@ import type {
 } from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import {
+  enqueueComments,
   fetchAgentContextForWorktree,
+  fetchDelivered,
   fetchHookStatus,
   installHook,
   sendInboxMessage,
   type HookStatus,
 } from "./agentContextClient";
+import { collectUnsent, type UnsentEntry } from "./sendBatch";
 import { KEYMAP } from "./keymap";
 import { clearSession, loadSession, saveSession } from "./persist";
 import { useApiKey } from "./useApiKey";
@@ -115,6 +118,11 @@ export default function App() {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentRefreshTick, setAgentRefreshTick] = useState(0);
+  // Server-confirmed delivered comment ids for the active worktree. Held
+  // here (rather than inside the Inspector) so the same Set drives both
+  // the SendBatch result panel and the per-thread pip rendering. Re-fetched
+  // on remount; not persisted (it's a server-derived view).
+  const [deliveredIds, setDeliveredIds] = useState<Set<string>>(new Set());
   // Hook status is fetched at App mount with retry+backoff. The server's
   // port briefly disappears during `tsx watch` reload windows, so a single
   // attempt can hit ECONNREFUSED and leave the banner stuck in "unknown".
@@ -246,6 +254,92 @@ export default function App() {
     // on the key alone is what we want.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedFetchKey]);
+
+  // Unsent comments for the active changeset. Recomputed on every
+  // state.replies change (cheap — small data, simple walk). Used by the
+  // Send-batch button + preview sheet.
+  const unsentForActive: UnsentEntry[] = activeWorktreeSource
+    ? collectUnsent(state, cs)
+    : [];
+
+  // Pending sentToAgentIds for the active worktree — anything we've
+  // stamped on a reply but the server hasn't reported delivered yet.
+  // The polling loop below uses this to decide whether to keep ticking.
+  const pendingSentIds: string[] = [];
+  for (const list of Object.values(state.replies)) {
+    for (const r of list) {
+      if (r.sentToAgentId && !deliveredIds.has(r.sentToAgentId)) {
+        pendingSentIds.push(r.sentToAgentId);
+      }
+    }
+  }
+  // Stable string for effect dependency.
+  const pendingKey = pendingSentIds.sort().join("|");
+
+  // Reset deliveredIds when the active worktree changes — server-derived
+  // state shouldn't bleed across worktrees. Uses the "adjust state during
+  // render" pattern (mirrors `lastFetchKey` above) so the lint rule
+  // against setState-in-effect stays clean.
+  const [deliveredForWtPath, setDeliveredForWtPath] = useState<
+    string | null
+  >(null);
+  if (deliveredForWtPath !== wtPath) {
+    setDeliveredForWtPath(wtPath);
+    if (deliveredIds.size > 0) setDeliveredIds(new Set());
+  }
+
+  // Delivered-state polling. Runs whenever there's a queued reply for the
+  // current worktree that hasn't been confirmed delivered yet. Mirrors the
+  // SendToAgent composer's cadence (2s poll, 5min *idle* timeout — the
+  // deadline resets every time a new delivery transitions in, so a slow
+  // review that drips deliveries every few minutes won't get cut off).
+  useEffect(() => {
+    if (!wtPath) return;
+    if (pendingKey === "") return; // nothing to poll for
+    let cancelled = false;
+    let idleSince = Date.now();
+    const POLL_MS = 2000;
+    const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+    const tick = async () => {
+      if (cancelled) return;
+      if (Date.now() - idleSince > IDLE_TIMEOUT_MS) {
+        window.clearInterval(id);
+        return;
+      }
+      try {
+        const list = await fetchDelivered(wtPath);
+        if (cancelled) return;
+        // Use a functional update so concurrent setState calls compose
+        // correctly. Only swap the Set when the membership actually
+        // changes — avoids re-rendering pip-bearing components on every
+        // poll when nothing's new. Also reset the idle timer when the
+        // delivered set grows so trickling deliveries keep us alive.
+        setDeliveredIds((prev) => {
+          let changed = false;
+          const next = new Set(prev);
+          for (const c of list) {
+            if (!next.has(c.id)) {
+              next.add(c.id);
+              changed = true;
+            }
+          }
+          if (changed) idleSince = Date.now();
+          return changed ? next : prev;
+        });
+      } catch {
+        // Server unreachable / restarting — silent retry on next tick.
+        // The pip stays at "queued"; the user can manually refresh later.
+      }
+    };
+    const id = window.setInterval(tick, POLL_MS);
+    void tick(); // kick the first poll immediately
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // pendingKey changes when the set of unconfirmed sent ids changes,
+    // which is the right re-trigger for the polling loop.
+  }, [wtPath, pendingKey]);
   const {
     plan,
     status: planStatus,
@@ -673,6 +767,8 @@ export default function App() {
                     error: agentError,
                     hookStatus,
                     worktreePath: activeWorktreeSource.worktreePath,
+                    commitSha: activeWorktreeSource.commitSha,
+                    unsent: unsentForActive,
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                     onSendToAgent: async (message) => {
@@ -695,9 +791,32 @@ export default function App() {
                         backupPath: r.backupPath,
                       };
                     },
+                    onEnqueueComments: async (selected) => {
+                      const res = await enqueueComments({
+                        worktreePath:
+                          activeWorktreeSource.worktreePath,
+                        commitSha: activeWorktreeSource.commitSha,
+                        comments: selected.map((s) => s.comment),
+                      });
+                      // Pair returned ids with the local replies in the
+                      // exact order we sent them. The server contract
+                      // says ids[i] corresponds to comments[i].
+                      const sentAt = new Date().toISOString();
+                      dispatch({
+                        type: "MARK_REPLIES_SENT",
+                        sentAt,
+                        assignments: selected.map((s, i) => ({
+                          targetKey: s.key,
+                          replyId: s.reply.id,
+                          sentToAgentId: res.ids[i],
+                        })),
+                      });
+                      return res.ids;
+                    },
                   }
                 : undefined
             }
+            deliveredIds={deliveredIds}
           />
         )}
       </div>

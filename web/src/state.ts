@@ -55,6 +55,22 @@ export type Action =
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
   | { type: "DELETE_REPLY"; targetKey: string; replyId: string }
+  | {
+      /**
+       * Stamp `sentToAgentAt`/`sentToAgentId` on a batch of replies after
+       * they've been enqueued via `/api/agent/enqueue`. Each entry pairs a
+       * reply-key with the specific reply id within that thread plus the
+       * server-assigned id from the enqueue response. Replies missing in
+       * state (deleted concurrently) are silently skipped.
+       */
+      type: "MARK_REPLIES_SENT";
+      sentAt: string;
+      assignments: Array<{
+        targetKey: string;
+        replyId: string;
+        sentToAgentId: string;
+      }>;
+    }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
   | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
@@ -155,6 +171,41 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       if (filtered.length === 0) delete next[action.targetKey];
       else next[action.targetKey] = filtered;
       return { ...state, replies: next };
+    }
+    case "MARK_REPLIES_SENT": {
+      // Group assignments by targetKey so each thread is rebuilt at most
+      // once. We only allocate new arrays/objects for threads that change.
+      const byKey = new Map<string, Map<string, string>>();
+      for (const a of action.assignments) {
+        let inner = byKey.get(a.targetKey);
+        if (!inner) {
+          inner = new Map();
+          byKey.set(a.targetKey, inner);
+        }
+        inner.set(a.replyId, a.sentToAgentId);
+      }
+      let mutated = false;
+      const nextReplies: Record<string, Reply[]> = { ...state.replies };
+      for (const [tkey, idMap] of byKey) {
+        const list = state.replies[tkey];
+        if (!list || list.length === 0) continue;
+        let threadChanged = false;
+        const nextList = list.map((r) => {
+          const sentId = idMap.get(r.id);
+          if (sentId === undefined) return r;
+          threadChanged = true;
+          return {
+            ...r,
+            sentToAgentAt: action.sentAt,
+            sentToAgentId: sentId,
+          };
+        });
+        if (threadChanged) {
+          nextReplies[tkey] = nextList;
+          mutated = true;
+        }
+      }
+      return mutated ? { ...state, replies: nextReplies } : state;
     }
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";

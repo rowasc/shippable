@@ -1,5 +1,5 @@
 import "./AgentContextSection.css";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   AgentContextSlice,
   AgentSessionRef,
@@ -7,6 +7,8 @@ import type {
 } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { fetchInboxStatus, type HookStatus } from "../agentContextClient";
+import type { UnsentEntry } from "../sendBatch";
+import { renderPreviewPayload } from "../sendBatch";
 
 interface Props {
   slice: AgentContextSlice | null;
@@ -51,6 +53,20 @@ interface Props {
    * hook was already there) and the path of any backup written.
    */
   onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
+  /**
+   * Reviewer-authored replies that haven't been pushed to the agent queue
+   * yet. Drives the Send-batch button + preview sheet. Empty array hides
+   * the button entirely.
+   */
+  unsent: UnsentEntry[];
+  /** Commit sha for the active changeset; required when sending a batch. */
+  commitSha: string;
+  /**
+   * Enqueue the selected replies. Returns the server-assigned ids in the
+   * same order as the input so the parent can stamp `sentToAgentId` on the
+   * matching local replies.
+   */
+  onEnqueueComments: (selected: UnsentEntry[]) => Promise<string[]>;
 }
 
 export function AgentContextSection({
@@ -67,6 +83,9 @@ export function AgentContextSection({
   onRefresh,
   onSendToAgent,
   onInstallHook,
+  unsent,
+  commitSha,
+  onEnqueueComments,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -138,6 +157,11 @@ export function AgentContextSection({
           missing={hookStatus.missing}
         />
       )}
+      <SendBatch
+        unsent={unsent}
+        commitSha={commitSha}
+        onEnqueue={onEnqueueComments}
+      />
       <SendToAgent
         worktreePath={worktreePath}
         onSend={onSendToAgent}
@@ -145,6 +169,245 @@ export function AgentContextSection({
       />
     </section>
   );
+}
+
+type BatchStatus =
+  | { kind: "idle" }
+  | { kind: "sending" }
+  | { kind: "queued"; sentAt: number; count: number }
+  | { kind: "error"; message: string };
+
+/**
+ * Sends every reviewer-authored reply that hasn't been pushed to the agent
+ * queue yet, with a default-on per-row checkbox so the user can deselect
+ * before confirming. The button hides when `unsent` is empty.
+ *
+ * The "What the agent will see" toggle re-uses the same sort + sanitization
+ * rules as the server formatter (see sendBatch.ts) so the preview matches
+ * what the hook eventually emits.
+ */
+function SendBatch({
+  unsent,
+  commitSha,
+  onEnqueue,
+}: {
+  unsent: UnsentEntry[];
+  commitSha: string;
+  onEnqueue: (selected: UnsentEntry[]) => Promise<string[]>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [showPayload, setShowPayload] = useState(false);
+  // Selection state, keyed by reply-id (which is unique even across threads
+  // because reply ids are minted with `r-${Date.now()}`).
+  const [excluded, setExcluded] = useState<Set<string>>(new Set());
+  const [status, setStatus] = useState<BatchStatus>({ kind: "idle" });
+
+  // Reset selection when the unsent list changes (user added/removed a
+  // reply, or sent some). Uses the "adjust state during render" pattern
+  // — mirrors the rest of this codebase's transitions, lint-friendly.
+  const unsentIds = unsent.map((e) => e.reply.id).join("|");
+  const [lastUnsentIds, setLastUnsentIds] = useState(unsentIds);
+  if (lastUnsentIds !== unsentIds) {
+    setLastUnsentIds(unsentIds);
+    if (excluded.size > 0) setExcluded(new Set());
+  }
+
+  const selected = useMemo(
+    () => unsent.filter((e) => !excluded.has(e.reply.id)),
+    [unsent, excluded],
+  );
+
+  const previewPayload = useMemo(
+    () => renderPreviewPayload(commitSha, selected.map((e) => e.comment)),
+    [commitSha, selected],
+  );
+
+  if (
+    unsent.length === 0 &&
+    status.kind !== "queued" &&
+    status.kind !== "error"
+  ) {
+    // Empty-state polish: hide the affordance entirely. The user has
+    // nothing to send; surfacing "Send 0" would be noise. We deliberately
+    // keep the panel mounted while the result banner ("queued" / "error")
+    // still has something to say, even if `unsent` was concurrently
+    // cleared by another path — otherwise the user would lose the
+    // confirmation/error message with no way to recover it.
+    return null;
+  }
+
+  function toggle(id: string) {
+    setExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function confirm() {
+    if (selected.length === 0) return;
+    setStatus({ kind: "sending" });
+    try {
+      await onEnqueue(selected);
+      setStatus({
+        kind: "queued",
+        sentAt: Date.now(),
+        count: selected.length,
+      });
+      setOpen(false);
+    } catch (e) {
+      setStatus({
+        kind: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  // Group entries by file for the preview list. Freeform (no file) goes
+  // last under a synthetic header; line-numbered entries above it.
+  const grouped = groupByFile(unsent);
+
+  return (
+    <div className="ac__batch">
+      {unsent.length > 0 && (
+        <>
+          <button
+            className="ac__batch-btn"
+            onClick={() => {
+              setOpen((v) => !v);
+              // Reopening after an error path: reset to idle so the button
+              // text isn't stuck on "error".
+              if (status.kind === "error") setStatus({ kind: "idle" });
+            }}
+            disabled={status.kind === "sending"}
+          >
+            {status.kind === "sending"
+              ? "Sending…"
+              : `Send ${unsent.length} comment${unsent.length === 1 ? "" : "s"}`}
+          </button>
+          <div className="ac__batch-hint">
+            Queue is in-memory — server restart drops unpulled comments.
+          </div>
+        </>
+      )}
+      {status.kind === "queued" && (
+        <div className="ac__batch-result">
+          {status.count} comment{status.count === 1 ? "" : "s"} queued —
+          delivers on the agent's next tool call or session start.
+        </div>
+      )}
+      {status.kind === "error" && (
+        <div className="ac__batch-result ac__batch-result--err">
+          Send failed: {status.message}. Replies stay unsent — try again.
+        </div>
+      )}
+      {open && unsent.length > 0 && (
+        <div className="ac__batch-sheet">
+          <div className="ac__batch-sheet-h">
+            Preview ({selected.length}/{unsent.length} selected)
+            <button
+              className="ac__batch-toggle-payload"
+              onClick={() => setShowPayload((v) => !v)}
+            >
+              {showPayload ? "show rows" : "what the agent will see"}
+            </button>
+          </div>
+          {showPayload ? (
+            <pre className="ac__batch-payload">
+              {previewPayload || "(no comments selected)"}
+            </pre>
+          ) : (
+            <ul className="ac__batch-list">
+              {grouped.map((g) => (
+                <li key={g.label} className="ac__batch-group">
+                  <div className="ac__batch-group-h">{g.label}</div>
+                  <ul className="ac__batch-rows">
+                    {g.entries.map((e) => (
+                      <li key={e.reply.id} className="ac__batch-row">
+                        <label className="ac__batch-row-label">
+                          <input
+                            type="checkbox"
+                            checked={!excluded.has(e.reply.id)}
+                            onChange={() => toggle(e.reply.id)}
+                          />
+                          <span className="ac__batch-row-loc">
+                            {locLabel(e)}
+                          </span>
+                          <span className="ac__batch-row-body">
+                            {clip(e.reply.body, 80)}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="ac__batch-foot">
+            <span className="ac__batch-foot-note">
+              Server orders by file/line; freeform last. Rows are not
+              reorderable.
+            </span>
+            <button
+              className="ac__batch-cancel"
+              onClick={() => setOpen(false)}
+              disabled={status.kind === "sending"}
+            >
+              cancel
+            </button>
+            <button
+              className="ac__batch-confirm"
+              onClick={() => void confirm()}
+              disabled={
+                status.kind === "sending" || selected.length === 0
+              }
+            >
+              {status.kind === "sending"
+                ? "Sending…"
+                : `Send ${selected.length}`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function groupByFile(
+  entries: UnsentEntry[],
+): Array<{ label: string; entries: UnsentEntry[] }> {
+  const fileGroups = new Map<string, UnsentEntry[]>();
+  const freeform: UnsentEntry[] = [];
+  for (const e of entries) {
+    if (e.comment.file === undefined) {
+      freeform.push(e);
+      continue;
+    }
+    const arr = fileGroups.get(e.comment.file);
+    if (arr) arr.push(e);
+    else fileGroups.set(e.comment.file, [e]);
+  }
+  const out: Array<{ label: string; entries: UnsentEntry[] }> = [];
+  for (const path of [...fileGroups.keys()].sort()) {
+    out.push({ label: path, entries: fileGroups.get(path)! });
+  }
+  if (freeform.length > 0) {
+    out.push({ label: "(freeform)", entries: freeform });
+  }
+  return out;
+}
+
+function locLabel(e: UnsentEntry): string {
+  if (e.comment.file === undefined) return "freeform";
+  if (!e.comment.lines) return "?";
+  return `L${e.comment.lines}`;
+}
+
+function clip(s: string, max: number): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
 type SendStatus =

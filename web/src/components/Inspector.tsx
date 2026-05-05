@@ -36,10 +36,17 @@ export interface AgentContextProps {
   hookStatus: HookStatus | null;
   /** Absolute worktree path; threaded through for inbox-status polling. */
   worktreePath: string;
+  /** Active changeset commit sha, used by the Send-batch button. */
+  commitSha: string;
+  /** Reviewer-authored unsent replies for the active changeset. */
+  unsent: import("../sendBatch").UnsentEntry[];
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
   onSendToAgent: (message: string) => Promise<void>;
   onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
+  onEnqueueComments: (
+    selected: import("../sendBatch").UnsentEntry[],
+  ) => Promise<string[]>;
 }
 
 /**
@@ -93,6 +100,13 @@ interface Props {
    * changeset" — the section is hidden entirely. See AgentContextProps.
    */
   agentContext?: AgentContextProps;
+  /**
+   * Server-confirmed delivered comment ids. Drives the per-thread pip from
+   * `◌ queued` → `✓ delivered` once the hook has consumed a comment.
+   * Empty/undefined means nothing's delivered (yet) — replies still render
+   * `◌ queued` as long as their `sentToAgentAt` is set.
+   */
+  deliveredIds?: Set<string>;
 }
 
 export function Inspector({
@@ -109,6 +123,7 @@ export function Inspector({
   onDeleteReply,
   onVerifyAiNote,
   agentContext,
+  deliveredIds,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -157,6 +172,9 @@ export function Inspector({
           onRefresh={agentContext.onRefresh}
           onSendToAgent={agentContext.onSendToAgent}
           onInstallHook={agentContext.onInstallHook}
+          unsent={agentContext.unsent}
+          commitSha={agentContext.commitSha}
+          onEnqueueComments={agentContext.onEnqueueComments}
         />
       )}
 
@@ -212,6 +230,7 @@ export function Inspector({
                 onVerify={() => {
                   if (row.runRecipe) onVerifyAiNote(row.runRecipe);
                 }}
+                deliveredIds={deliveredIds}
               />
             ))}
           </ul>
@@ -235,6 +254,7 @@ export function Inspector({
           onDeleteReply={(replyId) =>
             onDeleteReply(vm.aiSummaryReplyKey!, replyId)
           }
+          deliveredIds={deliveredIds}
         />
       )}
 
@@ -251,6 +271,7 @@ export function Inspector({
           onDeleteReply={(replyId) =>
             onDeleteReply(vm.teammate!.replyKey, replyId)
           }
+          deliveredIds={deliveredIds}
         />
       )}
 
@@ -265,6 +286,7 @@ export function Inspector({
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         onDeleteReply={onDeleteReply}
+        deliveredIds={deliveredIds}
       />
     </aside>
   );
@@ -281,6 +303,7 @@ function UserCommentsSection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  deliveredIds,
 }: {
   vm: InspectorViewModel;
   symbols: SymbolIndex;
@@ -292,6 +315,7 @@ function UserCommentsSection({
   onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
   onDeleteReply: (key: string, replyId: string) => void;
+  deliveredIds?: Set<string>;
 }) {
   return (
     <section className="inspector__sec">
@@ -336,6 +360,7 @@ function UserCommentsSection({
               onDeleteReply={(replyId) =>
                 onDeleteReply(vm.draftStubRow!.threadKey, replyId)
               }
+              deliveredIds={deliveredIds}
             />
           )}
           {vm.userCommentRows.map((row) => (
@@ -363,6 +388,7 @@ function UserCommentsSection({
               onDeleteReply={(replyId) =>
                 onDeleteReply(row.threadKey, replyId)
               }
+              deliveredIds={deliveredIds}
             />
           ))}
         </ul>
@@ -382,6 +408,7 @@ function UserThreadCard({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  deliveredIds,
 }: {
   row: UserCommentRowItem;
   symbols: SymbolIndex;
@@ -393,6 +420,7 @@ function UserThreadCard({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  deliveredIds?: Set<string>;
 }) {
   return (
     <li
@@ -433,6 +461,7 @@ function UserThreadCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredIds={deliveredIds}
       />
     </li>
   );
@@ -452,6 +481,7 @@ function NoteCard({
   onSubmitReply,
   onDeleteReply,
   onVerify,
+  deliveredIds,
 }: {
   row: AiNoteRowItem;
   symbols: SymbolIndex;
@@ -471,6 +501,7 @@ function NoteCard({
    * when row.runRecipe is defined; the button is hidden otherwise.
    */
   onVerify: () => void;
+  deliveredIds?: Set<string>;
 }) {
   return (
     <li
@@ -531,6 +562,7 @@ function NoteCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredIds={deliveredIds}
       />
     </li>
   );
@@ -549,6 +581,7 @@ function HunkSummarySection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  deliveredIds,
 }: {
   summary: string;
   replies: Reply[];
@@ -563,6 +596,7 @@ function HunkSummarySection({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  deliveredIds?: Set<string>;
 }) {
   return (
     <section className="inspector__sec">
@@ -586,6 +620,7 @@ function HunkSummarySection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredIds={deliveredIds}
         />
       </div>
     </section>
@@ -602,6 +637,7 @@ function TeammateSection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  deliveredIds,
 }: {
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
@@ -612,6 +648,7 @@ function TeammateSection({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  deliveredIds?: Set<string>;
 }) {
   return (
     <section className="inspector__sec">
@@ -642,6 +679,7 @@ function TeammateSection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredIds={deliveredIds}
         />
       </div>
     </section>

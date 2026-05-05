@@ -112,6 +112,53 @@ export interface Reply {
   author: string;
   body: string;
   createdAt: string;
+  /**
+   * ISO timestamp when this reply was enqueued via `/api/agent/enqueue`.
+   * Null/undefined means the reply hasn't been sent to the agent yet —
+   * the Send-batch button surfaces it as unsent and the thread renders no
+   * pip. Set together with `sentToAgentId` when the enqueue response
+   * lands; survives reload (lives in `ReviewState.replies`).
+   */
+  sentToAgentAt?: string | null;
+  /**
+   * Server-assigned id from the enqueue response. Lets the delivered-state
+   * polling loop match `fetchDelivered()` rows back to the originating
+   * reply so a thread's pip can flip from `◌ queued` → `✓ delivered`.
+   */
+  sentToAgentId?: string | null;
+}
+
+/**
+ * Wire shape for `/api/agent/enqueue`. Mirrors `EnqueueInput` server-side
+ * with `commitSha` lifted into the request body so a single batch carries
+ * one sha rather than per-comment. Used by `enqueueComments` in
+ * `agentContextClient.ts`.
+ */
+export interface DraftComment {
+  kind:
+    | "line"
+    | "block"
+    | "reply-to-ai-note"
+    | "reply-to-teammate"
+    | "reply-to-hunk-summary"
+    | "freeform";
+  /** Repo-relative path. Omit for `freeform`. */
+  file?: string;
+  /** Single line ("118") or range ("72-79"). Omit for `freeform`. */
+  lines?: string;
+  body: string;
+}
+
+/**
+ * Wire shape for the `/api/agent/delivered` response, mirroring the
+ * server-side `DeliveredComment`. Polled while any reply is in queued
+ * state to flip pips to delivered.
+ */
+export interface DeliveredComment extends DraftComment {
+  id: string;
+  commitSha: string;
+  enqueuedAt: string;
+  deliveredAt: string;
 }
 
 /**
@@ -297,4 +344,66 @@ export function userCommentKey(hunkId: string, lineIdx: number): string {
  */
 export function blockCommentKey(hunkId: string, lo: number, hi: number): string {
   return `block:${hunkId}:${lo}-${hi}`;
+}
+
+/**
+ * Decoded reply-key. The hunkId is verbatim from the encoder, so it can
+ * still contain `/`, `#`, `:` colons inside the path component, etc.
+ *   - "note"     → ai-note line reply
+ *   - "user"     → fresh user comment on a line
+ *   - "block"    → fresh user comment on a range
+ *   - "hunkSummary" → reply on the hunk-level AI summary
+ *   - "teammate" → reply on a teammate's review
+ */
+export type ReplyKeyDecoded =
+  | { kind: "note"; hunkId: string; lineIdx: number }
+  | { kind: "user"; hunkId: string; lineIdx: number }
+  | { kind: "block"; hunkId: string; lo: number; hi: number }
+  | { kind: "hunkSummary"; hunkId: string }
+  | { kind: "teammate"; hunkId: string };
+
+/**
+ * Inverse of the encoder helpers above. Returns null on malformed keys.
+ *
+ * Care for `block:<hunkId>:<lo>-<hi>` and `note:/user:<hunkId>:<lineIdx>`:
+ * `hunkId` is allowed to contain colons (file paths typically don't, but
+ * the schema doesn't forbid them), so we split on the *last* `:` after the
+ * prefix to peel off the trailing component.
+ */
+export function decodeReplyKey(key: string): ReplyKeyDecoded | null {
+  const firstColon = key.indexOf(":");
+  if (firstColon < 0) return null;
+  const prefix = key.slice(0, firstColon);
+  const rest = key.slice(firstColon + 1);
+  switch (prefix) {
+    case "hunkSummary":
+      return rest ? { kind: "hunkSummary", hunkId: rest } : null;
+    case "teammate":
+      return rest ? { kind: "teammate", hunkId: rest } : null;
+    case "note":
+    case "user": {
+      const last = rest.lastIndexOf(":");
+      if (last <= 0) return null;
+      const hunkId = rest.slice(0, last);
+      const lineIdx = parseInt(rest.slice(last + 1), 10);
+      if (!Number.isFinite(lineIdx)) return null;
+      return prefix === "note"
+        ? { kind: "note", hunkId, lineIdx }
+        : { kind: "user", hunkId, lineIdx };
+    }
+    case "block": {
+      const last = rest.lastIndexOf(":");
+      if (last <= 0) return null;
+      const hunkId = rest.slice(0, last);
+      const range = rest.slice(last + 1);
+      const dash = range.indexOf("-");
+      if (dash <= 0) return null;
+      const lo = parseInt(range.slice(0, dash), 10);
+      const hi = parseInt(range.slice(dash + 1), 10);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+      return { kind: "block", hunkId, lo, hi };
+    }
+    default:
+      return null;
+  }
 }

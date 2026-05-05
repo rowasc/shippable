@@ -13,6 +13,25 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.thread__pip {
+  font-size: 10px;
+  letter-spacing: normal;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  padding: 0 4px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+}
+.thread__pip--queued {
+  color: var(--fg-dim);
+}
+.thread__pip--delivered {
+  color: var(--green, #6c6);
+  border-color: var(--green, #6c6);
 }
 .thread__list {
   list-style: none;

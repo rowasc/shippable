@@ -2,7 +2,12 @@
 // and docs/concepts/agent-context.md for the design.
 
 import { apiUrl } from "./apiUrl";
-import type { AgentContextSlice, AgentSessionRef } from "./types";
+import type {
+  AgentContextSlice,
+  AgentSessionRef,
+  DeliveredComment,
+  DraftComment,
+} from "./types";
 
 export async function listSessionsForWorktree(
   worktreePath: string,
@@ -114,6 +119,58 @@ export async function fetchAgentContext(args: {
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
   }
   return json.slice;
+}
+
+/**
+ * Enqueue a batch of reviewer comments for an agent running in `worktreePath`.
+ * The server stores them in-memory until the next hook invocation pulls them.
+ * Returns the assigned ids in the same order as the input — callers pair
+ * them with the local Reply records so a later `fetchDelivered` response
+ * can flip the matching pip from `◌ queued` → `✓ delivered`.
+ */
+export async function enqueueComments(args: {
+  worktreePath: string;
+  commitSha: string;
+  comments: DraftComment[];
+}): Promise<{ enqueued: number; ids: string[] }> {
+  const res = await fetch(await apiUrl("/api/agent/enqueue"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      worktreePath: args.worktreePath,
+      commitSha: args.commitSha,
+      comments: args.comments,
+    }),
+  });
+  const json = (await res.json()) as
+    | { enqueued: number; ids: string[] }
+    | { error: string };
+  if (!res.ok || "error" in json) {
+    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
+  }
+  return json;
+}
+
+/**
+ * Read the per-worktree delivered comment list. The server returns newest
+ * first and caps history at 200 entries (older deliveries fall off). The
+ * UI uses the returned ids to set a `Set<string>` for pip rendering;
+ * delivered metadata isn't persisted — re-fetch on remount.
+ */
+export async function fetchDelivered(
+  worktreePath: string,
+): Promise<DeliveredComment[]> {
+  const url = await apiUrl(
+    `/api/agent/delivered?path=${encodeURIComponent(worktreePath)}`,
+  );
+  const res = await fetch(url);
+  const json = (await res.json()) as
+    | { delivered: DeliveredComment[] }
+    | { error: string };
+  if (!res.ok || "error" in json) {
+    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
+  }
+  return json.delivered;
 }
 
 /**

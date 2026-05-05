@@ -85,43 +85,43 @@ Replaces `tools/shippable-inbox-hook`. The script must stay thin enough to clone
 
 The user-facing change. Ships behind the queue from slice (a) — slice (b) is what lets it actually reach the agent in CC.
 
-- [ ] **Extend `Reply` in `web/src/types.ts`.**
+- [x] **Extend `Reply` in `web/src/types.ts`.**
   - Add `sentToAgentAt: string | null` (ISO timestamp; null = unsent).
   - Add to all reply-key categories: `lineNoteReplyKey`, `hunkSummaryReplyKey`, `teammateReplyKey`, `userCommentKey`, `blockCommentKey`. Whatever serialises through `ReviewState.replies` keeps the field across reload.
   - Migration on read of older localStorage: missing `sentToAgentAt` → `null`. Single line; the persistence layer in `web/src/persist.ts` should already tolerate field additions but verify.
 
-- [ ] **Add `enqueueComments` and `fetchDelivered` to `web/src/agentContextClient.ts`.**
+- [x] **Add `enqueueComments` and `fetchDelivered` to `web/src/agentContextClient.ts`.**
   - `enqueueComments({ worktreePath, commitSha, comments }): Promise<{ enqueued: number; ids: string[] }>`.
   - `fetchDelivered(worktreePath): Promise<DeliveredComment[]>`.
   - Type definitions live in `web/src/types.ts` next to `Reply`.
 
-- [ ] **Send-batch button in `AgentContextSection.tsx`.**
+- [x] **Send-batch button in `AgentContextSection.tsx`.**
   - Visible whenever there's at least one comment with `sentToAgentAt: null` for the current changeset's worktree.
   - Label: `Send N comment{N!==1?"s":""}` with the count.
   - Disabled when N === 0 or while the preview sheet is open.
 
-- [ ] **Preview sheet.**
+- [x] **Preview sheet.**
   - Lists every unsent comment grouped by file (freeform at the end).
   - Default-on checkbox per row; one-line preview = the comment body trimmed/clipped to ~80 chars.
   - "What the agent will see" toggle exposes the rendered `<reviewer-feedback>` payload as a `<pre>` block — same string the hook will emit.
   - Confirm button enqueues only the checked rows. On success, sets `sentToAgentAt = new Date().toISOString()` for those replies in `ReviewState.replies` and closes the sheet.
   - **Caveat:** the user can deselect rows but cannot reorder — sort order is fixed by the server (file/line, freeform last). Document this in the sheet's footer text.
 
-- [ ] **Pips on threads.**
+- [x] **Pips on threads.**
   - On every thread (line note, block, reply-to-ai-note, reply-to-teammate, reply-to-hunk-summary), display a pip when at least one reply has `sentToAgentAt != null`.
   - Pip states: `◌ queued` (sent but not yet delivered) → `✓ delivered` (server confirmed via `/api/agent/delivered`).
   - Title attribute carries the timestamp.
   - Lives wherever each thread renders today — likely `ReplyThread.tsx` and the AI-note inline UI. Find the render seams; don't fork a separate component.
 
-- [ ] **Delivered-state polling.**
+- [x] **Delivered-state polling.**
   - When any thread in the active changeset has a `queued`-state reply, poll `GET /api/agent/delivered?path=<worktreePath>` every 2s (mirror the existing `fetchInboxStatus` cadence). Stop after 5 min idle (mirror existing timeout).
   - On match (delivered comment id → enqueued reply id), flip the pip and stop polling that one.
   - **Caveat:** the comment id needs to round-trip. `enqueueComments` returns server-assigned ids; the UI stores them on the Reply alongside `sentToAgentAt`. Add `sentToAgentId: string | null` to `Reply` in the same migration as `sentToAgentAt`.
 
-- [ ] **"Server in-memory" hint.**
+- [x] **"Server in-memory" hint.**
   - Small dim text below the Send button: `Queue is in-memory — server restart drops unpulled comments.` Once. Don't repeat per-thread.
 
-- [ ] **Latency-model copy.**
+- [x] **Latency-model copy.**
   - The Send button's status line after a send reads: `queued — delivers on the agent's next tool call or session start.` Honest about not pushing to idle.
 
 **Acceptance:** write 5 comments across 3 files, hit Send, deselect one in the preview, confirm. Four pips flip to `◌ queued`. Run any tool in a CC session in that worktree; pips flip to `✓ delivered`. Reload the page; pips persist (they're in `ReviewState`).

@@ -22,6 +22,12 @@ interface Props {
   onDeleteReply: (replyId: string) => void;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
+  /**
+   * Set of `sentToAgentId`s the server has already handed to a hook. Used
+   * to flip the per-thread pip from `◌ queued` to `✓ delivered`. Empty
+   * set is fine — every queued reply just stays in `◌ queued`.
+   */
+  deliveredIds?: Set<string>;
 }
 
 export function ReplyThread({
@@ -35,10 +41,16 @@ export function ReplyThread({
   onDeleteReply,
   symbols,
   onJump,
+  deliveredIds,
 }: Props) {
   // A non-empty draft on a closed composer means the user closed without
   // sending. Surface a hint so they know it's still waiting.
   const hasUnsentDraft = !isDrafting && draftBody.trim().length > 0;
+
+  // Pip state derived from the union of replies and the latest delivered
+  // set. Renders the freshest non-null pip — preferring `delivered` over
+  // `queued` when at least one reply on the thread has crossed over.
+  const pip = computePip(replies, deliveredIds);
 
   if (replies.length === 0 && !isDrafting) {
     return (
@@ -54,6 +66,14 @@ export function ReplyThread({
       {replies.length > 0 && (
         <div className="thread__label">
           replies ({replies.length})
+          {pip && (
+            <span
+              className={`thread__pip thread__pip--${pip.kind}`}
+              title={pip.title}
+            >
+              {pip.kind === "delivered" ? "✓ delivered" : "◌ queued"}
+            </span>
+          )}
         </div>
       )}
       <ul className="thread__list">
@@ -155,6 +175,53 @@ function Composer({
       </div>
     </div>
   );
+}
+
+/**
+ * Pick the freshest pip for a thread:
+ *   - delivered: at least one reply's `sentToAgentId` is in `deliveredIds`.
+ *   - queued: at least one reply has `sentToAgentAt` set but isn't yet in
+ *     `deliveredIds`.
+ *   - null: no replies have been pushed to the queue.
+ *
+ * Prefers `delivered` over `queued` so a thread with two replies — one
+ * delivered, one still queued — surfaces the more useful "made it" signal.
+ * Title carries the timestamps for the hover-affordance.
+ */
+function computePip(
+  replies: Reply[],
+  deliveredIds: Set<string> | undefined,
+): { kind: "queued" | "delivered"; title: string } | null {
+  let queuedAt: string | null = null;
+  let delivered = false;
+  for (const r of replies) {
+    if (!r.sentToAgentAt) continue;
+    if (queuedAt === null) queuedAt = r.sentToAgentAt;
+    if (deliveredIds && r.sentToAgentId && deliveredIds.has(r.sentToAgentId)) {
+      delivered = true;
+    }
+  }
+  if (queuedAt === null) return null;
+  const queuedTime = formatTime(queuedAt);
+  if (delivered) {
+    return {
+      kind: "delivered",
+      title: `Queued at ${queuedTime} — delivered`,
+    };
+  }
+  return {
+    kind: "queued",
+    title: `Queued at ${queuedTime} — waiting on the agent's next tool call`,
+  };
+}
+
+function formatTime(iso: string): string {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return iso;
+  const h = String(t.getHours()).padStart(2, "0");
+  const m = String(t.getMinutes()).padStart(2, "0");
+  const s = String(t.getSeconds()).padStart(2, "0");
+  return `${h}:${m}:${s}`;
 }
 
 function timeAgo(iso: string): string {
