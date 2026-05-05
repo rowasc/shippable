@@ -4,9 +4,14 @@ import type {
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
+  DeliveredComment,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
-import { fetchInboxStatus, type HookStatus } from "../agentContextClient";
+import {
+  fetchDelivered,
+  fetchInboxStatus,
+  type HookStatus,
+} from "../agentContextClient";
 import type { UnsentEntry } from "../sendBatch";
 import { renderPreviewPayload } from "../sendBatch";
 
@@ -67,6 +72,13 @@ interface Props {
    * matching local replies.
    */
   onEnqueueComments: (selected: UnsentEntry[]) => Promise<string[]>;
+  /**
+   * Refresh signal for the Delivered (N) block. Pass the size of the
+   * App-level `deliveredIds` set: the delivered block re-fetches whenever
+   * this number changes (i.e. the polling loop saw a new transition) so
+   * we don't run a duplicate timer here just to populate read-only history.
+   */
+  deliveredIdsTick: number;
 }
 
 export function AgentContextSection({
@@ -86,6 +98,7 @@ export function AgentContextSection({
   unsent,
   commitSha,
   onEnqueueComments,
+  deliveredIdsTick,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -150,6 +163,11 @@ export function AgentContextSection({
         </>
       )}
 
+      <DeliveredBlock
+        worktreePath={worktreePath}
+        deliveredIdsTick={deliveredIdsTick}
+      />
+
       {hookStatus && !hookStatus.installed && (
         <HookHint
           onInstall={onInstallHook}
@@ -169,6 +187,111 @@ export function AgentContextSection({
       />
     </section>
   );
+}
+
+/**
+ * Read-only "did the agent see this?" history. Renders a collapsed
+ * `<details>` block listing comments the server reports as delivered for
+ * the active worktree.
+ *
+ * Self-contained state: we fetch once on mount and again whenever
+ * `deliveredIdsTick` changes — that prop is wired to the size of the
+ * App-level `deliveredIds` set, which only grows when the slice (c)
+ * polling loop confirms a new delivery. Re-using that signal means we
+ * don't run a second polling timer just to populate this history.
+ *
+ * Hidden entirely when no worktree is loaded or when the delivered list
+ * is empty (per § 6 empty-state polish in push-review-comments-tasks.md).
+ * The server caps history at 200 (slice (a)); we surface that with a
+ * "(showing last 200)" hint so the count is honest.
+ */
+function DeliveredBlock({
+  worktreePath,
+  deliveredIdsTick,
+}: {
+  worktreePath: string | null;
+  deliveredIdsTick: number;
+}) {
+  const [delivered, setDelivered] = useState<DeliveredComment[]>([]);
+
+  useEffect(() => {
+    if (!worktreePath) return;
+    let cancelled = false;
+    fetchDelivered(worktreePath)
+      .then((d) => {
+        if (cancelled) return;
+        // Server contract: newest first. Sort defensively in case a future
+        // change reorders the response — the block is purely read-only,
+        // so trusting the wire shape would be a silent regression risk.
+        const sorted = [...d].sort((a, b) =>
+          a.deliveredAt < b.deliveredAt ? 1 : a.deliveredAt > b.deliveredAt ? -1 : 0,
+        );
+        setDelivered(sorted);
+      })
+      .catch(() => {
+        // Server unreachable — leave the previous state in place. The block
+        // self-heals on the next tick (mount, worktree change, or a new
+        // delivered transition signaled by the App-level polling loop).
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [worktreePath, deliveredIdsTick]);
+
+  if (!worktreePath) return null;
+  // Empty-state polish: hide entirely at N=0. Don't render "Delivered (0)".
+  if (delivered.length === 0) return null;
+
+  // Server caps history at 200. When we hit that cap the count alone is
+  // misleading ("there could be more"), so surface the limit inline.
+  const capHit = delivered.length >= 200;
+
+  return (
+    <details className="ac__details ac__delivered">
+      <summary className="ac__details-summary">
+        Delivered ({delivered.length})
+        {capHit && (
+          <span className="ac__delivered-cap"> (showing last 200)</span>
+        )}
+      </summary>
+      <ul className="ac__delivered-list">
+        {delivered.map((c) => (
+          <li key={c.id} className="ac__delivered-row">
+            <div className="ac__delivered-meta">
+              {deliveredLocLabel(c)} · {c.kind} · {humanRelative(c.deliveredAt)}
+            </div>
+            <div className="ac__delivered-body" title={c.body}>
+              {clip(c.body, 120)}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function deliveredLocLabel(c: DeliveredComment): string {
+  if (c.file === undefined) return "freeform";
+  if (!c.lines) return c.file;
+  return `${c.file}:${c.lines}`;
+}
+
+/**
+ * Relative-time helper for the Delivered list. The existing `humanAgo` in
+ * this file collapses anything under a minute to "just now" — too coarse
+ * for a delivery feed where the most recent row is usually only seconds
+ * old. We use second granularity here and scale up matching `humanAgo`'s
+ * thresholds above that.
+ */
+function humanRelative(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "?";
+  const diff = Date.now() - ms;
+  if (diff < 1000) return "just now";
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
 }
 
 type BatchStatus =

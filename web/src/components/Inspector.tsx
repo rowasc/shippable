@@ -47,6 +47,13 @@ export interface AgentContextProps {
   onEnqueueComments: (
     selected: import("../sendBatch").UnsentEntry[],
   ) => Promise<string[]>;
+  /**
+   * Refresh signal for the Delivered (N) history block: a number that
+   * increments whenever the App-level polling loop confirms a new delivery.
+   * The block re-fetches on mount and on every change to this value — a
+   * single source of truth means no duplicate polling timer.
+   */
+  deliveredIdsTick: number;
 }
 
 /**
@@ -175,6 +182,7 @@ export function Inspector({
           unsent={agentContext.unsent}
           commitSha={agentContext.commitSha}
           onEnqueueComments={agentContext.onEnqueueComments}
+          deliveredIdsTick={agentContext.deliveredIdsTick}
         />
       )}
 

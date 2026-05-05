@@ -132,7 +132,7 @@ The user-facing change. Ships behind the queue from slice (a) — slice (b) is w
 
 Small read-only block answering "did the agent see this?"
 
-- [ ] **`Delivered (N)` collapsed `<details>` block in `AgentContextSection.tsx`.**
+- [x] **`Delivered (N)` collapsed `<details>` block in `AgentContextSection.tsx`.**
   - Sits below the existing transcript tail / above the composer-and-send block.
   - Expands to a list of delivered comments newest first: `<file>:<lines> · <kind> · <relative timestamp>` and the body clipped.
   - Reads from `fetchDelivered(worktreePath)`; refreshed alongside the polling loop from slice (c).

@@ -813,6 +813,11 @@ export default function App() {
                       });
                       return res.ids;
                     },
+                    // Bump the Delivered (N) block's refresh signal each
+                    // time the App-level poller observes a new delivery.
+                    // Set size is monotonic per worktree, so it doubles as
+                    // a "new transition" tick without an extra counter.
+                    deliveredIdsTick: deliveredIds.size,
                   }
                 : undefined
             }

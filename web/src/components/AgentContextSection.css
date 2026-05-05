@@ -202,6 +202,40 @@
   cursor: pointer;
   border-radius: 2px;
 }
+.ac__delivered {
+  margin-top: 10px;
+}
+.ac__delivered-cap {
+  color: var(--fg-mute);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  margin-left: 4px;
+}
+.ac__delivered-list {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ac__delivered-row {
+  border-left: 2px solid var(--border);
+  padding-left: 8px;
+}
+.ac__delivered-meta {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ac__delivered-body {
+  color: var(--fg);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ac__batch {
   margin-top: 12px;
   padding-top: 10px;
