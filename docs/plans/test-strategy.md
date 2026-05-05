@@ -2,7 +2,31 @@
 
 **Status:** Draft. Open questions at the bottom.
 
-ROADMAP 0.1.0 wants tests + CI. The product itself ships a *"Does this test do anything?"* mode — we should hold our suite to that bar.
+## What this is
+
+A proposal for how Shippable gets a test suite worth running, the refactors needed to make the code testable, and the order to do it in. `docs/ROADMAP.md` (0.1.0) calls for "tests + CI"; this document is the plan to deliver that.
+
+## TL;DR
+
+- Four test layers (unit / integration / E2E / manual). One bar: every test must catch a bug class the type checker can't.
+- Land the suite in four phases. **Phase A is load-bearing**: server integration tests, version `persist.ts`, prune dead smokes.
+- Three refactors are prerequisites, not nice-to-haves: `server/src/index.ts` (extract handlers + inject deps), `persist.ts` (versioned state + migration table), `promptRun`/`promptStore` (pure reducer reachable without a mounted component).
+- CI = GitHub Actions, lands in Phase C. Coverage collected, never gated.
+
+## How to read this
+
+- **Want the plan only?** TL;DR above, then [Sequencing](#sequencing).
+- **Reviewing the bar?** [Principles](#principles) and [Anti-patterns](#anti-patterns-will-reject-in-review).
+- **Wondering why we're refactoring, not just adding tests?** [Redesigns we expect](#redesigns-we-expect).
+- **What gets tested first?** [Risk-first plan](#risk-first-plan).
+
+## Glossary
+
+- **Smoke** — `web/test-smoke.mjs`, our existing CDP-driven end-to-end script. ~13 specs, ~5 currently disabled with a `blockedReason`.
+- **Tier 0–4** — priority bands inside the [Risk-first plan](#risk-first-plan), not test layers. Tier 0 = clear rot; higher tiers = lower-leverage surfaces.
+- **Risk-first** — order tests by the bug class they catch, not by file layout or coverage %.
+- ***"Does this test do anything?"* mode** — a Shippable product feature that flags tests which still pass after the implementation under test is reverted. Our own suite must clear that bar.
+- **Modules referenced below** — `parseDiff` (diff parser), `state` (review-state reducer), `persist.ts` (localStorage round-trip for review state), `promptRun`/`promptStore` (prompt-execution state machine), `symbols`/`plan`/`view`/`guide` (review-plan internals), and the UI components `ReviewPlanView` / `DiffView` / `PromptRunsPanel` / `LoadModal` / `Inspector`. Canonical map: `docs/architecture.md`.
 
 ## Principles
 
