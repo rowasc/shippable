@@ -83,10 +83,12 @@ export function ReviewWorkspace({
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [mouseTip, setMouseTip] = useState<string | null>(null);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
 
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const mouseTipTimeoutRef = useRef<number | null>(null);
 
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
@@ -102,6 +104,9 @@ export function ReviewWorkspace({
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
   const suggestion = maybeSuggest(cs, state);
+  const lineNoteAcked = state.ackedNotes.has(
+    noteKey(state.cursor.hunkId, state.cursor.lineIdx),
+  );
 
   const palettePredicates: Record<string, boolean> = {
     hasSuggestion: !!suggestion,
@@ -267,6 +272,17 @@ export function ReviewWorkspace({
     }
   }
 
+  function flashMouseTip(chord: string, label: string) {
+    if (mouseTipTimeoutRef.current !== null) {
+      window.clearTimeout(mouseTipTimeoutRef.current);
+    }
+    setMouseTip(`tip: next time press ${chord} for ${label}`);
+    mouseTipTimeoutRef.current = window.setTimeout(() => {
+      setMouseTip(null);
+      mouseTipTimeoutRef.current = null;
+    }, 2600);
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (showHelp && e.key !== "?" && e.key !== "Escape") return;
@@ -326,6 +342,15 @@ export function ReviewWorkspace({
     dispatch,
   ]);
 
+  useEffect(
+    () => () => {
+      if (mouseTipTimeoutRef.current !== null) {
+        window.clearTimeout(mouseTipTimeoutRef.current);
+      }
+    },
+    [],
+  );
+
   const readCoverage = changesetCoverage(cs, state.readLines);
   const reviewedFiles = reviewedFilesCount(cs, state.reviewedFiles);
   const fileIdx = cs.files.findIndex((f) => f.id === file.id);
@@ -378,7 +403,10 @@ export function ReviewWorkspace({
           isOpen={showPlan}
           plan={plan}
           reviewedFiles={state.reviewedFiles}
-          onToggle={() => setShowPlan((v) => !v)}
+          onToggle={() => {
+            flashMouseTip("p", "the review plan");
+            setShowPlan((v) => !v);
+          }}
         />
         <span className="topbar__sep">│</span>
         <span className="topbar__branch">
@@ -388,18 +416,52 @@ export function ReviewWorkspace({
         <span className="topbar__author">@{cs.author}</span>
         <ThemePicker value={themeId} onChange={setThemeId} />
         <button
-          className="topbar__btn"
-          onClick={() => setFreeRunnerOpen(true)}
-          title="open a free code runner — type or paste a snippet (shift+R)"
+          type="button"
+          className={`topbar__btn ${showInspector ? "topbar__btn--on" : ""}`}
+          onClick={() => {
+            flashMouseTip("i", "the inspector");
+            setShowInspector((v) => !v);
+          }}
+          title="toggle the inspector (i)"
         >
-          ▷ run
+          <span className="topbar__btn-label">◫ inspector</span>
+          <kbd>i</kbd>
         </button>
         <button
+          type="button"
           className="topbar__btn"
-          onClick={() => setShowLoad(true)}
+          onClick={() => {
+            flashMouseTip("⇧R", "the free code runner");
+            setFreeRunnerOpen(true);
+          }}
+          title="open a free code runner — type or paste a snippet (shift+R)"
+        >
+          <span className="topbar__btn-label">▷ run</span>
+          <kbd>⇧R</kbd>
+        </button>
+        <button
+          type="button"
+          className="topbar__btn"
+          onClick={() => {
+            flashMouseTip("⇧L", "load changeset");
+            setShowLoad(true);
+          }}
           title="load a changeset from URL, file, or paste (shift+L)"
         >
-          + load
+          <span className="topbar__btn-label">+ load</span>
+          <kbd>⇧L</kbd>
+        </button>
+        <button
+          type="button"
+          className="topbar__btn"
+          onClick={() => {
+            flashMouseTip("?", "help");
+            setShowHelp(true);
+          }}
+          title="open shortcut help (?)"
+        >
+          <span className="topbar__btn-label">help</span>
+          <kbd>?</kbd>
         </button>
         <button
           className="topbar__btn topbar__btn--danger"
@@ -603,7 +665,20 @@ export function ReviewWorkspace({
           }}
         />
       )}
-      {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}
+      {showHelp && (
+        <HelpOverlay
+          context={buildHelpContext({
+            hasSelection:
+              !!state.selection && state.selection.hunkId === state.cursor.hunkId,
+            lineHasAiNote: !!line?.aiNote,
+            lineNoteAcked,
+            currentFileReadFraction: fileCoverage(file, state.readLines),
+            currentFileReviewed: state.reviewedFiles.has(file.id),
+            showInspector,
+          })}
+          onClose={() => setShowHelp(false)}
+        />
+      )}
       {showLoad && (
         <LoadModal
           onClose={() => setShowLoad(false)}
@@ -617,6 +692,7 @@ export function ReviewWorkspace({
         />
       )}
       <StatusBar
+        transientHint={mouseTip}
         viewModel={buildStatusBarViewModel({
           totalFiles: cs.files.length,
           fileIdx,
@@ -628,9 +704,7 @@ export function ReviewWorkspace({
           reviewedFiles,
           selection: selectionForStatusBar(hunk, state.selection),
           lineHasAiNote: !!line?.aiNote,
-          lineNoteAcked: state.ackedNotes.has(
-            noteKey(state.cursor.hunkId, state.cursor.lineIdx),
-          ),
+          lineNoteAcked,
           currentFileReadFraction: fileCoverage(file, state.readLines),
           currentFileReviewed: state.reviewedFiles.has(file.id),
         })}
@@ -710,6 +784,74 @@ function selectionForStatusBar(
   };
 }
 
+function buildHelpContext({
+  hasSelection,
+  lineHasAiNote,
+  lineNoteAcked,
+  currentFileReadFraction,
+  currentFileReviewed,
+  showInspector,
+}: {
+  hasSelection: boolean;
+  lineHasAiNote: boolean;
+  lineNoteAcked: boolean;
+  currentFileReadFraction: number;
+  currentFileReviewed: boolean;
+  showInspector: boolean;
+}) {
+  if (hasSelection) {
+    return {
+      title: "right now: selection active",
+      rows: [
+        { chord: "c", label: "start a comment on this selection" },
+        { chord: "e", label: "run the selected code in the runner" },
+        { chord: "/", label: "run a prompt on the selected code" },
+        { chord: "Esc", label: "collapse the selection" },
+      ],
+      hint: "Selection commands are local to the diff. App-wide commands live under ⌘K / ⌃K.",
+    };
+  }
+
+  if (lineHasAiNote && !lineNoteAcked) {
+    return {
+      title: "right now: AI note on this line",
+      rows: [
+        { chord: "a", label: "ack or un-ack the note" },
+        { chord: "r", label: "reply to the note" },
+        { chord: "c", label: "start your own comment on this line" },
+      ],
+      hint: "This section changes with context. The table below is still the full key sheet.",
+    };
+  }
+
+  if (currentFileReadFraction >= 1 && !currentFileReviewed) {
+    return {
+      title: "right now: file is ready to sign off",
+      rows: [
+        { chord: "⇧m", label: "mark this file reviewed" },
+        { chord: "]/[", label: "move to the next or previous file" },
+        { chord: "p", label: "reopen the plan before moving on" },
+      ],
+      hint: "Signing off is separate from cursor visits. Read marks are automatic; review verdicts are not.",
+    };
+  }
+
+  return {
+    title: "right now: app-level actions",
+    rows: [
+      { chord: "⌘k/⌃k", label: "open the command palette for app actions" },
+      { chord: "p", label: "toggle the review plan" },
+      {
+        chord: "i",
+        label: showInspector ? "hide the inspector" : "reopen the inspector",
+      },
+      { chord: "⇧l", label: "load a changeset" },
+      { chord: "⇧r", label: "open the free code runner" },
+    ],
+    hint: "Use ? for the full shortcut sheet. Use ⌘K / ⌃K when you want app-level commands instead of diff navigation.",
+  };
+}
+
 /**
  * Persistent plan summary in the topbar. Shows "plan · X/N" where X is
  * the number of suggested entry-point files the reviewer has signed off
@@ -739,8 +881,12 @@ function PlanChip({
       } ${allDone ? "topbar__btn--done" : ""}`}
       onClick={onToggle}
       title="open the review plan (p)"
+      type="button"
     >
-      ◇ plan{total > 0 ? ` · ${done}/${total}` : ""}
+      <span className="topbar__btn-label">
+        ◇ plan{total > 0 ? ` · ${done}/${total}` : ""}
+      </span>
+      <kbd>p</kbd>
     </button>
   );
 }

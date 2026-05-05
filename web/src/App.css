@@ -54,6 +54,9 @@ body,
   color: var(--blue);
 }
 .topbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--fg-dim);
@@ -72,6 +75,17 @@ body,
   cursor: default;
   opacity: 0.85;
 }
+.topbar__btn--on {
+  background: var(--cursor-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.topbar__btn-label {
+  white-space: nowrap;
+}
+.topbar__btn kbd {
+  color: var(--fg-mute);
+}
 .topbar__btn--danger:hover:not(:disabled) {
   color: var(--red);
   border-color: var(--red);
@@ -84,10 +98,6 @@ body,
   color: var(--accent);
   border-color: var(--border-active);
   font-variant-numeric: tabular-nums;
-}
-.topbar__btn--plan.topbar__btn--on {
-  background: var(--cursor-bg);
-  border-color: var(--accent);
 }
 .topbar__btn--plan.topbar__btn--done {
   color: var(--green);

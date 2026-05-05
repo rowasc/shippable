@@ -3,9 +3,10 @@ import type { StatusBarViewModel } from "../view";
 
 interface Props {
   viewModel: StatusBarViewModel;
+  transientHint?: string | null;
 }
 
-export function StatusBar({ viewModel }: Props) {
+export function StatusBar({ viewModel, transientHint }: Props) {
   return (
     <footer className="statusbar">
       <span className="statusbar__cell">{viewModel.lineDisplay}</span>
@@ -24,7 +25,11 @@ export function StatusBar({ viewModel }: Props) {
         {viewModel.filesDisplay}
       </span>
       <span className="statusbar__spacer" />
-      {viewModel.selectionHint ? (
+      {transientHint ? (
+        <span className="statusbar__hint statusbar__hint--tip">
+          {transientHint}
+        </span>
+      ) : viewModel.selectionHint ? (
         <span className="statusbar__hint statusbar__hint--selection">
           {viewModel.selectionHint}
         </span>

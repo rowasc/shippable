@@ -1,6 +1,17 @@
 import "./HelpOverlay.css";
 import { KEYMAP, type KeyGroup } from "../keymap";
 
+interface HelpContextRow {
+  chord: string;
+  label: string;
+}
+
+interface HelpContextSection {
+  title: string;
+  rows: HelpContextRow[];
+  hint?: string;
+}
+
 /** Render a key name as a human-friendly label for <kbd>. */
 function keyLabel(key: string): string {
   switch (key) {
@@ -19,12 +30,20 @@ function keyLabel(key: string): string {
  * "uppercase letters imply shift" branch put `M` next to `⇧Tab` in the
  * same table, which read as two different conventions.
  */
-function chordLabel(key: string, shift?: boolean): string {
-  if (shift) {
-    const base = key.length === 1 ? key.toLowerCase() : keyLabel(key);
-    return `⇧${base}`;
-  }
-  return keyLabel(key);
+function chordLabel(
+  key: string,
+  {
+    shift,
+    meta,
+    ctrl,
+  }: { shift?: boolean; meta?: boolean; ctrl?: boolean } = {},
+): string {
+  const parts: string[] = [];
+  if (meta) parts.push("⌘");
+  if (ctrl) parts.push("⌃");
+  if (shift) parts.push("⇧");
+  const base = shift && key.length === 1 ? key.toLowerCase() : keyLabel(key);
+  return parts.join("") + base;
 }
 
 /** Collect unique display rows per action within a group. */
@@ -35,7 +54,13 @@ function groupRows(group: KeyGroup): { chord: string; label: string }[] {
     // Group by (action, label) so aliased keys merge into one row.
     const rowKey = `${entry.action}|${entry.label}`;
     if (!seen.has(rowKey)) seen.set(rowKey, []);
-    seen.get(rowKey)!.push(chordLabel(entry.key, entry.shift));
+    seen.get(rowKey)!.push(
+      chordLabel(entry.key, {
+        shift: entry.shift,
+        meta: entry.meta,
+        ctrl: entry.ctrl,
+      }),
+    );
   }
   return Array.from(seen.entries()).map(([rowKey, chords]) => ({
     chord: chords.join("/"),
@@ -45,7 +70,22 @@ function groupRows(group: KeyGroup): { chord: string; label: string }[] {
 
 const MAIN_GROUPS: KeyGroup[] = ["navigation", "review", "guide", "ui"];
 
-export function HelpOverlay({ onClose }: { onClose: () => void }) {
+function renderChord(chord: string) {
+  return chord.split("/").map((part, i) => (
+    <span key={part}>
+      {i > 0 && "/"}
+      <kbd>{part}</kbd>
+    </span>
+  ));
+}
+
+export function HelpOverlay({
+  onClose,
+  context,
+}: {
+  onClose: () => void;
+  context?: HelpContextSection;
+}) {
   const mainRows = MAIN_GROUPS.flatMap((g) => groupRows(g));
   const testingRows = groupRows("testing");
 
@@ -53,18 +93,28 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
     <div className="help" onClick={onClose}>
       <div className="help__box" onClick={(e) => e.stopPropagation()}>
         <div className="help__title">keybindings</div>
+        {context && context.rows.length > 0 && (
+          <>
+            <div className="help__title help__title--sub">{context.title}</div>
+            <table className="help__table">
+              <tbody>
+                {context.rows.map(({ chord, label }) => (
+                  <tr key={chord + label}>
+                    <td>{renderChord(chord)}</td>
+                    <td>{label}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {context.hint && <div className="help__hint">{context.hint}</div>}
+            <div className="help__title help__title--sub">all shortcuts</div>
+          </>
+        )}
         <table className="help__table">
           <tbody>
             {mainRows.map(({ chord, label }) => (
               <tr key={chord + label}>
-                <td>
-                  {chord.split("/").map((part, i) => (
-                    <span key={part}>
-                      {i > 0 && "/"}
-                      <kbd>{part}</kbd>
-                    </span>
-                  ))}
-                </td>
+                <td>{renderChord(chord)}</td>
                 <td>{label}</td>
               </tr>
             ))}
@@ -75,14 +125,7 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
           <tbody>
             {testingRows.map(({ chord, label }) => (
               <tr key={chord + label}>
-                <td>
-                  {chord.split("/").map((part, i) => (
-                    <span key={part}>
-                      {i > 0 && "/"}
-                      <kbd>{part}</kbd>
-                    </span>
-                  ))}
-                </td>
+                <td>{renderChord(chord)}</td>
                 <td>{label}</td>
               </tr>
             ))}
