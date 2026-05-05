@@ -964,6 +964,12 @@ function FrameStage({
           readCoverage,
           reviewedFiles,
           selection: selectionForBar,
+          // Demo surface stays on the default hint — context-aware variants
+          // are exercised in the live app.
+          lineHasAiNote: false,
+          lineNoteAcked: false,
+          currentFileReadFraction: 0,
+          currentFileReviewed: false,
         })}
       />
 

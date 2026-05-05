@@ -29,9 +29,7 @@ export function StatusBar({ viewModel }: Props) {
           {viewModel.selectionHint}
         </span>
       ) : (
-        <span className="statusbar__hint">
-          j/k line · Tab file · a ack · c comment · ⇧M sign off · i inspector · p plan · ? help
-        </span>
+        <span className="statusbar__hint">{viewModel.defaultHint}</span>
       )}
     </footer>
   );

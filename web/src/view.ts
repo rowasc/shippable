@@ -418,6 +418,14 @@ export interface StatusBarViewModel {
    * temporarily so the affordance is paired with the selection state.
    */
   selectionHint: string | null;
+  /**
+   * The trailing-hint text shown when no selection is active. The builder
+   * picks the message from context — an unacked AI note on the cursor line
+   * surfaces ack/reply; a fully-read file surfaces sign-off; otherwise the
+   * standard menu. Keeps the most useful key one glance away instead of
+   * burying it in the `?` overlay.
+   */
+  defaultHint: string;
 }
 
 export interface BuildStatusBarViewModelArgs {
@@ -443,7 +451,18 @@ export interface BuildStatusBarViewModelArgs {
    * the block-comment affordance from Help.
    */
   selection: { lo: number; hi: number; loLineNo: number; hiLineNo: number } | null;
+  /** True when the cursor line carries an AI note. */
+  lineHasAiNote: boolean;
+  /** True when that AI note has already been acked. */
+  lineNoteAcked: boolean;
+  /** 0–1 read fraction for the current file. 1 when fully visited. */
+  currentFileReadFraction: number;
+  /** True when the reviewer has signed off on the current file. */
+  currentFileReviewed: boolean;
 }
+
+const DEFAULT_HINT =
+  "j/k line · ]/[ file · / prompt · c comment · ⇧M sign off · i inspector · p plan · ? help";
 
 export function buildStatusBarViewModel({
   totalFiles,
@@ -455,7 +474,23 @@ export function buildStatusBarViewModel({
   readCoverage,
   reviewedFiles,
   selection,
+  lineHasAiNote,
+  lineNoteAcked,
+  currentFileReadFraction,
+  currentFileReviewed,
 }: BuildStatusBarViewModelArgs): StatusBarViewModel {
+  // Priority: an unacked note on the current line is the most actionable
+  // signal — surface r/a first. Otherwise, when the file is fully read but
+  // not signed off, nudge ⇧M. Fall back to the standard menu.
+  let defaultHint: string;
+  if (lineHasAiNote && !lineNoteAcked) {
+    defaultHint = "a ack · r reply · c comment · ]/[ file · ? help";
+  } else if (currentFileReadFraction >= 1 && !currentFileReviewed) {
+    defaultHint = "⇧M sign off this file · ]/[ next file · / prompt · ? help";
+  } else {
+    defaultHint = DEFAULT_HINT;
+  }
+
   return {
     lineDisplay: `line ${lineIdx + 1}/${totalLines}`,
     hunkDisplay: `hunk ${hunkIdx + 1}/${totalHunks}`,
@@ -465,6 +500,7 @@ export function buildStatusBarViewModel({
     selectionHint: selection
       ? `selection L${selection.loLineNo}–L${selection.hiLineNo} · c to comment`
       : null,
+    defaultHint,
   };
 }
 

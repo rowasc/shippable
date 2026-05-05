@@ -4,10 +4,6 @@
  * ActionId drives dispatch/setState in App.tsx.
  * ContextPredicate names a runtime condition that App.tsx evaluates; an entry
  * only fires when its predicate (if any) is truthy.
- *
- * Tab is special: its shift variant (previous file) is represented by a
- * separate entry with shift:true so the table stays flat and HelpOverlay can
- * display both variants naturally.
  */
 
 export type ActionId =
@@ -72,8 +68,10 @@ export const KEYMAP: KeyEntry[] = [
   { key: "ArrowUp",   label: "previous line",        group: "navigation", action: "MOVE_LINE_UP" },
   { key: "J",         label: "next hunk",            group: "navigation", action: "MOVE_HUNK_DOWN" },
   { key: "K",         label: "previous hunk",        group: "navigation", action: "MOVE_HUNK_UP" },
-  { key: "Tab", shift: false, label: "next file",     group: "navigation", action: "MOVE_FILE_NEXT" },
-  { key: "Tab", shift: true,  label: "previous file", group: "navigation", action: "MOVE_FILE_PREV" },
+  // ]/[ for files keeps Tab as the browser-native focus key. Sample-changeset
+  // cycling moves to the shifted variants (}/{) — testing-only, less common.
+  { key: "]",         label: "next file",            group: "navigation", action: "MOVE_FILE_NEXT" },
+  { key: "[",         label: "previous file",        group: "navigation", action: "MOVE_FILE_PREV" },
   { key: "Escape", when: "hasSelection", label: "collapse selection", group: "navigation", action: "COLLAPSE_SELECTION" },
 
   // ── review ──────────────────────────────────────────────────────────────────
@@ -102,6 +100,6 @@ export const KEYMAP: KeyEntry[] = [
   { key: "Escape", when: "hasPicker", label: "close prompt picker", group: "ui", action: "CLOSE_PROMPT_PICKER" },
 
   // ── testing ─────────────────────────────────────────────────────────────────
-  { key: "[", label: "previous sample changeset", group: "testing", action: "PREV_CHANGESET" },
-  { key: "]", label: "next sample changeset",     group: "testing", action: "NEXT_CHANGESET" },
+  { key: "{", label: "previous sample changeset", group: "testing", action: "PREV_CHANGESET" },
+  { key: "}", label: "next sample changeset",     group: "testing", action: "NEXT_CHANGESET" },
 ];

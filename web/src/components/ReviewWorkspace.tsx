@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch } from "react";
-import { changesetCoverage, reviewedFilesCount } from "../state";
+import { changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
 import type { Action } from "../state";
 import { maybeSuggest } from "../guide";
 import { usePlan } from "../usePlan";
@@ -28,7 +28,7 @@ import type {
   ReviewState,
   Reply,
 } from "../types";
-import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "../types";
+import { blockCommentKey, lineNoteReplyKey, noteKey, userCommentKey } from "../types";
 import { KEYMAP } from "../keymap";
 import { clearSession } from "../persist";
 import { useApiKey } from "../useApiKey";
@@ -594,6 +594,12 @@ export function ReviewWorkspace({
           readCoverage,
           reviewedFiles,
           selection: selectionForStatusBar(hunk, state.selection),
+          lineHasAiNote: !!line?.aiNote,
+          lineNoteAcked: state.ackedNotes.has(
+            noteKey(state.cursor.hunkId, state.cursor.lineIdx),
+          ),
+          currentFileReadFraction: fileCoverage(file, state.readLines),
+          currentFileReviewed: state.reviewedFiles.has(file.id),
         })}
       />
     </div>
