@@ -6,7 +6,7 @@ import type {
   Cursor,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
-import { fetchInboxStatus } from "../agentContextClient";
+import { fetchInboxStatus, type HookStatus } from "../agentContextClient";
 
 interface Props {
   slice: AgentContextSlice | null;
@@ -26,7 +26,7 @@ interface Props {
    */
   symbols: SymbolIndex;
   /** Hook-installation status; null while loading or unsupported. */
-  hookStatus: { installed: boolean } | null;
+  hookStatus: HookStatus | null;
   /** Click on a symbol link → jump to its definition in the diff. */
   onJump: (c: Cursor) => void;
   /** Switch the active session — the parent re-fetches with the new pin. */
@@ -132,7 +132,11 @@ export function AgentContextSection({
       )}
 
       {hookStatus && !hookStatus.installed && (
-        <HookHint onInstall={onInstallHook} />
+        <HookHint
+          onInstall={onInstallHook}
+          partial={hookStatus.partial}
+          missing={hookStatus.missing}
+        />
       )}
       <SendToAgent
         worktreePath={worktreePath}
@@ -542,8 +546,12 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 
 function HookHint({
   onInstall,
+  partial,
+  missing,
 }: {
   onInstall: () => Promise<{ didModify: boolean; backupPath: string | null }>;
+  partial: boolean;
+  missing: string[];
 }) {
   const [open, setOpen] = useState(false);
   const [installState, setInstallState] = useState<
@@ -581,16 +589,22 @@ function HookHint({
     }
   }
 
+  // Two messages:
+  //  - Partial install: legacy / half-installed hook. Surface what's missing
+  //    so the user can see the install isn't a no-op.
+  //  - Not installed: nothing detected. Same affordance as before.
+  const hintText = partial
+    ? `Agent hook only partially installed — missing ${missing.join(", ")}.`
+    : "Agent hook not detected — feedback won't reach the agent until you install it.";
+  const installLabel = partial ? "Install missing" : "Install for me";
+
   return (
     <div className="ac__hook">
       <div className="ac__hook-line">
         <span className="ac__hook-icon" aria-hidden>
           ⚠
         </span>
-        <span className="ac__hook-text">
-          Inbox hook not detected — feedback will sit in the inbox until your
-          next Claude Code session reads it.
-        </span>
+        <span className="ac__hook-text">{hintText}</span>
         <button
           className="ac__hook-toggle"
           onClick={() => setOpen((v) => !v)}
@@ -605,20 +619,25 @@ function HookHint({
               className="ac__hook-install"
               onClick={() => void install()}
               disabled={installState.kind === "installing"}
-              title="merge the hook entry into ~/.claude/settings.json"
+              title="merge the three hook entries into ~/.claude/settings.local.json"
             >
-              {installState.kind === "installing" ? "Installing…" : "Install for me"}
+              {installState.kind === "installing"
+                ? "Installing…"
+                : installLabel}
             </button>
             <button className="ac__hook-copy" onClick={() => void copy()}>
               {copied ? "Copied" : "Copy snippet"}
             </button>
             <span className="ac__hook-or">or paste manually:</span>
           </div>
+          <p className="ac__hook-snippet-path">
+            Add the JSON below to <code>~/.claude/settings.local.json</code>:
+          </p>
           <pre className="ac__hook-snippet">{HOOK_SNIPPET}</pre>
           {installState.kind === "done" && (
             <div className="ac__hook-result">
               {installState.didModify
-                ? `Done. ~/.claude/settings.json updated${
+                ? `Done. ~/.claude/settings.local.json updated${
                     installState.backupPath
                       ? ` (backup at ${installState.backupPath}).`
                       : "."
@@ -637,8 +656,20 @@ function HookHint({
   );
 }
 
-const HOOK_SNIPPET = `// add to ~/.claude/settings.json
-{
+// Pure-JSON snippet so users can paste-and-parse without stripping a `//`
+// comment first (the path hint lives in JSX above the <pre> instead).
+//
+// This shape matches what `installHook` writes for the *default* server
+// port (3001): a bare absolute path, no env prefix. Users running the
+// server on a non-default PORT should use the "Install for me" button —
+// the server-side install captures the resolved port and writes the
+// matching `SHIPPABLE_PORT=<port> /abs/.../shippable-agent-hook` command.
+// We deliberately don't fetch the resolved port to render this snippet:
+// the Install button is the supported path for non-default-port users,
+// and adding a fetch just to re-render this preview isn't worth the
+// complexity. Keep this snippet in sync with the default-port shape in
+// server/src/hook-status.ts.
+const HOOK_SNIPPET = `{
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -646,7 +677,29 @@ const HOOK_SNIPPET = `// add to ~/.claude/settings.json
         "hooks": [
           {
             "type": "command",
-            "command": "<absolute path>/tools/shippable-inbox-hook"
+            "command": "<absolute path>/tools/shippable-agent-hook"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<absolute path>/tools/shippable-agent-hook"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<absolute path>/tools/shippable-agent-hook"
           }
         ]
       }

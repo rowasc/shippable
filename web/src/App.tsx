@@ -35,6 +35,7 @@ import {
   fetchHookStatus,
   installHook,
   sendInboxMessage,
+  type HookStatus,
 } from "./agentContextClient";
 import { KEYMAP } from "./keymap";
 import { clearSession, loadSession, saveSession } from "./persist";
@@ -118,9 +119,7 @@ export default function App() {
   // port briefly disappears during `tsx watch` reload windows, so a single
   // attempt can hit ECONNREFUSED and leave the banner stuck in "unknown".
   // After a few retries we give up silently — composer still works.
-  const [hookStatus, setHookStatus] = useState<{ installed: boolean } | null>(
-    null,
-  );
+  const [hookStatus, setHookStatus] = useState<HookStatus | null>(null);
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
@@ -685,7 +684,12 @@ export default function App() {
                     onInstallHook: async () => {
                       const r = await installHook();
                       // Refresh banner state without waiting on a reload.
-                      setHookStatus({ installed: true });
+                      // After install all three required events are present.
+                      setHookStatus({
+                        installed: true,
+                        partial: false,
+                        missing: [],
+                      });
                       return {
                         didModify: r.didModify,
                         backupPath: r.backupPath,

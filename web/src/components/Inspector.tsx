@@ -16,6 +16,7 @@ import type {
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
 import { AgentContextSection } from "./AgentContextSection";
+import type { HookStatus } from "../agentContextClient";
 import { useEffect, useRef } from "react";
 import type { MouseEvent, RefObject } from "react";
 
@@ -30,8 +31,9 @@ export interface AgentContextProps {
   selectedSessionFilePath: string | null;
   loading: boolean;
   error: string | null;
-  /** Whether the UserPromptSubmit hook is detected in user settings. */
-  hookStatus: { installed: boolean } | null;
+  /** Whether the agent hook is wired into all three CC events; partial state
+   *  surfaces the missing events for the install hint. */
+  hookStatus: HookStatus | null;
   /** Absolute worktree path; threaded through for inbox-status polling. */
   worktreePath: string;
   onPickSession: (sessionFilePath: string) => void;

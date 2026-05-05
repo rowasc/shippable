@@ -58,22 +58,22 @@ The HTTP endpoint is the main contract; everything else is glue over it. Keep th
 
 Replaces `tools/shippable-inbox-hook`. The script must stay thin enough to clone for other harnesses later.
 
-- [ ] **Write `tools/shippable-agent-hook`.**
+- [x] **Write `tools/shippable-agent-hook`.**
   - Same shape as the existing script: read JSON from stdin, extract `cwd`, POST `{ worktreePath: cwd }` to `http://127.0.0.1:<server-port>/api/agent/pull`, print response body's `payload` to stdout.
   - The server port: today the existing script reads no env or config — it just deletes a file at a known path. For HTTP we need the port. Options: hard-coded `4179` (current dev port — check `server/src/index.ts`), `SHIPPABLE_PORT` env var with the hard-coded fallback. Pick the env-var-with-fallback shape so the install logic can write the port in if it ever varies.
   - Use `curl -fsS --max-time 2` (curl is on every macOS install; we already require Python). On non-zero exit code or timeout, exit 0 — the hook must never block the agent.
   - **Caveat:** stdout from a `PostToolUse` hook is *not* automatically additionalContext on every CC version. Verify against the version we target. If `PostToolUse` stdout doesn't inject context cleanly, fall back to the documented JSON output shape (`{"hookSpecificOutput": {"additionalContext": "..."}}`) — see Claude Code hook docs. **This needs to be confirmed before wiring (a) is shipped.**
 
-- [ ] **Extend `server/src/hook-status.ts`.**
+- [x] **Extend `server/src/hook-status.ts`.**
   - Look for the hook script (basename match) across three event arrays: `UserPromptSubmit`, `PostToolUse`, `SessionStart`. Both legacy basename `shippable-inbox-hook` and new `shippable-agent-hook` count, so an existing install still detects.
   - Return shape grows: `{ installed: boolean; partial: boolean; missing: ("UserPromptSubmit"|"PostToolUse"|"SessionStart")[] }`. `installed: true` only when all three are present.
 
-- [ ] **Extend `installHook()` in `server/src/hook-status.ts`.**
+- [x] **Extend `installHook()` in `server/src/hook-status.ts`.**
   - Idempotently merges three matcher entries into `~/.claude/settings.local.json` `hooks.{UserPromptSubmit,PostToolUse,SessionStart}`. Keep the same atomic-write + first-modification-only backup discipline.
   - Resolve to `tools/shippable-agent-hook` (rename — the old basename stops being shipped).
   - **Caveat:** users with the old hook installed will end up with both `shippable-inbox-hook` (in `UserPromptSubmit`) and `shippable-agent-hook` (in all three) until they manually remove the legacy entry. Either (a) detect and rewrite the legacy entry in-place, or (b) ship the rename in a separate doc/migration note. (a) is friendlier.
 
-- [ ] **Update `HookHint` in `AgentContextSection.tsx`.**
+- [x] **Update `HookHint` in `AgentContextSection.tsx`.**
   - "Inbox hook not detected" → split into "not installed" and "partially installed (missing: PostToolUse, SessionStart)".
   - The static snippet shown for manual paste also grows to three events.
 

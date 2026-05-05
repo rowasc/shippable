@@ -21,11 +21,15 @@ export async function listSessionsForWorktree(
   return json.sessions;
 }
 
-export async function fetchHookStatus(): Promise<{ installed: boolean }> {
+export interface HookStatus {
+  installed: boolean;
+  partial: boolean;
+  missing: string[];
+}
+
+export async function fetchHookStatus(): Promise<HookStatus> {
   const res = await fetch(await apiUrl("/api/worktrees/hook-status"));
-  const json = (await res.json()) as
-    | { installed: boolean }
-    | { error: string };
+  const json = (await res.json()) as HookStatus | { error: string };
   if (!res.ok || "error" in json) {
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
   }

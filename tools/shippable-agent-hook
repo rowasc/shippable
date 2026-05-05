@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# Claude Code agent hook for Shippable.
+#
+# Single bundled script for three Claude Code hook events:
+#   - UserPromptSubmit
+#   - PostToolUse
+#   - SessionStart
+#
+# Wiring (~/.claude/settings.local.json):
+#
+#   {
+#     "hooks": {
+#       "UserPromptSubmit": [{ "matcher": "", "hooks": [{ "type": "command", "command": "<abs path>/shippable-agent-hook" }] }],
+#       "PostToolUse":      [{ "matcher": "", "hooks": [{ "type": "command", "command": "<abs path>/shippable-agent-hook" }] }],
+#       "SessionStart":     [{ "matcher": "", "hooks": [{ "type": "command", "command": "<abs path>/shippable-agent-hook" }] }]
+#     }
+#   }
+#
+# Behavior: read the CC event JSON from stdin, extract `cwd` and
+# `hook_event_name`, POST `{ worktreePath: <cwd> }` to the local Shippable
+# server's /api/agent/pull, and print the response's `payload` so it lands
+# as additionalContext in the agent's next model call.
+#
+# Output shape (decision): emit JSON `{ "hookSpecificOutput": {
+# "hookEventName": "<event>", "additionalContext": "<payload>" } }`.
+# Per https://code.claude.com/docs/en/hooks, plain stdout is treated as
+# additionalContext for SessionStart and UserPromptSubmit, but for
+# PostToolUse stdout goes to the debug log and is NOT seen by the model —
+# JSON is required there. We always emit JSON so the same script handles
+# all three events identically; this is also forward-compatible if CC ever
+# tightens stdout-as-context for the other two events.
+#
+# The hook MUST never block the agent. Any failure (curl non-zero, server
+# unreachable, malformed JSON, missing python3) exits 0 silently. We do
+# NOT use `set -e` for the network-touching block; failures swallow.
+#
+# PostToolUse fires per tool call — a 50-tool turn fires this 50 times.
+# Keep the script tight: no disk reads, no `git` invocations, just stdin
+# parse → curl → stdout.
+
+set -uo pipefail
+
+PORT="${SHIPPABLE_PORT:-3001}"
+
+# Read the entire stdin event once. Use python3 for everything JSON-shaped:
+# extract `cwd` and `hook_event_name`, then build the request body and the
+# response wrapper. Python is on every macOS install; we don't need jq.
+INPUT="$(cat 2>/dev/null || true)"
+if [ -z "$INPUT" ]; then
+  exit 0
+fi
+
+# Extract cwd + event name. Empty strings on any failure (silent).
+PARSED="$(printf '%s' "$INPUT" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    cwd = d.get('cwd', '') or ''
+    ev = d.get('hook_event_name', '') or ''
+    # Tab-separate so we can split safely; tabs don't appear in event names
+    # and almost never in absolute paths.
+    sys.stdout.write(cwd + '\t' + ev)
+except Exception:
+    pass
+" 2>/dev/null || true)"
+
+CWD="${PARSED%%$'\t'*}"
+EVENT="${PARSED#*$'\t'}"
+
+if [ -z "$CWD" ]; then
+  exit 0
+fi
+if [ -z "$EVENT" ]; then
+  # Default to PostToolUse (the strictest output requirement). Better to
+  # emit JSON than to risk silently dropping the payload.
+  EVENT="PostToolUse"
+fi
+
+# Build the JSON request body via python json.dumps so embedded quotes /
+# backslashes in CWD can't break out of the JSON literal.
+REQ_BODY="$(printf '%s' "$CWD" | python3 -c "
+import json, sys
+try:
+    cwd = sys.stdin.read()
+    sys.stdout.write(json.dumps({'worktreePath': cwd}))
+except Exception:
+    pass
+" 2>/dev/null || true)"
+
+if [ -z "$REQ_BODY" ]; then
+  exit 0
+fi
+
+# POST to the queue. --max-time 2 caps the worst case at 2s; the endpoint
+# is in-memory and should answer in single-digit ms. -fsS makes curl exit
+# non-zero on HTTP errors (4xx/5xx) and stay quiet otherwise.
+RESPONSE="$(printf '%s' "$REQ_BODY" | curl -fsS --max-time 2 \
+  -H 'Content-Type: application/json' \
+  -X POST \
+  --data-binary @- \
+  "http://127.0.0.1:${PORT}/api/agent/pull" 2>/dev/null || true)"
+
+if [ -z "$RESPONSE" ]; then
+  exit 0
+fi
+
+# Extract `payload`. Empty payload (no comments queued) → silent exit;
+# we don't want to spam additionalContext with empty wrappers.
+PAYLOAD="$(printf '%s' "$RESPONSE" | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+    sys.stdout.write(d.get('payload', '') or '')
+except Exception:
+    pass
+" 2>/dev/null || true)"
+
+if [ -z "$PAYLOAD" ]; then
+  exit 0
+fi
+
+# Emit JSON so the agent sees this on the next model call regardless of
+# event type. PostToolUse requires JSON; SessionStart and UserPromptSubmit
+# accept plain stdout as context, but JSON is fine for them too.
+SHIPPABLE_HOOK_EVENT="$EVENT" printf '%s' "$PAYLOAD" \
+  | SHIPPABLE_HOOK_EVENT="$EVENT" python3 -c "
+import json, sys, os
+try:
+    payload = sys.stdin.read()
+    out = {
+        'hookSpecificOutput': {
+            'hookEventName': os.environ.get('SHIPPABLE_HOOK_EVENT', 'PostToolUse'),
+            'additionalContext': payload,
+        }
+    }
+    sys.stdout.write(json.dumps(out))
+except Exception:
+    pass
+" 2>/dev/null || true
+
+exit 0
