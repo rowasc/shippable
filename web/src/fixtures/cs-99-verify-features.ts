@@ -486,6 +486,7 @@ export const CS_99: ChangeSet = {
           lines: README_LINES_H1,
         },
       ],
+      fullContent: README_LINES_H1,
     },
 
     // ─── lib/legacy_session.php (deleted) ────────────────────────────────
