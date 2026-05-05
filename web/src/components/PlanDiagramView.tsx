@@ -8,9 +8,20 @@ const COLUMN_GAP = 96;
 const ROW_GAP = 28;
 const PADDING_X = 20;
 const PADDING_Y = 18;
+const EDGE_TONES = ["accent", "blue", "magenta", "green", "yellow"] as const;
+
+type EdgeTone = (typeof EDGE_TONES)[number];
 
 interface Props {
   diagram: PlanDiagram;
+}
+
+interface PositionedEdge extends PlanDiagramEdge {
+  fromPoint: { x: number; y: number };
+  toPoint: { x: number; y: number };
+  tone: EdgeTone;
+  strokeWidth: number;
+  label: string;
 }
 
 export function PlanDiagramView({ diagram }: Props) {
@@ -41,6 +52,7 @@ export function PlanDiagramView({ diagram }: Props) {
   const maxRow = Math.max(...diagram.nodes.map((node) => node.row));
   const width = PADDING_X * 2 + (maxColumn + 1) * NODE_WIDTH + maxColumn * COLUMN_GAP;
   const height = PADDING_Y * 2 + (maxRow + 1) * NODE_HEIGHT + maxRow * ROW_GAP;
+  const positionedEdges = positionEdges(diagram, positions);
 
   return (
     <section className="plan-diagram">
@@ -62,32 +74,28 @@ export function PlanDiagramView({ diagram }: Props) {
           aria-label="Code map for the current changeset"
         >
           <defs>
-            <marker
-              id="plan-diagram-arrow"
-              viewBox="0 0 10 10"
-              refX="8"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 10 5 L 0 10 z" className="plan-diagram__arrowhead" />
-            </marker>
+            {EDGE_TONES.map((tone) => (
+              <marker
+                key={tone}
+                id={`plan-diagram-arrow-${tone}`}
+                viewBox="0 0 10 10"
+                refX="8"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path
+                  d="M 0 0 L 10 5 L 0 10 z"
+                  className={`plan-diagram__arrowhead plan-diagram__arrowhead--${tone}`}
+                />
+              </marker>
+            ))}
           </defs>
 
-          {diagram.edges.map((edge) => {
-            const from = positions.get(edge.from);
-            const to = positions.get(edge.to);
-            if (!from || !to) return null;
-            return (
-              <DiagramEdgeView
-                key={edge.id}
-                edge={edge}
-                from={from}
-                to={to}
-              />
-            );
-          })}
+          {positionedEdges.map((edge) => (
+            <DiagramEdgeView key={edge.id} edge={edge} />
+          ))}
 
           {diagram.nodes.map((node) => {
             const pos = positions.get(node.id)!;
@@ -106,32 +114,35 @@ export function PlanDiagramView({ diagram }: Props) {
   );
 }
 
-function DiagramEdgeView({
-  edge,
-  from,
-  to,
-}: {
-  edge: PlanDiagramEdge;
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-}) {
-  const startX = from.x + NODE_WIDTH;
-  const startY = from.y + NODE_HEIGHT / 2;
-  const endX = to.x;
-  const endY = to.y + NODE_HEIGHT / 2;
+function DiagramEdgeView({ edge }: { edge: PositionedEdge }) {
+  const startX = edge.fromPoint.x;
+  const startY = edge.fromPoint.y;
+  const endX = edge.toPoint.x;
+  const endY = edge.toPoint.y;
   const bend = Math.max(48, Math.abs(endX - startX) / 2);
   const labelX = startX + (endX - startX) / 2;
-  const labelY = startY + (endY - startY) / 2 - 8;
+  const labelY = startY + (endY - startY) / 2 - 12;
+  const labelWidth = Math.max(52, edge.label.length * 7 + 18);
 
   return (
-    <g className="plan-diagram__edge">
+    <g className={`plan-diagram__edge plan-diagram__edge--${edge.tone}`}>
       <path
         d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
         className="plan-diagram__edge-path"
-        markerEnd="url(#plan-diagram-arrow)"
+        markerEnd={`url(#plan-diagram-arrow-${edge.tone})`}
+        style={{ strokeWidth: edge.strokeWidth }}
+      />
+      <rect
+        className="plan-diagram__edge-label-bg"
+        x={labelX - labelWidth / 2}
+        y={labelY - 10}
+        width={labelWidth}
+        height={18}
+        rx="9"
+        ry="9"
       />
       <text className="plan-diagram__edge-label" x={labelX} y={labelY}>
-        {formatEdgeLabel(edge.labels)}
+        {edge.label}
       </text>
     </g>
   );
@@ -199,4 +210,87 @@ function statusGlyph(status: PlanDiagramNode["status"]): string {
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function positionEdges(
+  diagram: PlanDiagram,
+  positions: Map<string, { x: number; y: number }>,
+): PositionedEdge[] {
+  const nodeById = new Map(diagram.nodes.map((node) => [node.id, node] as const));
+  const outgoingByNode = new Map<string, PlanDiagramEdge[]>();
+  const incomingByNode = new Map<string, PlanDiagramEdge[]>();
+
+  for (const edge of diagram.edges) {
+    const outgoing = outgoingByNode.get(edge.from) ?? [];
+    outgoing.push(edge);
+    outgoingByNode.set(edge.from, outgoing);
+
+    const incoming = incomingByNode.get(edge.to) ?? [];
+    incoming.push(edge);
+    incomingByNode.set(edge.to, incoming);
+  }
+
+  for (const edges of outgoingByNode.values()) {
+    edges.sort((a, b) => compareEdges(a, b, nodeById));
+  }
+  for (const edges of incomingByNode.values()) {
+    edges.sort((a, b) => compareEdges(a, b, nodeById));
+  }
+
+  return diagram.edges.flatMap((edge) => {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) return [];
+
+    const outgoing = outgoingByNode.get(edge.from) ?? [edge];
+    const incoming = incomingByNode.get(edge.to) ?? [edge];
+    const outgoingIndex = outgoing.findIndex((candidate) => candidate.id === edge.id);
+    const incomingIndex = incoming.findIndex((candidate) => candidate.id === edge.id);
+    const label = formatEdgeLabel(edge.labels);
+
+    return [{
+      ...edge,
+      fromPoint: {
+        x: from.x + NODE_WIDTH,
+        y: from.y + NODE_HEIGHT / 2 + laneOffset(outgoing.length, outgoingIndex),
+      },
+      toPoint: {
+        x: to.x,
+        y: to.y + NODE_HEIGHT / 2 + laneOffset(incoming.length, incomingIndex),
+      },
+      tone: edgeTone(edge),
+      strokeWidth: edgeStrokeWidth(edge.labels.length),
+      label,
+    }];
+  });
+}
+
+function compareEdges(
+  edgeA: PlanDiagramEdge,
+  edgeB: PlanDiagramEdge,
+  nodeById: Map<string, PlanDiagramNode>,
+): number {
+  const targetA = nodeById.get(edgeA.to)?.path ?? edgeA.to;
+  const targetB = nodeById.get(edgeB.to)?.path ?? edgeB.to;
+  if (targetA !== targetB) return targetA.localeCompare(targetB);
+  return formatEdgeLabel(edgeA.labels).localeCompare(formatEdgeLabel(edgeB.labels));
+}
+
+function laneOffset(total: number, index: number): number {
+  if (total <= 1) return 0;
+  const spacing = 12;
+  return (index - (total - 1) / 2) * spacing;
+}
+
+function edgeTone(edge: PlanDiagramEdge): EdgeTone {
+  const key = `${edge.from}>${edge.to}:${edge.labels.join(",")}`;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  return EDGE_TONES[hash % EDGE_TONES.length];
+}
+
+function edgeStrokeWidth(labelCount: number): number {
+  if (labelCount >= 3) return 3.2;
+  if (labelCount === 2) return 2.6;
+  return 2.1;
 }

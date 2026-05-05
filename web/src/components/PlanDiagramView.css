@@ -44,17 +44,55 @@
 .plan-diagram__edge-path {
   fill: none;
   stroke: color-mix(in srgb, var(--accent) 55%, var(--border));
-  stroke-width: 1.8;
+  stroke-linecap: round;
+  opacity: 0.92;
 }
 
 .plan-diagram__arrowhead {
   fill: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 
+.plan-diagram__edge--accent .plan-diagram__edge-path,
+.plan-diagram__arrowhead--accent {
+  stroke: color-mix(in srgb, var(--accent) 72%, var(--border));
+  fill: color-mix(in srgb, var(--accent) 72%, var(--border));
+}
+
+.plan-diagram__edge--blue .plan-diagram__edge-path,
+.plan-diagram__arrowhead--blue {
+  stroke: color-mix(in srgb, var(--blue) 70%, var(--border));
+  fill: color-mix(in srgb, var(--blue) 70%, var(--border));
+}
+
+.plan-diagram__edge--magenta .plan-diagram__edge-path,
+.plan-diagram__arrowhead--magenta {
+  stroke: color-mix(in srgb, var(--magenta) 70%, var(--border));
+  fill: color-mix(in srgb, var(--magenta) 70%, var(--border));
+}
+
+.plan-diagram__edge--green .plan-diagram__edge-path,
+.plan-diagram__arrowhead--green {
+  stroke: color-mix(in srgb, var(--green) 68%, var(--border));
+  fill: color-mix(in srgb, var(--green) 68%, var(--border));
+}
+
+.plan-diagram__edge--yellow .plan-diagram__edge-path,
+.plan-diagram__arrowhead--yellow {
+  stroke: color-mix(in srgb, var(--yellow) 78%, var(--border));
+  fill: color-mix(in srgb, var(--yellow) 78%, var(--border));
+}
+
+.plan-diagram__edge-label-bg {
+  fill: color-mix(in srgb, var(--bg) 92%, transparent);
+  stroke: color-mix(in srgb, var(--border) 80%, transparent);
+  stroke-width: 1;
+}
+
 .plan-diagram__edge-label {
   fill: var(--fg-dim);
   font-size: 11px;
   text-anchor: middle;
+  dominant-baseline: middle;
 }
 
 .plan-diagram__node rect {
