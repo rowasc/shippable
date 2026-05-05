@@ -131,6 +131,7 @@ export function adaptShikiTheme(theme: ShikiTheme, label: string): ThemeDefiniti
     colorScheme,
     vars: {
       "bg": bg,
+      "bg-1": bg,
       "bg-2": bg2,
       "bg-3": bg3,
       "fg": fg,

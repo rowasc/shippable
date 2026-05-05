@@ -6,11 +6,13 @@ interface Props {
   text: string;
   /** Optional extra class — useful for per-host positioning tweaks. */
   className?: string;
+  /** Accessible hover label; defaults to a generic clipboard action. */
+  title?: string;
 }
 
 type State = "idle" | "ok" | "fail";
 
-export function CopyButton({ text, className }: Props) {
+export function CopyButton({ text, className, title = "Copy to clipboard" }: Props) {
   const [state, setState] = useState<State>("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -39,7 +41,7 @@ export function CopyButton({ text, className }: Props) {
       type="button"
       className={`copybtn copybtn--${state}${className ? ` ${className}` : ""}`}
       onClick={copy}
-      title="Copy error to clipboard"
+      title={title}
     >
       {label}
     </button>
