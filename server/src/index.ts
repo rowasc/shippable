@@ -59,6 +59,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/worktrees/list") {
       return handleWorktreesList(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/pick-directory") {
+      return handleWorktreesPickDirectory(req, res, origin);
+    }
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return handleWorktreesChangeset(req, res, origin);
     }
@@ -318,6 +321,41 @@ async function handleWorktreesChangeset(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/changeset err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesPickDirectory(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { startPath?: unknown } = {};
+  if (body.trim().length > 0) {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid JSON body" }));
+      return;
+    }
+  }
+  const startPath =
+    typeof parsed.startPath === "string" && parsed.startPath.length > 0
+      ? parsed.startPath
+      : undefined;
+  try {
+    const result = await worktrees.pickDirectory(startPath);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/pick-directory err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));

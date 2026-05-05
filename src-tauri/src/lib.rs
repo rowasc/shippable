@@ -44,113 +44,118 @@ fn find_free_port() -> std::io::Result<u16> {
 fn start_sidecar(app: tauri::AppHandle) {
     let startup = Instant::now();
 
-    match keychain::get(ANTHROPIC_KEY_ACCOUNT) {
+    let key = match keychain::get(ANTHROPIC_KEY_ACCOUNT) {
         Ok(Some(key)) => {
             log::info!(
                 "keychain lookup completed in {}ms",
                 startup.elapsed().as_millis()
             );
-
-            let port = match find_free_port() {
-                Ok(port) => port,
-                Err(e) => {
-                    log::warn!(
-                        "port allocation failed after {}ms: {e}",
-                        startup.elapsed().as_millis()
-                    );
-                    return;
-                }
-            };
-
-            let sidecar = match app.shell().sidecar("shippable-server") {
-                Ok(sidecar) => sidecar,
-                Err(e) => {
-                    log::warn!(
-                        "sidecar lookup failed after {}ms: {e}",
-                        startup.elapsed().as_millis()
-                    );
-                    return;
-                }
-            }
-            .env("ANTHROPIC_API_KEY", key)
-            .env("PORT", port.to_string())
-            .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
-
-            // The Bun-compiled sidecar binary can't resolve the `library/` dir
-            // from `import.meta.url` the way `tsx` can, so point it at the
-            // source repo in dev. Production builds need the library bundled
-            // as a resource — not wired yet.
-            #[cfg(debug_assertions)]
-            let sidecar = {
-                let library_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .unwrap()
-                    .join("library");
-                sidecar.env(
-                    "SHIPPABLE_LIBRARY_PATH",
-                    library_path.to_string_lossy().to_string(),
-                )
-            };
-
-            match sidecar.spawn() {
-                Ok((mut rx, child)) => {
-                    log::info!(
-                        "sidecar started on 127.0.0.1:{port} in {}ms",
-                        startup.elapsed().as_millis()
-                    );
-
-                    tauri::async_runtime::spawn(async move {
-                        while let Some(event) = rx.recv().await {
-                            match event {
-                                CommandEvent::Stdout(bytes) => {
-                                    log::info!(
-                                        "[sidecar] {}",
-                                        String::from_utf8_lossy(&bytes).trim_end()
-                                    );
-                                }
-                                CommandEvent::Stderr(bytes) => {
-                                    log::warn!(
-                                        "[sidecar] {}",
-                                        String::from_utf8_lossy(&bytes).trim_end()
-                                    );
-                                }
-                                CommandEvent::Terminated(payload) => {
-                                    log::warn!(
-                                        "[sidecar] terminated (code={:?}, signal={:?})",
-                                        payload.code,
-                                        payload.signal
-                                    );
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                    });
-
-                    let state = app.state::<SidecarState>();
-                    let mut runtime = state.inner.lock().unwrap();
-                    runtime.port = Some(port);
-                    runtime.child = Some(child);
-                }
-                Err(e) => {
-                    log::warn!(
-                        "sidecar spawn failed after {}ms: {e}",
-                        startup.elapsed().as_millis()
-                    );
-                }
-            }
+            Some(key)
         }
         Ok(None) => {
             log::warn!(
                 "no key in Keychain after {}ms (service=shippable account={ANTHROPIC_KEY_ACCOUNT}); \
-                 AI plan will fall back to rule-based. Add via Settings (later) or run: \
-                 security add-generic-password -s shippable -a {ANTHROPIC_KEY_ACCOUNT} -w",
+                 AI plan will be unavailable until one is added",
                 startup.elapsed().as_millis()
             );
+            None
         }
         Err(e) => {
             log::warn!(
                 "Keychain lookup error after {}ms: {e}",
+                startup.elapsed().as_millis()
+            );
+            None
+        }
+    };
+
+    let port = match find_free_port() {
+        Ok(port) => port,
+        Err(e) => {
+            log::warn!(
+                "port allocation failed after {}ms: {e}",
+                startup.elapsed().as_millis()
+            );
+            return;
+        }
+    };
+
+    let mut sidecar = match app.shell().sidecar("shippable-server") {
+        Ok(sidecar) => sidecar,
+        Err(e) => {
+            log::warn!(
+                "sidecar lookup failed after {}ms: {e}",
+                startup.elapsed().as_millis()
+            );
+            return;
+        }
+    }
+    .env("PORT", port.to_string())
+    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
+
+    if let Some(key) = key {
+        sidecar = sidecar.env("ANTHROPIC_API_KEY", key);
+    }
+
+    // The Bun-compiled sidecar binary can't resolve the `library/` dir
+    // from `import.meta.url` the way `tsx` can, so point it at the
+    // source repo in dev. Production builds need the library bundled
+    // as a resource — not wired yet.
+    #[cfg(debug_assertions)]
+    let sidecar = {
+        let library_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("library");
+        sidecar.env(
+            "SHIPPABLE_LIBRARY_PATH",
+            library_path.to_string_lossy().to_string(),
+        )
+    };
+
+    match sidecar.spawn() {
+        Ok((mut rx, child)) => {
+            log::info!(
+                "sidecar started on 127.0.0.1:{port} in {}ms",
+                startup.elapsed().as_millis()
+            );
+
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(bytes) => {
+                            log::info!(
+                                "[sidecar] {}",
+                                String::from_utf8_lossy(&bytes).trim_end()
+                            );
+                        }
+                        CommandEvent::Stderr(bytes) => {
+                            log::warn!(
+                                "[sidecar] {}",
+                                String::from_utf8_lossy(&bytes).trim_end()
+                            );
+                        }
+                        CommandEvent::Terminated(payload) => {
+                            log::warn!(
+                                "[sidecar] terminated (code={:?}, signal={:?})",
+                                payload.code,
+                                payload.signal
+                            );
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            let state = app.state::<SidecarState>();
+            let mut runtime = state.inner.lock().unwrap();
+            runtime.port = Some(port);
+            runtime.child = Some(child);
+        }
+        Err(e) => {
+            log::warn!(
+                "sidecar spawn failed after {}ms: {e}",
                 startup.elapsed().as_millis()
             );
         }

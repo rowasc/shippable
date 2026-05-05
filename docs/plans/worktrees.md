@@ -4,6 +4,8 @@ The reviewer today is fed by URL, file upload, or paste. None of those match the
 
 This pairs with `auto-mode-sandbox.md`. The sandbox is where agents *do* the work (`.claude/worktrees/<name>` is its convention). This is where you *review* the work. They meet at the worktree boundary.
 
+Directory selection is now split into a focused follow-up plan: see [worktree-directory-picker.md](./worktree-directory-picker.md). The short version: the current path textbox needs to become a chooser-first flow in both Tauri and browser-dev, with the browser chooser opened through the local server so the existing git-backed path API stays intact.
+
 ## Goal
 
 What this enables:

@@ -57,10 +57,28 @@
   margin: 0 0 6px 0;
   font-size: 11px;
 }
+.modal__hint--error {
+  color: var(--red);
+  margin-top: 8px;
+}
 .modal__row {
   display: flex;
   gap: 6px;
   align-items: stretch;
+}
+.modal__picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.modal__picked-path {
+  margin-top: 8px;
+  color: var(--fg-dim);
+  font-size: 12px;
+  word-break: break-all;
+}
+.modal__manual {
+  margin-top: 8px;
 }
 .modal__row--end {
   justify-content: flex-end;

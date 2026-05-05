@@ -12,9 +12,8 @@
 // sidecar bound. Rust picks a free port at startup and exposes it via the
 // `get_sidecar_port` command; we resolve and cache it on first call.
 //
-// If the sidecar didn't spawn (e.g. no Anthropic key in Keychain),
-// get_sidecar_port returns null and we throw — callers surface the error to
-// the user.
+// If the sidecar didn't spawn, get_sidecar_port returns null and we throw —
+// callers surface the error to the user.
 
 let cachedBase: Promise<string> | null = null;
 
@@ -39,7 +38,7 @@ export async function apiUrl(path: string): Promise<string> {
       const { invoke } = await import("@tauri-apps/api/core");
       const port = await invoke<number | null>("get_sidecar_port");
       if (port == null) {
-        throw new Error("Sidecar not available (no Anthropic key in Keychain)");
+        throw new Error("Sidecar not available");
       }
       return `http://127.0.0.1:${port}`;
     })().catch((err) => {

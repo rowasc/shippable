@@ -1,11 +1,11 @@
 import "./Welcome.css";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ChangeSet, Reply } from "../types";
 import { parseDiff } from "../parseDiff";
-import { apiUrl } from "../apiUrl";
 import { STUBS } from "../fixtures";
 import type { RecentEntry, RecentSource } from "../recents";
 import { removeRecent } from "../recents";
+import { useWorktreeLoader } from "../useWorktreeLoader";
 
 interface Props {
   recents: RecentEntry[];
@@ -19,26 +19,8 @@ interface Props {
   onRecentsChange: (next: RecentEntry[]) => void;
 }
 
-const WORKTREES_DIR_KEY = "shippable.worktreesDir";
-
-interface Worktree {
-  path: string;
-  branch: string | null;
-  head: string;
-  isMain: boolean;
-}
-
 export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
-  const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
   const [err, setErr] = useState<string | null>(null);
-
-  // Worktree pane (server-only).
-  const [wtDir, setWtDir] = useState(
-    () => localStorage.getItem(WORKTREES_DIR_KEY) ?? "",
-  );
-  const [wtBusy, setWtBusy] = useState(false);
-  const [wtList, setWtList] = useState<Worktree[] | null>(null);
-  const [wtLoadingPath, setWtLoadingPath] = useState<string | null>(null);
 
   // URL pane.
   const [url, setUrl] = useState("");
@@ -50,21 +32,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   // Drop zone.
   const [dropActive, setDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(await apiUrl("/api/health"));
-        if (!cancelled) setServerAvailable(res.ok);
-      } catch {
-        if (!cancelled) setServerAvailable(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   function deliver(
     cs: ChangeSet,
@@ -130,84 +97,9 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     });
   }
 
-  async function scanWorktrees() {
-    const dir = wtDir.trim();
-    if (!dir) return;
-    setErr(null);
-    setWtBusy(true);
-    setWtList(null);
-    try {
-      const res = await fetch(await apiUrl("/api/worktrees/list"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dir }),
-      });
-      const json = (await res.json()) as
-        | { worktrees: Worktree[] }
-        | { error: string };
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
-      localStorage.setItem(WORKTREES_DIR_KEY, dir);
-      setWtList(json.worktrees);
-      if (json.worktrees.length === 0) {
-        setErr(`No worktrees found in ${dir}.`);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(`Scan failed: ${msg}`);
-    } finally {
-      setWtBusy(false);
-    }
-  }
-
-  async function loadFromWorktree(wt: Worktree) {
-    setErr(null);
-    setWtLoadingPath(wt.path);
-    try {
-      const res = await fetch(await apiUrl("/api/worktrees/changeset"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: wt.path }),
-      });
-      const json = (await res.json()) as
-        | {
-            diff: string;
-            sha: string;
-            subject: string;
-            author: string;
-            date: string;
-            branch: string | null;
-            fileContents?: Record<string, string>;
-          }
-        | { error: string };
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
-      try {
-        const cs = parseDiff(json.diff, {
-          id: `wt-${json.sha.slice(0, 12)}`,
-          title:
-            json.subject || `${wt.branch ?? "detached"} @ ${json.sha.slice(0, 7)}`,
-          author: json.author,
-          head: json.branch ?? json.sha.slice(0, 7),
-          fileContents: json.fileContents,
-        });
-        if (cs.files.length === 0) {
-          setErr("Latest commit produced no parseable diff (empty or merge?).");
-          return;
-        }
-        deliver(cs, {}, { kind: "worktree", path: wt.path, branch: wt.branch });
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : "parse failed");
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(`Load failed: ${msg}`);
-    } finally {
-      setWtLoadingPath(null);
-    }
-  }
+  const worktrees = useWorktreeLoader({
+    onLoad: (cs, source) => deliver(cs, {}, source),
+  });
 
   function loadFromRecent(r: RecentEntry) {
     deliver(r.changeset, r.replies, r.source);
@@ -262,40 +154,76 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
         {/* Hero swaps based on capability: worktree picker when the local
             server is up; drop-zone otherwise. The other inputs render below
             either way. */}
-        {serverAvailable === true ? (
+        {worktrees.serverAvailable === true ? (
           <section className="welcome__hero welcome__wt">
             <h1 className="welcome__hero-h">Open a local branch</h1>
             <p className="welcome__hero-sub">
-              Point at a directory containing one or more git worktrees (a repo
-              root, or <code>.claude/worktrees</code>). Reviews the latest commit.
+              Choose a repo root or worktrees folder. Shippable scans it and
+              loads the latest committed diff from the worktree you pick.
             </p>
-            <div className="welcome__wt-row">
-              <input
-                className="welcome__input"
-                type="text"
-                placeholder="/Users/you/code/my-repo"
-                value={wtDir}
-                onChange={(e) => setWtDir(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && scanWorktrees()}
-                autoFocus
-              />
+            <div className="welcome__wt-actions">
               <button
                 className="welcome__btn welcome__btn--primary"
-                onClick={scanWorktrees}
-                disabled={wtBusy || !wtDir.trim()}
+                onClick={worktrees.pickDirectory}
+                disabled={worktrees.wtPickerBusy}
               >
-                {wtBusy ? "scanning…" : "scan"}
+                {worktrees.wtPickerBusy ? "opening…" : "choose folder…"}
+              </button>
+              {worktrees.wtDir.trim() && (
+                <button
+                  className="welcome__btn"
+                  onClick={() => worktrees.scanWorktrees()}
+                  disabled={worktrees.wtBusy}
+                >
+                  {worktrees.wtBusy ? "scanning…" : "rescan"}
+                </button>
+              )}
+              <button
+                className="welcome__btn"
+                onClick={() => worktrees.setShowManualPath((shown) => !shown)}
+              >
+                {worktrees.showManualPath ? "hide path input" : "paste path instead"}
               </button>
             </div>
-            {wtList && wtList.length > 0 && (
+            {worktrees.wtDir.trim() && (
+              <div className="welcome__wt-picked">
+                Current folder: <code>{worktrees.wtDir}</code>
+              </div>
+            )}
+            {worktrees.showManualPath && (
+              <div className="welcome__wt-manual">
+                <div className="welcome__wt-row">
+                  <input
+                    className="welcome__input"
+                    type="text"
+                    placeholder="/Users/you/code/my-repo"
+                    value={worktrees.wtDir}
+                    onChange={(e) => worktrees.setWtDir(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && worktrees.scanWorktrees()
+                    }
+                    autoFocus
+                  />
+                  <button
+                    className="welcome__btn"
+                    onClick={() => worktrees.scanWorktrees()}
+                    disabled={worktrees.wtBusy || !worktrees.wtDir.trim()}
+                  >
+                    {worktrees.wtBusy ? "scanning…" : "scan"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {worktrees.err && <div className="welcome__err">{worktrees.err}</div>}
+            {worktrees.wtList && worktrees.wtList.length > 0 && (
               <ul className="welcome__wt-list modal__wt-list">
-                {wtList.map((wt) => (
+                {worktrees.wtList.map((wt) => (
                   <li key={wt.path}>
                     <button
                       type="button"
                       className="modal__wt-row"
-                      onClick={() => loadFromWorktree(wt)}
-                      disabled={wtLoadingPath !== null}
+                      onClick={() => worktrees.loadFromWorktree(wt)}
+                      disabled={worktrees.wtLoadingPath !== null}
                     >
                       <span className="modal__wt-branch">
                         {wt.branch ?? "(detached)"}
@@ -304,7 +232,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
                       <span className="modal__wt-path">{wt.path}</span>
                       <span className="modal__wt-head">
                         {wt.head.slice(0, 7)}
-                        {wtLoadingPath === wt.path && " · loading…"}
+                        {worktrees.wtLoadingPath === wt.path && " · loading…"}
                       </span>
                     </button>
                   </li>
@@ -371,7 +299,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
           </div>
         </section>
 
-        {serverAvailable === true && (
+        {worktrees.serverAvailable === true && (
           <section className="welcome__sec">
             <h2 className="welcome__sec-h">From a file</h2>
             <input

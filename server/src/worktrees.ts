@@ -64,6 +64,10 @@ export interface ChangesetResult {
   fileContents: Record<string, string>;
 }
 
+export type PickDirectoryResult =
+  | { path: string }
+  | { cancelled: true };
+
 /**
  * Validate that `dir` is an absolute path that exists, is a directory, and
  * contains a `.git` entry (file for worktrees, dir for the main repo).
@@ -100,6 +104,67 @@ async function assertGitDir(dir: string): Promise<void> {
     await fs.stat(path.join(dir, ".git"));
   } catch {
     throw new Error(`dir does not look like a git repo (no .git entry): ${dir}`);
+  }
+}
+
+async function normalizeDefaultDirectory(
+  startPath: string | undefined,
+): Promise<string | null> {
+  if (!startPath || !path.isAbsolute(startPath)) return null;
+  try {
+    const stat = await fs.stat(startPath);
+    if (!stat.isDirectory()) return null;
+    return startPath;
+  } catch {
+    return null;
+  }
+}
+
+function toAppleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export async function pickDirectory(
+  startPath?: string,
+): Promise<PickDirectoryResult> {
+  if (process.platform !== "darwin") {
+    throw new Error("directory chooser is only wired up on macOS right now");
+  }
+
+  const defaultDir = await normalizeDefaultDirectory(startPath);
+  const args: string[] = [];
+  if (defaultDir) {
+    args.push(
+      "-e",
+      `set chosenFolder to choose folder with prompt "Choose a local repo or worktrees folder" default location POSIX file "${toAppleScriptString(defaultDir)}"`,
+    );
+  } else {
+    args.push(
+      "-e",
+      'set chosenFolder to choose folder with prompt "Choose a local repo or worktrees folder"',
+    );
+  }
+  args.push("-e", "return POSIX path of chosenFolder");
+
+  try {
+    const { stdout } = await execFileAsync("/usr/bin/osascript", args, {
+      maxBuffer: 128 * 1024,
+    });
+    const chosen = stdout.trim();
+    if (!chosen) {
+      throw new Error("folder chooser returned an empty path");
+    }
+    return { path: chosen };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message.includes("User canceled") ||
+      message.includes("User cancelled") ||
+      message.includes("(-128)")
+    ) {
+      return { cancelled: true };
+    }
+    throw err;
   }
 }
 

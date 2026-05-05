@@ -135,8 +135,23 @@
   flex-direction: column;
   gap: 6px;
 }
+.welcome__wt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .welcome__wt-row {
   display: flex;
+  gap: 6px;
+}
+.welcome__wt-picked {
+  color: var(--fg-dim);
+  font-size: 12px;
+  word-break: break-all;
+}
+.welcome__wt-manual {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 .welcome__wt-list {
