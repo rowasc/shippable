@@ -14,11 +14,12 @@ const DEFAULT_ALLOWED_ORIGINS = [
 ];
 const ALLOWED_ORIGINS = loadAllowedOrigins();
 
+// Only the AI endpoints (/api/plan, /api/review) need the key; worktree, library,
+// and health endpoints work without it. Warn at startup, enforce per-handler.
 if (!process.env.ANTHROPIC_API_KEY) {
-  console.error(
-    "[server] ANTHROPIC_API_KEY is not set in the environment. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
+  console.warn(
+    "[server] ANTHROPIC_API_KEY is not set — /api/plan and /api/review will return 503. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
   );
-  process.exit(1);
 }
 
 const server = createServer(async (req, res) => {
@@ -84,6 +85,12 @@ async function handlePlan(
   res: ServerResponse,
   origin: string | null,
 ) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    return;
+  }
   const body = await readBody(req);
   let parsed: { changeset?: ChangeSet };
   try {
@@ -149,6 +156,12 @@ async function handleReview(
   res: ServerResponse,
   origin: string | null,
 ) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    return;
+  }
   const ip = req.socket.remoteAddress ?? "unknown";
   const gate = checkReviewRateLimit(ip);
   if (!gate.allowed) {
