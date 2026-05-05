@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CS_42, REPLIES_42 } from "../fixtures/cs-42-preferences";
+import { CS_72, REPLIES_72 } from "../fixtures/cs-72-docs-preview";
 import {
   initialState,
   reducer,
   changesetCoverage,
   reviewedFilesCount,
 } from "../state";
+import { planReview } from "../plan";
 import { applyThemeToRoot, type ThemeId } from "../tokens";
 import { Sidebar } from "./Sidebar";
 import { DiffView } from "./DiffView";
@@ -16,9 +18,12 @@ import { GuidePrompt } from "./GuidePrompt";
 import { HelpOverlay } from "./HelpOverlay";
 import { LoadModal } from "./LoadModal";
 import { CodeRunner } from "./CodeRunner";
+import { KeySetup } from "./KeySetup";
 import { PromptPicker } from "./PromptPicker";
+import { PromptEditor } from "./PromptEditor";
 import { type PromptRunView } from "./PromptRunsPanel";
 import { ThemePicker } from "./ThemePicker";
+import "./Welcome.css";
 import {
   buildDiffViewModel,
   buildGuidePromptViewModel,
@@ -32,6 +37,7 @@ import { usePlan } from "../usePlan";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
 import { runPrompt } from "../promptRun";
 import { KEYMAP } from "../keymap";
+import type { RecentEntry } from "../recents";
 import {
   blockCommentKey,
   lineNoteReplyKey,
@@ -45,10 +51,114 @@ import {
 import "./Demo.css";
 
 const CS = CS_42;
+const PREVIEW_CS = CS_72;
+const USER_FILE = CS.files[0];
 const PREF_FILE = CS.files.find(
   (f) => f.path === "src/components/PreferencesPanel.tsx",
 )!;
 const STORAGE_FILE = CS.files.find((f) => f.path === "src/utils/storage.ts")!;
+const PREVIEW_FILE = PREVIEW_CS.files[0];
+
+const DEMO_INLINE_SOURCE =
+  "function clamp(value, min, max) {\n" +
+  "  return Math.min(max, Math.max(min, value));\n" +
+  "}\n" +
+  "clamp(42, 0, 10);\n";
+
+const DEMO_LIBRARY_PROMPTS = [
+  {
+    id: "review-this-hunk",
+    name: "Review this hunk",
+    description: "Look for risk, edge cases, and missing tests in the current selection.",
+    args: [{ name: "selection", required: true, auto: "selection" }],
+    body: "Review this diff hunk like a skeptical senior engineer:\n\n{{selection}}",
+  },
+  {
+    id: "security-review",
+    name: "Security review",
+    description: "Focus on auth, input validation, and unsafe data flow.",
+    args: [
+      { name: "selection", required: true, auto: "selection" },
+      { name: "file", required: false, auto: "file" },
+    ],
+    body:
+      "Review this code for security issues.\n\n{{selection}}\n{{#file}}File: {{file}}{{/file}}",
+  },
+];
+
+const DEMO_USER_PROMPT = {
+  id: "business-risk-pass",
+  name: "Business risk pass",
+  description: "Call out rollout, support, and migration risk.",
+  args: [
+    { name: "selection", required: true, auto: "selection" },
+    { name: "title", required: false, auto: "changeset.title" },
+  ],
+  body:
+    "Change: {{title}}\n\nAssess business risk in this selection:\n{{selection}}",
+};
+
+const DEMO_PROMPT_RUNS: PromptRunView[] = [
+  {
+    id: "demo-run-1",
+    promptName: "Business risk pass",
+    status: "done",
+    text:
+      "Rollout risk is low because this is local-only UI state, but malformed saved prefs still need sanitizing before apply.",
+  },
+  {
+    id: "demo-run-2",
+    promptName: "Security review",
+    status: "streaming",
+    text:
+      "Two reviewer-relevant concerns so far:\n\n1. localStorage JSON is trusted as-is.\n2. invalid theme values can flow straight into controlled UI state.",
+  },
+];
+
+const DEMO_WORKTREE_DIR = "/Users/you/code/shippable";
+const DEMO_WORKTREES = [
+  {
+    path: `${DEMO_WORKTREE_DIR}`,
+    branch: "main",
+    head: "7251d27c8630d6a2fd8b14b8d3bb4a46f5117a20",
+    isMain: true,
+  },
+  {
+    path: `${DEMO_WORKTREE_DIR}-preview-mode`,
+    branch: "docs/preview-mode",
+    head: "682b0b7ac12a52dd44ef1203b89cbf0cb9bc2d61",
+    isMain: false,
+  },
+  {
+    path: `${DEMO_WORKTREE_DIR}-prompt-lab`,
+    branch: "feat/prompt-library",
+    head: "9bda200f4d77f9832c9fd0d8be0bb4c03d0bc7ab",
+    isMain: false,
+  },
+];
+
+const DEMO_RECENTS: RecentEntry[] = [
+  {
+    id: PREVIEW_CS.id,
+    title: PREVIEW_CS.title,
+    addedAt: Date.parse("2026-05-04T15:20:00Z"),
+    source: {
+      kind: "worktree",
+      path: DEMO_WORKTREES[1].path,
+      branch: DEMO_WORKTREES[1].branch,
+    },
+    changeset: PREVIEW_CS,
+    replies: { ...REPLIES_72 },
+  },
+  {
+    id: CS.id,
+    title: CS.title,
+    addedAt: Date.parse("2026-05-04T11:05:00Z"),
+    source: { kind: "paste" },
+    changeset: CS,
+    replies: { ...REPLIES_42 },
+  },
+];
 
 type Overlay =
   | { kind: "none" }
@@ -59,20 +169,47 @@ type Overlay =
   | { kind: "runnerInline"; source: string }
   | { kind: "runnerFree" };
 
-interface Frame {
+interface BaseFrame {
   caption: string;
   themeId?: ThemeId;
   durationMs?: number;
+}
+
+interface WorkspaceFrame extends BaseFrame {
+  kind: "workspace";
   state: ReviewState;
   overlay: Overlay;
-  /** Force the GuidePrompt to render when the cursor triggers maybeSuggest. */
   showGuide?: boolean;
+  showInspector?: boolean;
+  sidebarWide?: boolean;
+  seedRuns?: PromptRunView[];
 }
+
+interface WelcomeFrame extends BaseFrame {
+  kind: "welcome";
+}
+
+interface KeySetupFrame extends BaseFrame {
+  kind: "keySetup";
+  saved?: boolean;
+}
+
+interface PromptEditorFrame extends BaseFrame {
+  kind: "promptEditor";
+}
+
+type Frame = WorkspaceFrame | WelcomeFrame | KeySetupFrame | PromptEditorFrame;
 
 // ── frame state helpers ───────────────────────────────────────────────────
 
-function fresh(): ReviewState {
-  return { ...initialState([CS]), replies: { ...REPLIES_42 } };
+function repliesFor(cs: ChangeSet): Record<string, ReviewState["replies"][string]> {
+  if (cs.id === CS.id) return { ...REPLIES_42 };
+  if (cs.id === PREVIEW_CS.id) return { ...REPLIES_72 };
+  return {};
+}
+
+function fresh(cs: ChangeSet = CS): ReviewState {
+  return { ...initialState([cs]), replies: repliesFor(cs) };
 }
 
 function withCursor(
@@ -81,9 +218,153 @@ function withCursor(
   hunkId: string,
   lineIdx: number,
 ): ReviewState {
+  const currentCs = state.changesets[0];
   return {
     ...state,
-    cursor: { changesetId: CS.id, fileId, hunkId, lineIdx },
+    cursor: { changesetId: currentCs.id, fileId, hunkId, lineIdx },
+  };
+}
+
+function makeContextExpandedState(): ReviewState {
+  const hunk = USER_FILE.hunks[0];
+  return {
+    ...fresh(),
+    cursor: {
+      changesetId: CS.id,
+      fileId: USER_FILE.id,
+      hunkId: hunk.id,
+      lineIdx: 7,
+    },
+    expandLevelAbove: { [hunk.id]: 2 },
+    expandLevelBelow: { [hunk.id]: 2 },
+  };
+}
+
+function makeFullFileState(): ReviewState {
+  const hunk = USER_FILE.hunks[0];
+  return {
+    ...fresh(),
+    cursor: {
+      changesetId: CS.id,
+      fileId: USER_FILE.id,
+      hunkId: hunk.id,
+      lineIdx: 0,
+    },
+    fullExpandedFiles: new Set([USER_FILE.id]),
+  };
+}
+
+function makePreviewState(): ReviewState {
+  return {
+    ...fresh(PREVIEW_CS),
+    cursor: {
+      changesetId: PREVIEW_CS.id,
+      fileId: PREVIEW_FILE.id,
+      hunkId: PREVIEW_FILE.hunks[0].id,
+      lineIdx: 0,
+    },
+    previewedFiles: new Set([PREVIEW_FILE.id]),
+  };
+}
+
+function readRequestJson(init?: RequestInit): Record<string, unknown> {
+  if (!init?.body || typeof init.body !== "string") return {};
+  try {
+    return JSON.parse(init.body) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function linePrefix(kind: "context" | "add" | "del"): string {
+  return kind === "add" ? "+" : kind === "del" ? "-" : " ";
+}
+
+function changesetToDiff(cs: ChangeSet): string {
+  const parts: string[] = [];
+  for (const file of cs.files) {
+    parts.push(`diff --git a/${file.path} b/${file.path}`);
+    if (file.status === "added") parts.push("new file mode 100644");
+    if (file.status === "deleted") parts.push("deleted file mode 100644");
+    parts.push(file.status === "added" ? "--- /dev/null" : `--- a/${file.path}`);
+    parts.push(file.status === "deleted" ? "+++ /dev/null" : `+++ b/${file.path}`);
+    for (const h of file.hunks) {
+      parts.push(`@@ -${h.oldStart},${h.oldCount} +${h.newStart},${h.newCount} @@`);
+      for (const l of h.lines) {
+        parts.push(`${linePrefix(l.kind)}${l.text}`);
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+function buildFileContents(cs: ChangeSet): Record<string, string> | undefined {
+  const entries = cs.files
+    .filter((file) => file.fullContent && file.fullContent.length > 0)
+    .map((file) => [
+      file.path,
+      file.fullContent!.map((line) => line.text).join("\n"),
+    ] as const);
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries);
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function installDemoMocks() {
+  const win = window as Window & {
+    __shippableDemoFetchInstalled?: boolean;
+    __shippableDemoOriginalFetch?: typeof window.fetch;
+  };
+  if (win.__shippableDemoFetchInstalled) return;
+  win.__shippableDemoFetchInstalled = true;
+  win.__shippableDemoOriginalFetch = window.fetch.bind(window);
+
+  localStorage.setItem(
+    "shippable.prompts.user",
+    JSON.stringify([DEMO_USER_PROMPT]),
+  );
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.endsWith("/api/health")) {
+      return jsonResponse({ ok: true });
+    }
+    if (url.endsWith("/api/library/prompts")) {
+      return jsonResponse({ prompts: DEMO_LIBRARY_PROMPTS });
+    }
+    if (url.endsWith("/api/worktrees/pick-directory")) {
+      return jsonResponse({ path: DEMO_WORKTREE_DIR });
+    }
+    if (url.endsWith("/api/worktrees/list")) {
+      return jsonResponse({ worktrees: DEMO_WORKTREES });
+    }
+    if (url.endsWith("/api/worktrees/changeset")) {
+      const req = readRequestJson(init);
+      const path = typeof req.path === "string" ? req.path : DEMO_WORKTREES[0].path;
+      const wt = DEMO_WORKTREES.find((item) => item.path === path) ?? DEMO_WORKTREES[0];
+      const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
+      return jsonResponse({
+        diff: changesetToDiff(cs),
+        sha: wt.head,
+        subject: cs.title,
+        author: cs.author,
+        date: cs.createdAt,
+        branch: wt.branch,
+        fileContents: buildFileContents(cs),
+      });
+    }
+    if (url.endsWith("/api/plan")) {
+      const req = readRequestJson(init);
+      const requested = req.changeset as ChangeSet | undefined;
+      return jsonResponse({ plan: planReview(requested ?? CS) });
+    }
+    return win.__shippableDemoOriginalFetch!(input, init);
   };
 }
 
@@ -161,15 +442,15 @@ function buildFrames(): Frame[] {
     reviewedFiles: new Set([STORAGE_FILE.id]),
   };
 
-  // 8 — runner inline with a small, runnable snippet.
-  const f8Source =
-    "function clamp(value, min, max) {\n" +
-    "  return Math.min(max, Math.max(min, value));\n" +
-    "}\n" +
-    "clamp(42, 0, 10);\n";
-
   return [
     {
+      kind: "welcome",
+      caption: "start from a recent review or scan local worktrees",
+      themeId: "light",
+      durationMs: 8500,
+    },
+    {
+      kind: "workspace",
       caption: "plan mode answers where do I begin?",
       themeId: "light",
       durationMs: 9000,
@@ -177,70 +458,113 @@ function buildFrames(): Frame[] {
       overlay: { kind: "plan" },
     },
     {
+      kind: "workspace",
       caption: "go to the recommended starting point",
       state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 0),
       overlay: { kind: "none" },
     },
     {
+      kind: "workspace",
       caption: "AI notes are top of mind",
       state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 14),
       overlay: { kind: "none" },
     },
     {
+      kind: "workspace",
       caption: "ack to dismiss, reply to start a thread",
       state: f5State,
       overlay: { kind: "none" },
     },
     {
+      kind: "workspace",
       caption: "comment a block of code",
       state: f6State,
       overlay: { kind: "none" },
     },
     {
+      kind: "workspace",
+      caption: "expand just enough surrounding context before you zoom out",
+      state: makeContextExpandedState(),
+      overlay: { kind: "none" },
+      showInspector: false,
+    },
+    {
+      kind: "workspace",
+      caption: "flip from review hunks to the full post-change file",
+      state: makeFullFileState(),
+      overlay: { kind: "none" },
+      showInspector: false,
+    },
+    {
+      kind: "workspace",
+      caption: "markdown diffs can switch into rendered preview mode",
+      state: makePreviewState(),
+      overlay: { kind: "none" },
+      showInspector: false,
+    },
+    {
+      kind: "workspace",
       caption: "Shift+M signs off; the topbar plan chip tracks progress",
       state: f7State,
       overlay: { kind: "none" },
     },
     {
-      caption: "quick checks without leaving the diff",
-      state: withCursor(fresh(), STORAGE_FILE.id, STORAGE_H1.id, 0),
-      overlay: { kind: "runnerInline", source: f8Source },
+      kind: "workspace",
+      caption: "prompt output stays in the sidebar instead of covering the diff",
+      state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 14),
+      overlay: { kind: "none" },
+      seedRuns: DEMO_PROMPT_RUNS,
+      sidebarWide: true,
     },
     {
-      caption: "scratch space for one-off snippets",
-      state: withCursor(fresh(), STORAGE_FILE.id, STORAGE_H1.id, 0),
-      overlay: { kind: "runnerFree" },
-    },
-    {
+      kind: "workspace",
       caption: "run any saved prompt against the current context",
       state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 14),
       overlay: { kind: "promptPicker" },
     },
     {
+      kind: "promptEditor",
+      caption: "fork built-ins or edit your own prompts with live preview",
+    },
+    {
+      kind: "workspace",
+      caption: "quick checks without leaving the diff",
+      state: withCursor(fresh(), STORAGE_FILE.id, STORAGE_H1.id, 0),
+      overlay: { kind: "runnerInline", source: DEMO_INLINE_SOURCE },
+    },
+    {
+      kind: "workspace",
+      caption: "scratch space for one-off snippets",
+      state: withCursor(fresh(), STORAGE_FILE.id, STORAGE_H1.id, 0),
+      overlay: { kind: "runnerFree" },
+    },
+    {
+      kind: "workspace",
       caption: "review any change",
       state: fresh(),
       overlay: { kind: "load" },
     },
     {
+      kind: "workspace",
       caption:
         "the guide nudges you toward related changes you haven't read",
-      // Cursor on line 1 of PreferencesPanel — the import that references
-      // loadPrefs / savePrefs from storage.ts. storage.ts is unread, so
-      // maybeSuggest returns a "review the definition" suggestion.
       state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 1),
       overlay: { kind: "none" },
       showGuide: true,
     },
     {
+      kind: "workspace",
       caption: "everything is keyboard-driven; ? is the cheat sheet",
       state: fresh(),
       overlay: { kind: "help" },
     },
     {
-      // The theme demo lives at the end so the demo finishes with a flourish
-      // — switches from light to dollhouse mid-frame to show off the swap.
-      // The animation is driven in <Demo> by the "last frame" branch so we
-      // don't have to encode a multi-step transition in the frame data.
+      kind: "keySetup",
+      caption: "desktop mode asks for an API key only when AI features need it",
+      durationMs: 7000,
+    },
+    {
+      kind: "workspace",
       caption: "we also have themes :)",
       durationMs: 6000,
       state: fresh(),
@@ -251,15 +575,147 @@ function buildFrames(): Frame[] {
 
 // ── component ─────────────────────────────────────────────────────────────
 
+function DemoFrame({
+  frame,
+  themeId,
+  onPickTheme,
+}: {
+  frame: Frame;
+  themeId: ThemeId;
+  onPickTheme: (id: ThemeId) => void;
+}) {
+  if (frame.kind === "welcome") {
+    return <WelcomeStage />;
+  }
+  if (frame.kind === "keySetup") {
+    return <KeySetupStage saved={frame.saved ?? false} />;
+  }
+  if (frame.kind === "promptEditor") {
+    return <PromptEditorStage />;
+  }
+  return (
+    <WorkspaceStage
+      frame={frame}
+      themeId={themeId}
+      onPickTheme={onPickTheme}
+    />
+  );
+}
+
+function WelcomeStage() {
+  return (
+    <div className="demo__app welcome">
+      <div className="welcome__top">
+        <span className="welcome__brand">shippable</span>
+        <span className="welcome__sep">│</span>
+        <span className="welcome__sub">
+          prototype — review a diff to get started
+        </span>
+      </div>
+
+      <div className="welcome__body">
+        <section className="welcome__recents">
+          <h2 className="welcome__sec-h">Recent</h2>
+          <ul className="welcome__recents-list">
+            {DEMO_RECENTS.map((recent) => (
+              <li key={recent.id}>
+                <button type="button" className="welcome__recent">
+                  <span className="welcome__recent-title">{recent.title}</span>
+                  <span className="welcome__recent-meta">
+                    {recent.source.kind === "worktree"
+                      ? recent.source.branch
+                      : recent.source.kind}{" "}
+                    · recent
+                  </span>
+                  <span className="welcome__recent-x" aria-hidden="true">
+                    ×
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="welcome__hero welcome__wt">
+          <h1 className="welcome__hero-h">Open a local branch</h1>
+          <p className="welcome__hero-sub">
+            Choose a repo root or worktrees folder. Shippable scans it and
+            loads the latest committed diff from the worktree you pick.
+          </p>
+          <div className="welcome__wt-actions">
+            <button className="welcome__btn welcome__btn--primary">
+              choose folder…
+            </button>
+            <button className="welcome__btn">rescan</button>
+            <button className="welcome__btn">paste path instead</button>
+          </div>
+          <div className="welcome__wt-picked">
+            Current folder: <code>{DEMO_WORKTREE_DIR}</code>
+          </div>
+          <ul className="welcome__wt-list modal__wt-list">
+            {DEMO_WORKTREES.map((wt) => (
+              <li key={wt.path}>
+                <button type="button" className="modal__wt-row">
+                  <span className="modal__wt-branch">
+                    {wt.branch ?? "(detached)"}
+                    {wt.isMain && <span className="modal__wt-tag"> main</span>}
+                  </span>
+                  <span className="modal__wt-path">{wt.path}</span>
+                  <span className="modal__wt-head">{wt.head.slice(0, 7)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function KeySetupStage({ saved }: { saved: boolean }) {
+  return (
+    <div className="demo__app demo__center-stage">
+      <KeySetup
+        onSave={async () => {}}
+        onSkip={() => {}}
+        saved={saved}
+      />
+    </div>
+  );
+}
+
+function PromptEditorStage() {
+  return (
+    <div className="demo__app demo__center-stage">
+      <div className="demo__editor-shell modal__box">
+        <header className="modal__h">
+          <span className="modal__h-label">edit prompt</span>
+          <button className="modal__close" type="button">
+            × close
+          </button>
+        </header>
+        <PromptEditor
+          initial={{ ...DEMO_USER_PROMPT, source: "user" }}
+          context={buildAutoFillContext(CS, PREF_FILE, PREF_FILE.hunks[0], null)}
+          onSaved={() => {}}
+          onCancel={() => {}}
+          onDeleted={() => {}}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function Demo() {
+  installDemoMocks();
   const frames = useMemo(() => buildFrames(), []);
   const [idx, setIdx] = useState(0);
   // Demo opens paused so a recorder can frame the shot before hitting Play —
   // matches the gallery's play mode.
   const [playing, setPlaying] = useState(false);
   const [hover, setHover] = useState(false);
-  // Initial theme matches the first frame (plan, in light) so opening the
-  // demo paused looks right; the theme demo at the end animates to dollhouse.
+  // Initial theme matches the opening frame; the theme demo at the end
+  // still animates to dollhouse once playback reaches it.
   const [themeId, setThemeId] = useState<ThemeId>("light");
   // Buttons hide entirely when false — for clean recording. The caption +
   // text stay visible. Toggle with Ctrl/⌘+. or the × button.
@@ -317,7 +773,7 @@ export function Demo() {
   };
 
   // Demo-level shortcuts. All gated on Ctrl or ⌘ so they never collide with
-  // the live app's single-key bindings (j/k/c/r/etc.) inside FrameStage.
+  // the live app's single-key bindings (j/k/c/r/etc.) inside WorkspaceStage.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!e.ctrlKey && !e.metaKey) return;
@@ -353,7 +809,7 @@ export function Demo() {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <FrameStage
+      <DemoFrame
         key={idx}
         frame={current}
         themeId={themeId}
@@ -426,28 +882,29 @@ export function Demo() {
 
 // ── stage ─────────────────────────────────────────────────────────────────
 
-function FrameStage({
+function WorkspaceStage({
   frame,
   themeId,
   onPickTheme,
 }: {
-  frame: Frame;
+  frame: WorkspaceFrame;
   themeId: ThemeId;
   onPickTheme: (id: ThemeId) => void;
 }) {
   const [state, dispatch] = useReducer(reducer, frame.state);
 
   // Composer + UI state mirrors App.tsx's local state. Each frame mounts a
-  // fresh FrameStage, so drafts are scoped to a frame's lifetime — advancing
-  // and coming back resets them, which is what we want for a demo.
+  // fresh WorkspaceStage, so drafts are scoped to a frame's lifetime —
+  // advancing and coming back resets them, which is what we want for a demo.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
-  const [showInspector, setShowInspector] = useState(true);
+  const [showInspector, setShowInspector] = useState(
+    frame.showInspector ?? true,
+  );
 
   // Per-frame modal visibility. Initial values are seeded from the frame's
-  // declared overlay so frame 2 opens with the plan, frame 11 with the load
-  // modal, etc. The user can dismiss them and toggle via keyboard like in
-  // the live app.
+  // declared overlay. The user can dismiss them and toggle via keyboard
+  // like in the live app.
   const [showPlan, setShowPlan] = useState(frame.overlay.kind === "plan");
   const [showHelp, setShowHelp] = useState(frame.overlay.kind === "help");
   const [showLoad, setShowLoad] = useState(frame.overlay.kind === "load");
@@ -478,47 +935,33 @@ function FrameStage({
 
   // Inline-runner request — populated when the frame seeds an inline runner,
   // and re-populated by the `e` keybinding (see RUN_SELECTION below).
-  // Switched to during-render setState (gated on overlay-reference change)
-  // so we don't cascade renders through an effect.
   const [runRequest, setRunRequest] = useState<{
     tick: number;
     source: string;
     inputs?: Record<string, string>;
-  } | null>(null);
-  const [trackedRunOverlay, setTrackedRunOverlay] = useState(frame.overlay);
-  if (trackedRunOverlay !== frame.overlay) {
-    setTrackedRunOverlay(frame.overlay);
-    if (frame.overlay.kind === "runnerInline") {
-      // tick value is unused beyond ≠0; CodeRunner re-fires on every new
-      // request object reference, so a constant non-zero tick is fine.
-      setRunRequest({ tick: 1, source: frame.overlay.source });
-    }
-  }
+  } | null>(
+    frame.overlay.kind === "runnerInline"
+      ? { tick: 1, source: frame.overlay.source }
+      : null,
+  );
 
   // Prompt runs — real Claude streams from picker submits land here, and
-  // frame 10 also seeds a fake-streaming demo run so the surface looks
+  // the prompt-picker frame also seeds a fake-streaming demo run so the
   // populated even without a backend. Rendered in the sidebar panel.
-  // Seed during render (canonical prop-change pattern); the streaming
-  // interval lives in its own effect below.
-  const [runs, setRuns] = useState<PromptRunView[]>([]);
-  const [sidebarWide, setSidebarWide] = useState(false);
-  const runControllersRef = useRef<Map<string, AbortController>>(new Map());
-  const [trackedPickerKind, setTrackedPickerKind] = useState(
-    frame.overlay.kind,
+  const [runs, setRuns] = useState<PromptRunView[]>(
+    frame.overlay.kind === "promptPicker"
+      ? [
+          {
+            id: "demo-run",
+            promptName: "review-this-hunk",
+            text: "",
+            status: "streaming",
+          },
+        ]
+      : (frame.seedRuns ?? []),
   );
-  if (trackedPickerKind !== frame.overlay.kind) {
-    setTrackedPickerKind(frame.overlay.kind);
-    if (frame.overlay.kind === "promptPicker") {
-      setRuns([
-        {
-          id: "demo-run",
-          promptName: "review-this-hunk",
-          text: "",
-          status: "streaming",
-        },
-      ]);
-    }
-  }
+  const [sidebarWide, setSidebarWide] = useState(frame.sidebarWide ?? false);
+  const runControllersRef = useRef<Map<string, AbortController>>(new Map());
   useEffect(() => {
     if (frame.overlay.kind !== "promptPicker") return;
     const id = "demo-run";
