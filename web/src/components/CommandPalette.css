@@ -1,0 +1,56 @@
+.cmdpal__box {
+  width: min(640px, 100%);
+}
+.cmdpal__results {
+  padding: 0;
+}
+.cmdpal__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow: auto;
+}
+.cmdpal__item {
+  display: grid;
+  grid-template-columns: minmax(80px, 140px) 1fr auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  padding: 6px 14px;
+  border-bottom: 1px dashed var(--border);
+  cursor: pointer;
+}
+.cmdpal__item:last-child {
+  border-bottom: none;
+}
+.cmdpal__item--active {
+  background: var(--bg-3, var(--bg));
+}
+.cmdpal__item--disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.cmdpal__item--disabled.cmdpal__item--active {
+  background: transparent;
+}
+.cmdpal__chord {
+  color: var(--accent);
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cmdpal__item--disabled .cmdpal__chord {
+  color: var(--fg-mute);
+}
+.cmdpal__label {
+  color: var(--fg);
+  font-size: 13px;
+}
+.cmdpal__group {
+  color: var(--fg-mute);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}

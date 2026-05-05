@@ -93,6 +93,10 @@ export function HelpOverlay({ onClose }: { onClose: () => void }) {
           </tbody>
         </table>
         <div className="help__hint">
+          Forgot a key? Press <kbd>⌘k</kbd> / <kbd>⌃k</kbd> to open the
+          command palette and search app-level actions.
+        </div>
+        <div className="help__hint">
           Lines you visit are marked as <em>read</em>. Press{" "}
           <kbd>⇧m</kbd> to sign off the current file as reviewed.
         </div>

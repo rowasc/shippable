@@ -16,6 +16,7 @@ import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
 import { ThemePicker } from "./ThemePicker";
 import { PromptPicker } from "./PromptPicker";
+import { CommandPalette } from "./CommandPalette";
 import { type PromptRunView } from "./PromptRunsPanel";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
 import { runPrompt } from "../promptRun";
@@ -29,7 +30,7 @@ import type {
   Reply,
 } from "../types";
 import { blockCommentKey, lineNoteReplyKey, noteKey, userCommentKey } from "../types";
-import { KEYMAP } from "../keymap";
+import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
 import { useApiKey } from "../useApiKey";
 import type { ThemeId } from "../tokens";
@@ -81,6 +82,7 @@ export function ReviewWorkspace({
   const [showPlan, setShowPlan] = useState(true);
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
 
@@ -101,11 +103,179 @@ export function ReviewWorkspace({
 
   const suggestion = maybeSuggest(cs, state);
 
+  const palettePredicates: Record<string, boolean> = {
+    hasSuggestion: !!suggestion,
+    lineHasAiNote: !!line?.aiNote,
+    hasSelection: !!state.selection,
+    hasPlan: showPlan,
+    hasPicker: showPicker,
+    hasCommandPalette: showCommandPalette,
+  };
+
+  function runAction(action: ActionId) {
+    const preserveSelection = draftingKey?.startsWith("block:") ?? false;
+    switch (action) {
+      case "MOVE_LINE_DOWN":
+        dispatch({ type: "MOVE_LINE", delta: 1, preserveSelection });
+        break;
+      case "MOVE_LINE_UP":
+        dispatch({ type: "MOVE_LINE", delta: -1, preserveSelection });
+        break;
+      case "MOVE_LINE_DOWN_EXTEND":
+        dispatch({ type: "MOVE_LINE", delta: 1, extend: true });
+        break;
+      case "MOVE_LINE_UP_EXTEND":
+        dispatch({ type: "MOVE_LINE", delta: -1, extend: true });
+        break;
+      case "COLLAPSE_SELECTION":
+        dispatch({ type: "COLLAPSE_SELECTION" });
+        break;
+      case "MOVE_HUNK_DOWN":
+        dispatch({ type: "MOVE_HUNK", delta: 1 });
+        break;
+      case "MOVE_HUNK_UP":
+        dispatch({ type: "MOVE_HUNK", delta: -1 });
+        break;
+      case "MOVE_FILE_NEXT":
+        dispatch({ type: "MOVE_FILE", delta: 1 });
+        break;
+      case "MOVE_FILE_PREV":
+        dispatch({ type: "MOVE_FILE", delta: -1 });
+        break;
+      case "TOGGLE_HELP":
+        setShowHelp((v) => !v);
+        break;
+      case "TOGGLE_INSPECTOR":
+        setShowInspector((v) => !v);
+        break;
+      case "TOGGLE_PLAN":
+        setShowPlan((v) => !v);
+        break;
+      case "CLOSE_PLAN":
+        setShowPlan(false);
+        break;
+      case "TOGGLE_ACK":
+        dispatch({
+          type: "TOGGLE_ACK",
+          hunkId: state.cursor.hunkId,
+          lineIdx: state.cursor.lineIdx,
+        });
+        break;
+      case "TOGGLE_FILE_REVIEWED":
+        dispatch({
+          type: "TOGGLE_FILE_REVIEWED",
+          fileId: state.cursor.fileId,
+        });
+        break;
+      case "START_REPLY":
+        setDraftingKey(
+          lineNoteReplyKey(state.cursor.hunkId, state.cursor.lineIdx),
+        );
+        setShowInspector(true);
+        break;
+      case "START_COMMENT": {
+        const sel = state.selection;
+        const key =
+          sel && sel.hunkId === state.cursor.hunkId
+            ? blockCommentKey(
+                sel.hunkId,
+                Math.min(sel.anchor, sel.head),
+                Math.max(sel.anchor, sel.head),
+              )
+            : userCommentKey(state.cursor.hunkId, state.cursor.lineIdx);
+        setDraftingKey(key);
+        setShowInspector(true);
+        break;
+      }
+      case "ACCEPT_GUIDE": {
+        if (!suggestion) break;
+        dispatch({
+          type: "SET_CURSOR",
+          cursor: {
+            changesetId: state.cursor.changesetId,
+            fileId: suggestion.toFileId,
+            hunkId: suggestion.toHunkId,
+            lineIdx: suggestion.toLineIdx,
+          },
+        });
+        break;
+      }
+      case "DISMISS_GUIDE":
+        if (!suggestion) break;
+        dispatch({ type: "DISMISS_GUIDE", guideId: suggestion.id });
+        break;
+      case "CLOSE_HELP":
+        if (showHelp) setShowHelp(false);
+        break;
+      case "OPEN_LOAD":
+        setShowLoad(true);
+        break;
+      case "OPEN_RUNNER":
+        setFreeRunnerOpen(true);
+        break;
+      case "OPEN_PROMPT_PICKER":
+        setShowPicker((v) => !v);
+        break;
+      case "CLOSE_PROMPT_PICKER":
+        setShowPicker(false);
+        break;
+      case "OPEN_COMMAND_PALETTE":
+        setShowCommandPalette(true);
+        break;
+      case "CLOSE_COMMAND_PALETTE":
+        setShowCommandPalette(false);
+        break;
+      case "RUN_SELECTION": {
+        const sel = state.selection;
+        const lines =
+          sel && sel.hunkId === hunk.id
+            ? hunk.lines.slice(
+                Math.min(sel.anchor, sel.head),
+                Math.max(sel.anchor, sel.head) + 1,
+              )
+            : hunk.lines;
+        const source = lines
+          .filter((l) => l.kind !== "del")
+          .map((l) => l.text)
+          .join("\n");
+        setRunRequest((prev) => ({
+          tick: (prev?.tick ?? 0) + 1,
+          source,
+        }));
+        break;
+      }
+      case "PREV_CHANGESET":
+        dispatch({
+          type: "SWITCH_CHANGESET",
+          changesetId: cycleChangeset(
+            state.changesets,
+            state.cursor.changesetId,
+            -1,
+          ),
+        });
+        break;
+      case "NEXT_CHANGESET":
+        dispatch({
+          type: "SWITCH_CHANGESET",
+          changesetId: cycleChangeset(
+            state.changesets,
+            state.cursor.changesetId,
+            1,
+          ),
+        });
+        break;
+    }
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (showHelp && e.key !== "?" && e.key !== "Escape") return;
       if (showPlan && !["p", "?", "Escape"].includes(e.key)) return;
       if (showPicker && e.key !== "Escape") return;
+      // The palette has its own keyboard handlers; the global keymap only
+      // needs to handle Escape as a fallback when focus has escaped the
+      // palette's box (e.g. after clicking outside the input).
+      if (showCommandPalette && e.key !== "Escape") return;
 
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && sel.toString().length > 0) return;
@@ -120,178 +290,31 @@ export function ReviewWorkspace({
       }
       if (e.key === "Tab" && tgt && tgt !== document.body) return;
 
-      const predicates: Record<string, boolean> = {
-        hasSuggestion: !!suggestion,
-        lineHasAiNote: !!line?.aiNote,
-        hasSelection: !!state.selection,
-        hasPlan: showPlan,
-        hasPicker: showPicker,
-      };
-
       const entry = KEYMAP.find(
         (km) =>
           km.key === e.key &&
           (km.shift === undefined ? true : km.shift === e.shiftKey) &&
-          (km.when === undefined ? true : predicates[km.when]),
+          (km.meta ?? false) === e.metaKey &&
+          (km.ctrl ?? false) === e.ctrlKey &&
+          (km.when === undefined ? true : palettePredicates[km.when]),
       );
 
       if (!entry) return;
 
       e.preventDefault();
-
-      const preserveSelection = draftingKey?.startsWith("block:") ?? false;
-
-      switch (entry.action) {
-        case "MOVE_LINE_DOWN":
-          dispatch({ type: "MOVE_LINE", delta: 1, preserveSelection });
-          break;
-        case "MOVE_LINE_UP":
-          dispatch({ type: "MOVE_LINE", delta: -1, preserveSelection });
-          break;
-        case "MOVE_LINE_DOWN_EXTEND":
-          dispatch({ type: "MOVE_LINE", delta: 1, extend: true });
-          break;
-        case "MOVE_LINE_UP_EXTEND":
-          dispatch({ type: "MOVE_LINE", delta: -1, extend: true });
-          break;
-        case "COLLAPSE_SELECTION":
-          dispatch({ type: "COLLAPSE_SELECTION" });
-          break;
-        case "MOVE_HUNK_DOWN":
-          dispatch({ type: "MOVE_HUNK", delta: 1 });
-          break;
-        case "MOVE_HUNK_UP":
-          dispatch({ type: "MOVE_HUNK", delta: -1 });
-          break;
-        case "MOVE_FILE_NEXT":
-          dispatch({ type: "MOVE_FILE", delta: 1 });
-          break;
-        case "MOVE_FILE_PREV":
-          dispatch({ type: "MOVE_FILE", delta: -1 });
-          break;
-        case "TOGGLE_HELP":
-          setShowHelp((v) => !v);
-          break;
-        case "TOGGLE_INSPECTOR":
-          setShowInspector((v) => !v);
-          break;
-        case "TOGGLE_PLAN":
-          setShowPlan((v) => !v);
-          break;
-        case "CLOSE_PLAN":
-          setShowPlan(false);
-          break;
-        case "TOGGLE_ACK":
-          dispatch({
-            type: "TOGGLE_ACK",
-            hunkId: state.cursor.hunkId,
-            lineIdx: state.cursor.lineIdx,
-          });
-          break;
-        case "TOGGLE_FILE_REVIEWED":
-          dispatch({
-            type: "TOGGLE_FILE_REVIEWED",
-            fileId: state.cursor.fileId,
-          });
-          break;
-        case "START_REPLY":
-          setDraftingKey(
-            lineNoteReplyKey(state.cursor.hunkId, state.cursor.lineIdx),
-          );
-          setShowInspector(true);
-          break;
-        case "START_COMMENT": {
-          const sel = state.selection;
-          const key =
-            sel && sel.hunkId === state.cursor.hunkId
-              ? blockCommentKey(
-                  sel.hunkId,
-                  Math.min(sel.anchor, sel.head),
-                  Math.max(sel.anchor, sel.head),
-                )
-              : userCommentKey(state.cursor.hunkId, state.cursor.lineIdx);
-          setDraftingKey(key);
-          setShowInspector(true);
-          break;
-        }
-        case "ACCEPT_GUIDE": {
-          const s = suggestion!;
-          dispatch({
-            type: "SET_CURSOR",
-            cursor: {
-              changesetId: state.cursor.changesetId,
-              fileId: s.toFileId,
-              hunkId: s.toHunkId,
-              lineIdx: s.toLineIdx,
-            },
-          });
-          break;
-        }
-        case "DISMISS_GUIDE":
-          dispatch({ type: "DISMISS_GUIDE", guideId: suggestion!.id });
-          break;
-        case "CLOSE_HELP":
-          if (showHelp) setShowHelp(false);
-          break;
-        case "OPEN_LOAD":
-          setShowLoad(true);
-          break;
-        case "OPEN_RUNNER":
-          setFreeRunnerOpen(true);
-          break;
-        case "OPEN_PROMPT_PICKER":
-          setShowPicker((v) => !v);
-          break;
-        case "CLOSE_PROMPT_PICKER":
-          setShowPicker(false);
-          break;
-        case "RUN_SELECTION": {
-          const sel = state.selection;
-          const lines =
-            sel && sel.hunkId === hunk.id
-              ? hunk.lines.slice(
-                  Math.min(sel.anchor, sel.head),
-                  Math.max(sel.anchor, sel.head) + 1,
-                )
-              : hunk.lines;
-          const source = lines
-            .filter((l) => l.kind !== "del")
-            .map((l) => l.text)
-            .join("\n");
-          setRunRequest((prev) => ({
-            tick: (prev?.tick ?? 0) + 1,
-            source,
-          }));
-          break;
-        }
-        case "PREV_CHANGESET":
-          dispatch({
-            type: "SWITCH_CHANGESET",
-            changesetId: cycleChangeset(
-              state.changesets,
-              state.cursor.changesetId,
-              -1,
-            ),
-          });
-          break;
-        case "NEXT_CHANGESET":
-          dispatch({
-            type: "SWITCH_CHANGESET",
-            changesetId: cycleChangeset(
-              state.changesets,
-              state.cursor.changesetId,
-              1,
-            ),
-          });
-          break;
-      }
+      runAction(entry.action);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // palettePredicates and runAction are rebuilt every render; including
+    // them would cause the effect to re-register each render anyway. The
+    // explicit deps below already cover everything either of them reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     showHelp,
     showPlan,
     showPicker,
+    showCommandPalette,
     state.cursor,
     state.changesets,
     state.selection,
@@ -568,6 +591,16 @@ export function ReviewWorkspace({
           context={buildAutoFillContext(cs, file, hunk, state.selection)}
           onClose={() => setShowPicker(false)}
           onSubmit={(prompt, rendered) => startPromptRun(prompt, rendered)}
+        />
+      )}
+      {showCommandPalette && (
+        <CommandPalette
+          predicates={palettePredicates}
+          onClose={() => setShowCommandPalette(false)}
+          onPick={(action) => {
+            setShowCommandPalette(false);
+            runAction(action);
+          }}
         />
       )}
       {showHelp && <HelpOverlay onClose={() => setShowHelp(false)} />}

@@ -33,14 +33,17 @@ export type ActionId =
   | "OPEN_LOAD"
   | "OPEN_RUNNER"
   | "OPEN_PROMPT_PICKER"
-  | "CLOSE_PROMPT_PICKER";
+  | "CLOSE_PROMPT_PICKER"
+  | "OPEN_COMMAND_PALETTE"
+  | "CLOSE_COMMAND_PALETTE";
 
 export type ContextPredicate =
   | "hasSuggestion"
   | "lineHasAiNote"
   | "hasSelection"
   | "hasPlan"
-  | "hasPicker";
+  | "hasPicker"
+  | "hasCommandPalette";
 
 export type KeyGroup = "navigation" | "review" | "guide" | "ui" | "testing";
 
@@ -49,11 +52,17 @@ export interface KeyEntry {
   key: string;
   /** If true, Shift must be held; default false */
   shift?: boolean;
+  /** If true, Cmd (macOS) must be held; default false (must NOT be held) */
+  meta?: boolean;
+  /** If true, Ctrl must be held; default false (must NOT be held) */
+  ctrl?: boolean;
   label: string;
   group: KeyGroup;
   action: ActionId;
   /** Entry only fires when this predicate is true at dispatch time */
   when?: ContextPredicate;
+  /** Palette-visible commands should be app-level actions, not cursor motion */
+  palette?: "global";
 }
 
 export const KEYMAP: KeyEntry[] = [
@@ -88,16 +97,19 @@ export const KEYMAP: KeyEntry[] = [
   { key: "n",      label: "dismiss guide", group: "guide", action: "DISMISS_GUIDE", when: "hasSuggestion" },
 
   // ── ui ──────────────────────────────────────────────────────────────────────
-  { key: "?",      label: "toggle this help",    group: "ui", action: "TOGGLE_HELP" },
-  { key: "i",      label: "toggle AI inspector", group: "ui", action: "TOGGLE_INSPECTOR" },
-  { key: "p",      label: "where to start (plan)", group: "ui", action: "TOGGLE_PLAN" },
+  { key: "?",      label: "see keybindings",    group: "ui", action: "TOGGLE_HELP", palette: "global" },
+  { key: "i",      label: "toggle AI inspector", group: "ui", action: "TOGGLE_INSPECTOR", palette: "global" },
+  { key: "p",      label: "where to start (plan)", group: "ui", action: "TOGGLE_PLAN", palette: "global" },
   // Escape closes plan before falling through to help / guide Escape handlers.
   { key: "Escape", when: "hasPlan", label: "close plan", group: "ui", action: "CLOSE_PLAN" },
   { key: "Escape", label: "close help",          group: "ui", action: "CLOSE_HELP" },
-  { key: "L", shift: true, label: "load a changeset (URL / file / paste)", group: "ui", action: "OPEN_LOAD" },
-  { key: "R", shift: true, label: "open the free code runner", group: "ui", action: "OPEN_RUNNER" },
+  { key: "L", shift: true, label: "load a changeset (URL / file / paste)", group: "ui", action: "OPEN_LOAD", palette: "global" },
+  { key: "R", shift: true, label: "open the free code runner", group: "ui", action: "OPEN_RUNNER", palette: "global" },
   { key: "/", shift: false, label: "run a prompt on the current selection", group: "ui", action: "OPEN_PROMPT_PICKER" },
   { key: "Escape", when: "hasPicker", label: "close prompt picker", group: "ui", action: "CLOSE_PROMPT_PICKER" },
+  { key: "k", meta: true, label: "open command palette", group: "ui", action: "OPEN_COMMAND_PALETTE" },
+  { key: "k", ctrl: true, label: "open command palette", group: "ui", action: "OPEN_COMMAND_PALETTE" },
+  { key: "Escape", when: "hasCommandPalette", label: "close command palette", group: "ui", action: "CLOSE_COMMAND_PALETTE" },
 
   // ── testing ─────────────────────────────────────────────────────────────────
   { key: "{", label: "previous sample changeset", group: "testing", action: "PREV_CHANGESET" },
