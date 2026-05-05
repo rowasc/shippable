@@ -1,6 +1,6 @@
 # Test and refactor strategy
 
-**Status:** Draft. Open questions at the bottom.
+**Status:** Draft.
 
 ## What this is
 
@@ -11,7 +11,7 @@ A proposal for how Shippable gets a test suite worth running, the refactors need
 - Four test layers (unit / integration / E2E / manual). One bar: every test must catch a bug class the type checker can't.
 - Land the suite in four phases. **Phase A is load-bearing**: server integration tests, version `persist.ts`, prune dead smokes.
 - Three refactors are prerequisites, not nice-to-haves: `server/src/index.ts` (extract handlers + inject deps), `persist.ts` (versioned state + migration table), `promptRun`/`promptStore` (pure reducer reachable without a mounted component).
-- CI = GitHub Actions, lands in Phase C. Coverage collected, never gated.
+- CI = GitHub Actions. Tiny in Phase A (lint/test/typecheck), full in Phase C (Playwright + server integration). Coverage published, never gated.
 
 ## How to read this
 
@@ -51,7 +51,7 @@ A proposal for how Shippable gets a test suite worth running, the refactors need
 
 - **Unit** — vitest + jsdom. Pure modules and components in isolation. Default.
 - **Integration** — vitest, Node. Boot real `http.Server` from `server/src` in-process. Mock only at the Anthropic SDK boundary.
-- **E2E** — keep `test:smoke` for now; new specs via `@playwright/test` if we adopt it. Few, golden, against a real Vite build.
+- **E2E** — keep `test:smoke` for now; the three golden paths move to `@playwright/test` in Phase C. Few, golden, against a real Vite build.
 - **Manual** — Tauri shell, runner sandbox edges. Document, don't automate yet.
 
 ## Risk-first plan
@@ -102,24 +102,29 @@ Parked until Tier 0 decides what survives.
 - Asserting on private helpers — drive through the public API.
 - One trivial test per source file to inflate coverage.
 
+## Coverage rule
+
+"Every feature has a suite" is checkable, not vibes. The unit of "feature" is layer-specific:
+
+- Every workflow in `docs/features/` has at least one happy-path E2E.
+- Every server endpoint has at least one integration test.
+- Every module's public API has unit tests.
+
+That inventory is what we run against before calling Phase D done.
+
 ## Tooling
 
-Vitest + Testing Library kept. Anthropic SDK mocked at boundary only. `@playwright/test` is an open question. CI = GitHub Actions running `web:lint`, `web:test`, `server:typecheck`, `web:test:smoke` (default specs); add `server:test` once Tier 1 lands. Coverage collected, never gated — gates push people into principle #2 violations.
+- **Vitest + Testing Library** for unit and integration. Kept.
+- **Anthropic SDK** — hand-written stubs at the boundary, validated against the same Zod schema the UI consumes. No recorded-response replay until drift bites us.
+- **`@playwright/test`** adopted in Phase C. `playwright-core` already in deps is incidental — `test-smoke.mjs` drives Chrome via CDP directly. Port only the three golden-path E2Es; don't migrate the rest of the smoke suite.
+- **`@vitest/coverage-v8`** wired in Phase A. Publish the number, never set a threshold — gates push people into principle #2 violations.
+- **Tauri shell** stays out of scope until CI grows Macs.
 
 ## Sequencing
 
-- **Phase A:** Tier 0 + Tier 1 + persist redesign. Output: server has integration tests, persist is versioned, blocked smokes resolved.
+- **Phase A:** Tier 0 + Tier 1 + `persist.ts` redesign + tiny CI (`web:lint`, `web:test`, `server:typecheck`, `server:test`, coverage published). Output: server has integration tests, persist is versioned, blocked smokes resolved.
 - **Phase B:** Tier 2.
-- **Phase C:** Tier 3 + CI.
+- **Phase C:** Tier 3 + Playwright + golden-path E2Es in CI.
 - **Phase D:** Tier 4.
 
 Each phase's PR says what bug class it locked down.
-
-## Open questions
-
-1. Stub the Anthropic SDK or replay recorded responses? (lean stub.)
-2. Adopt `@playwright/test`, or stay on `test:smoke`? `playwright-core` is already a dep — deliberate?
-3. CI in Phase A or after?
-4. Tauri shell out of scope for now — confirm.
-5. `@vitest/coverage-v8` now or in Phase B?
-6. Unit of "feature" for *"every feature has a suite"*: workflow for E2E, module for unit, endpoint for integration — agree?
