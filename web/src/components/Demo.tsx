@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { CHANGESETS, SEED_REPLIES } from "../fixtures";
+import { CS_42, REPLIES_42 } from "../fixtures/cs-42-preferences";
 import {
   initialState,
   reducer,
@@ -44,7 +44,7 @@ import {
 } from "../types";
 import "./Demo.css";
 
-const CS = CHANGESETS[0]; // cs-42 — Add user preferences panel
+const CS = CS_42;
 const PREF_FILE = CS.files.find(
   (f) => f.path === "src/components/PreferencesPanel.tsx",
 )!;
@@ -72,7 +72,7 @@ interface Frame {
 // ── frame state helpers ───────────────────────────────────────────────────
 
 function fresh(): ReviewState {
-  return { ...initialState([CS]), replies: { ...SEED_REPLIES } };
+  return { ...initialState([CS]), replies: { ...REPLIES_42 } };
 }
 
 function withCursor(
@@ -100,7 +100,7 @@ function buildFrames(): Frame[] {
       ...fresh(),
       ackedNotes: new Set([noteKey(PREF_H1.id, 14)]),
       replies: {
-        ...SEED_REPLIES,
+        ...REPLIES_42,
         [lineNoteReplyKey(PREF_H1.id, 21)]: [
           {
             id: "demo-r1",
@@ -130,7 +130,7 @@ function buildFrames(): Frame[] {
     },
     selection: { hunkId: STORAGE_H2.id, anchor: BLOCK_LO, head: BLOCK_HI },
     replies: {
-      ...SEED_REPLIES,
+      ...REPLIES_42,
       [blockKey]: [
         {
           id: "demo-block",

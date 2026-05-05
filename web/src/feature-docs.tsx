@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./App.css";
 import "./feature-docs.css";
-import { CHANGESETS } from "./fixtures";
+import { CS_42 } from "./fixtures/cs-42-preferences";
 import { initialState, changesetCoverage, reviewedFilesCount } from "./state";
 import { planReview } from "./plan";
 import { maybeSuggest } from "./guide";
@@ -70,7 +70,7 @@ type View =
   | "runner-free"
   | "themes";
 
-const CS = CHANGESETS[0];
+const CS = CS_42;
 const USER_FILE = CS.files[0];
 const STORAGE_FILE = CS.files[1];
 const PREF_FILE = CS.files[2];

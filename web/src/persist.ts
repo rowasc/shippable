@@ -91,6 +91,54 @@ export function clearSession(): void {
 }
 
 /**
+ * Raw snapshot read without changeset validation. Used at boot to decide
+ * which changeset to hydrate (the snapshot's cursor.changesetId tells us
+ * what to look up in stubs/recents), before we have a changesets array
+ * to pass to loadSession. Returns null if the storage entry is missing
+ * or malformed.
+ */
+export function peekSession(): PersistedSnapshot | null {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  return isPersistedSnapshot(parsed) ? parsed : null;
+}
+
+/**
+ * Heuristic for "the user actually did something." Just visiting the app
+ * triggers a debounced save of the seeded state (cursor on line 0, one
+ * read line), so existence-of-snapshot alone isn't a useful signal — we
+ * need to look at what's *in* it.
+ */
+export function hasProgress(s: PersistedSnapshot): boolean {
+  if (s.reviewedFiles.length > 0) return true;
+  if (s.ackedNotes.length > 0) return true;
+  for (const arr of Object.values(s.readLines)) {
+    if (arr.length > 1) return true;
+  }
+  for (const v of Object.values(s.drafts)) {
+    if (v && v.trim()) return true;
+  }
+  // Replies: any reply whose author isn't a seeded teammate. Hard to
+  // detect precisely from this layer, but presence of replies on a
+  // userCommentKey-prefixed key is a strong "user did this" signal.
+  for (const key of Object.keys(s.replies)) {
+    if (key.startsWith("user:") || key.startsWith("block:")) return true;
+  }
+  return false;
+}
+
+/**
  * Read + validate the persisted snapshot. Returns hydrated state shaped
  * to overlay onto initialState. Cursor is validated against the loaded
  * changesets — if the persisted file/hunk no longer exists, we fall back
@@ -130,6 +178,10 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
     if (!validHunkIds.has(hunkId)) continue;
     readLines[hunkId] = new Set(arr.filter((n) => Number.isFinite(n)));
   }
+
+  // When changesets is empty (welcome boot), there's no fallback cursor to
+  // resolve — return null state so the caller knows nothing to overlay.
+  if (!cursor && changesets.length === 0) return empty;
 
   return {
     state: {
