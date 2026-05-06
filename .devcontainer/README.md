@@ -1,9 +1,11 @@
 # Sandboxed Claude Code
 
 Run Claude Code with `--dangerously-skip-permissions` inside a container whose
-egress is restricted to a known allowlist (npm, GitHub, Anthropic API, a few
-VS Code endpoints). The repo is bind-mounted at `/workspace`; the rest of the
-container filesystem is ephemeral.
+egress is restricted to a known allowlist: `registry.npmjs.org`,
+`api.anthropic.com`, and a few VS Code endpoints. **No GitHub access by
+default** — neither HTTPS nor SSH. **No telemetry hosts** (sentry, statsig).
+The repo is bind-mounted at `/workspace`; the rest of the container
+filesystem is ephemeral.
 
 ## Layout
 
@@ -18,7 +20,7 @@ from the [reference container](https://github.com/anthropics/claude-code/tree/ma
 | File                  | Why it's here                                                              |
 | --------------------- | -------------------------------------------------------------------------- |
 | `devcontainer.json`   | Declares the Feature, `NET_ADMIN`/`NET_RAW` caps, mounts, post-start hook |
-| `Dockerfile`          | Adds `iptables`/`ipset`/`dig`/`jq`/`aggregate`, sudoers rule for firewall |
+| `Dockerfile`          | Adds `iptables`/`ipset`/`dig`, sudoers rule for firewall                  |
 | `init-firewall.sh`    | Default-DROP egress + ipset allowlist; self-tests at startup              |
 
 ## What's enforced
@@ -31,7 +33,7 @@ from the [reference container](https://github.com/anthropics/claude-code/tree/ma
 
 The firewall script self-tests at startup: it fails the container if it can
 reach `https://example.com` (should be blocked) or can't reach
-`https://api.github.com` (should be allowed).
+`https://api.anthropic.com` (should be allowed).
 
 ## Run it (Podman)
 
@@ -56,10 +58,12 @@ fails, the container won't be considered ready.
 
 ## Editing the allowlist
 
-`init-firewall.sh` lines 67–75 list domains that get DNS-resolved and added
-to `allowed-domains`. GitHub IPs come from `api.github.com/meta` (line 45).
-After edits, rebuild the image — the firewall is applied at container start,
-not on each command.
+The `for domain in ...` block in `init-firewall.sh` lists every domain that
+gets DNS-resolved and added to `allowed-domains`. To add a host, add it
+there. To allow GitHub, add `github.com` and `api.github.com` (and reinstate
+the `iptables -A OUTPUT -p tcp --dport 22 -j ACCEPT` lines if you need git
+over SSH). After edits, rebuild the image — the firewall is applied at
+container start, not on each command.
 
 ## Caveats
 
