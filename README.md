@@ -42,13 +42,29 @@ npm run typecheck  # tsc --noEmit
 npm run test       # vitest run
 ```
 
-For the first real go-to-definition slice, the server can also resolve JS/TS definitions against a local checkout. Assumptions:
+#### Optional: enable click-through symbol navigation (JS/TS)
 
-- load the diff from the worktree picker so the frontend can pass the checkout root to the server, or set `SHIPPABLE_WORKSPACE_ROOT=/abs/path/to/checkout` as a fallback for non-worktree diffs
-- install `typescript-language-server` on `PATH`, or point `SHIPPABLE_TYPESCRIPT_LSP` at the binary explicitly
-- this first slice is intentionally narrow: worktree-backed diffs only, JS/TS files only, no browser-only fallback yet
+The server can resolve JS/TS go-to-definition against a local checkout. The feature is off by default; turn it on with two steps:
 
-The bundled desktop app reads from the same Keychain entry, so this one setup serves both surfaces.
+1. **Install `typescript-language-server`.** Either globally:
+
+   ```
+   npm install -g typescript typescript-language-server
+   ```
+
+   …or pin to a specific binary with `SHIPPABLE_TYPESCRIPT_LSP=/abs/path/to/typescript-language-server`.
+
+2. **Load the diff from a worktree.** Open the worktree picker and pick a checkout — the frontend passes its path to the server. For diffs that don't come from a worktree (pasted, URL-loaded, fixture), set `SHIPPABLE_WORKSPACE_ROOT=/abs/path/to/checkout` before starting the server as a fallback root.
+
+Verify it's working: hit `GET http://127.0.0.1:3001/api/definition/capabilities` — you want `{"available": true, "resolver": "typescript-language-server", ...}`. The diff toolbar will also show a `def: TS LSP` chip when the file is JS/TS and the server is reachable; otherwise it shows the reason (`def: worktree only`, `def: JS/TS only`, `def: unavailable`).
+
+Current limits — see [`docs/plans/plan-symbols.md`](docs/plans/plan-symbols.md) for the roadmap:
+
+- worktree-backed diffs only (or the `SHIPPABLE_WORKSPACE_ROOT` fallback)
+- JS/TS files only — PHP and others are planned in [`docs/plans/lsp-php.md`](docs/plans/lsp-php.md) and the same Tier-1b path
+- no browser-only fallback yet (every click goes through the server)
+
+The bundled desktop app reads from the same Keychain entry as the dev server, so this one setup serves both surfaces.
 
 The backend listens on `http://127.0.0.1:3001` and allows these browser origins by default:
 
@@ -61,13 +77,36 @@ If you want a different browser-origin allowlist, set:
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-API endpoints:
+#### API surface
 
-- `POST /api/plan` — accepts `{ changeset: ChangeSet }`, returns `{ plan: ReviewPlan }`
-- `GET /api/definition/capabilities` — reports whether the first JS/TS LSP slice is available
-- `POST /api/definition` — accepts `{ file, language, line, col, workspaceRoot? }`, returns definition locations or an honest unsupported/error response
+The full surface lives in [`server/src/index.ts`](server/src/index.ts). Request/response shapes are TypeScript types in [`web/src/types.ts`](web/src/types.ts) and [`web/src/definitionTypes.ts`](web/src/definitionTypes.ts) — the server imports them directly so they cannot drift from the client.
+
+The endpoints, grouped by feature:
+
+| Method   | Path                              | Purpose                                                                    |
+|----------|-----------------------------------|----------------------------------------------------------------------------|
+| `GET`    | `/api/health`                     | Liveness check — `{ ok: true }`.                                           |
+| `POST`   | `/api/plan`                       | Generate a review plan. `{ changeset: ChangeSet } → { plan: ReviewPlan }`. |
+| `POST`   | `/api/review`                     | Streaming review (SSE). Rate-limited per IP.                               |
+| `GET`    | `/api/definition/capabilities`    | Whether definition lookup is available + which languages.                  |
+| `POST`   | `/api/definition`                 | `{ file, language, line, col, workspaceRoot? } → DefinitionResponse`.      |
+| `GET`    | `/api/library/prompts`            | List shipped prompts.                                                      |
+| `POST`   | `/api/library/refresh`            | Re-sync the prompt library. Requires `SHIPPABLE_ADMIN_TOKEN`.              |
+| `POST`   | `/api/worktrees/list`             | List git worktrees discoverable from a given dir.                          |
+| `POST`   | `/api/worktrees/changeset`        | Build a `ChangeSet` from a worktree at HEAD or a specific ref.             |
+| `POST`   | `/api/worktrees/graph`            | Repo graph for a worktree at a ref.                                        |
+| `POST`   | `/api/worktrees/sessions`         | Claude/Codex session files for a worktree.                                 |
+| `POST`   | `/api/worktrees/agent-context`    | Slice of agent context for one commit.                                     |
+| `POST`   | `/api/worktrees/pick-directory`   | Native directory picker (sidecar only).                                    |
+| `GET`    | `/api/worktrees/mcp-status`       | Whether the shippable MCP server is wired into common harnesses.           |
+| `POST`   | `/api/agent/enqueue`              | Enqueue a reviewer comment for the agent to pull.                          |
+| `POST`   | `/api/agent/pull`                 | MCP-side: pull pending comments and ack them.                              |
+| `GET`    | `/api/agent/delivered?path=…`     | Already-delivered comments for a worktree.                                 |
+| `POST`   | `/api/agent/unenqueue`            | Drop a comment by id before delivery.                                      |
 
 The plan model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
+
+> **Heads-up:** the API surface is currently RPC-style and not stable. We're tracking design issues (HTTP status vs. discriminated `status` field, `path` vs. `worktreePath` body keys, structured error codes for the MCP queue, capability/lookup race) in [`docs/plans/api-review.md`](docs/plans/api-review.md). The frontend is the only client today, so changes don't break a public contract.
 
 Three entry points:
 

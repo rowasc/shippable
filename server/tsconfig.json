@@ -13,8 +13,15 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
+    // rootDir reaches up so the include block below can pull a few type files
+    // out of web/. We don't have a shared package; the server imports
+    // `ChangeSet`, `ReviewPlan`, `DefinitionRequest` directly. Without rootDir
+    // ".." TS would refuse to project-include files outside server/.
     "rootDir": ".."
   },
+  // Cross-package type sharing without a monorepo. Each entry is a type-only
+  // file the server imports from web/. If you add a new shared type, list it
+  // here so `tsc --noEmit` stays honest.
   "include": [
     "src/**/*.ts",
     "../web/src/types.ts",

@@ -2,13 +2,17 @@
 
 ## Status: partially implemented first slice
 
-The broad architecture here is still a draft. The first honest end-to-end slice now exists with deliberate limits:
+The broad architecture here is still a draft. The first end-to-end slice exists with deliberate limits:
 
 - deployment shape: local dev server or desktop sidecar with a real checkout on disk
 - changeset source: worktree-loaded diffs first; `SHIPPABLE_WORKSPACE_ROOT` is only a fallback for non-worktree diffs
 - language coverage: JS/TS only for the real LSP path
 - resolver: `typescript-language-server` discovered on `PATH` or via `SHIPPABLE_TYPESCRIPT_LSP`
-- UI honesty: pasted/url/file-loaded diffs show "worktree only", non-JS/TS files show "JS/TS only", and missing LSP binaries surface as unavailable rather than pretending clicks work
+- UI signals:
+  - pasted/url/file-loaded diffs show `def: worktree only` (the diff didn't come from a checkout)
+  - missing LSP binary shows `def: unavailable` with the reason in the tooltip
+  - files in a *programming* language we don't yet handle show `def: JS/TS only`
+  - files in a non-programming language (markdown, json, yaml, plain text — anything where definition nav doesn't apply at all) show no chip. A "JS/TS only" badge on a markdown file is worse than nothing — it implies a feature exists for that file when it doesn't
 
 ## Goal
 
