@@ -34,6 +34,11 @@ if ! grep -q "^export SHIPPABLE_HOST_REPO=" "$shell_rc" 2>/dev/null; then
     echo "added SHIPPABLE_HOST_REPO=\"$repo_root\" to $shell_rc"
 fi
 
+if grep -q "^alias yolo=" "$shell_rc" 2>/dev/null; then
+    sed -i.bak '/^alias yolo=/d' "$shell_rc" && rm -f "$shell_rc.bak"
+    echo "removed old 'alias yolo=' from $shell_rc"
+fi
+
 if ! grep -q "^yolo()" "$shell_rc" 2>/dev/null; then
     cat >> "$shell_rc" <<'EOF'
 
