@@ -74,6 +74,9 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return await handleWorktreesChangeset(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/state") {
+      return handleWorktreesState(req, res, origin);
+    }
     if (req.method === "POST" && req.url === "/api/worktrees/graph") {
       return await handleWorktreesGraph(req, res, origin);
     }
@@ -388,7 +391,7 @@ async function handleWorktreesChangeset(
   origin: string | null,
 ) {
   const body = await readBody(req);
-  let parsed: { path?: unknown; ref?: unknown };
+  let parsed: { path?: unknown; ref?: unknown; dirty?: unknown };
   try {
     parsed = JSON.parse(body);
   } catch {
@@ -400,20 +403,23 @@ async function handleWorktreesChangeset(
   const wtPath = typeof parsed.path === "string" ? parsed.path : "";
   const ref =
     typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : null;
+  const dirty = parsed.dirty === true;
   if (!wtPath) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { path: string, ref?: string }" }));
+    res.end(JSON.stringify({ error: "expected { path: string, ref?: string, dirty?: boolean }" }));
     return;
   }
   try {
-    // Default: cumulative branch view (committed-since-base + uncommitted +
-    // untracked). Only fall back to the single-commit view when the caller
-    // asks for a specific ref — that's a future "load specific commit" UX,
-    // not what LoadModal does today.
-    const result = ref
-      ? await worktrees.changesetFor(wtPath, ref)
-      : await worktrees.branchChangeset(wtPath);
+    // dirty=true: working-tree-only diff (live-reload "show me the
+    // uncommitted edits" path). ref: single-commit view (future "load
+    // specific commit" UX). Otherwise: cumulative branch view, which is
+    // what LoadModal asks for today.
+    const result = dirty
+      ? await worktrees.dirtyChangesetFor(wtPath)
+      : ref
+        ? await worktrees.changesetFor(wtPath, ref)
+        : await worktrees.branchChangeset(wtPath);
     writeCorsHeaders(res, origin);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
@@ -422,6 +428,46 @@ async function handleWorktreesChangeset(
     console.warn(`[server] /api/worktrees/changeset err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesState(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string }" }));
+    return;
+  }
+  try {
+    const state = await worktrees.stateFor(wtPath);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(state));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // 404 on missing/non-git paths so the client can stop polling cleanly
+    // without a banner-spamming log of generic 400s.
+    const status = /does not exist|not a directory|no \.git entry/.test(message)
+      ? 404
+      : 400;
+    writeCorsHeaders(res, origin);
+    res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
   }
 }

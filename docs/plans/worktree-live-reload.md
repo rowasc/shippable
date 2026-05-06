@@ -25,12 +25,12 @@ What it explicitly does *not* try to do:
 
 ## What "the diff" means
 
-The existing worktree loader uses `HEAD~1..HEAD` — the last commit. With uncommitted changes in the picture, we need a rule that doesn't double-count when the agent commits work that was previously sitting uncommitted.
+The clean default needs a rule that doesn't double-count when the agent commits work that was previously sitting uncommitted. The current `/api/worktrees/changeset` endpoint already returns the cumulative branch view (committed-since-base + uncommitted + untracked) by default — that's what LoadModal asks for. Live reload reuses that path for the clean case and adds a dirty-only path for the working-tree-only refresh.
 
 **Rule:**
 
-- **Clean tree** → `HEAD~1..HEAD`. The last commit, same as today.
-- **Dirty tree** → `HEAD..working-tree`. Everything not yet in `HEAD`: uncommitted edits, staged or unstaged.
+- **Clean tree** → cumulative branch view via the existing `branchChangeset` (committed-since-base + tracked uncommitted + untracked). Same as today's load.
+- **Dirty tree** → `HEAD..working-tree` via the new `dirty=true` request. Just the uncommitted edits, staged or unstaged, plus untracked.
 
 When an agent finishes their uncommitted edits and commits them, the view transitions cleanly: dirty hash goes away, HEAD advances by one, and the diff we show is `HEAD~1..HEAD` — which is *the same content* the user was just reviewing as uncommitted. No duplication, just a baseline shift.
 
@@ -92,6 +92,14 @@ Implementation notes from the slice (c) landing:
 **(f) Server-pushed updates (optional, deferred).** Replace polling with SSE backed by `fs.watch`. Worth doing only if (a) is meaningfully insufficient. *Done when:* there's evidence polling is too slow or too chatty in real use.
 
 Slices (a)–(d) are the feature. (e) is the next-most-useful follow-up. (f) is an "if we need it."
+
+### Status (2026-05-06)
+
+- **(a) Polling + banner** — shipped. `POST /api/worktrees/state`, hook, `LiveReloadBar`, `LOAD_CHANGESET` reload via the existing changeset endpoint with `dirty=true` honored.
+- **(b) Per-worktree toggle persistence** — shipped. `getLiveReloadEnabled` / `setLiveReloadEnabled` in `web/src/persist.ts`, keyed by absolute path, default-on, in its own localStorage key so `clearSession()` doesn't reset it.
+- **(c) Content-anchored comments + detached sidebar** — separate worktree.
+- **(d) Stop polling when the worktree is gone** — shipped. Three-strike error counter in the hook; `onWorktreeGone` fires once.
+- **(e), (f)** — not started.
 
 ## Architecture sketch
 

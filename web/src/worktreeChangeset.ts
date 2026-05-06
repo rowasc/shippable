@@ -1,6 +1,6 @@
 import { apiUrl } from "./apiUrl";
 import { parseDiff } from "./parseDiff";
-import type { ChangeSet, CodeGraph } from "./types";
+import type { ChangeSet, CodeGraph, WorktreeState } from "./types";
 
 interface WorktreeChangesetResponse {
   diff: string;
@@ -10,6 +10,7 @@ interface WorktreeChangesetResponse {
   date: string;
   branch: string | null;
   fileContents?: Record<string, string>;
+  state?: WorktreeState;
 }
 
 interface WorktreeGraphResponse {
@@ -74,6 +75,7 @@ export async function fetchWorktreeChangeset(wt: {
     worktreePath: wt.path,
     commitSha: json.sha,
     branch: wt.branch ?? null,
+    state: json.state,
   };
   return cs;
 }

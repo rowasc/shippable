@@ -23,6 +23,49 @@ import type {
 const STORAGE_KEY = "shippable:review:v1";
 
 /**
+ * Per-worktree live-reload toggle. Keyed by absolute worktree path so
+ * pausing on one tree doesn't pause others. Default-on for first encounter
+ * (a missing key returns true). Stored in its own JSON object rather than
+ * folded into the review snapshot — toggle state outlives any single review
+ * and shouldn't get reset by `clearSession()`.
+ */
+const LIVE_RELOAD_TOGGLE_KEY = "shippable:liveReload:v1";
+
+function readLiveReloadMap(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(LIVE_RELOAD_TOGGLE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return {};
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "boolean") out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function getLiveReloadEnabled(worktreePath: string): boolean {
+  const map = readLiveReloadMap();
+  return map[worktreePath] ?? true;
+}
+
+export function setLiveReloadEnabled(
+  worktreePath: string,
+  enabled: boolean,
+): void {
+  try {
+    const map = readLiveReloadMap();
+    map[worktreePath] = enabled;
+    localStorage.setItem(LIVE_RELOAD_TOGGLE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore — toggle persistence is a nice-to-have
+  }
+}
+
+/**
  * Head schema version. To bump it: add a `migrations[N]` entry below in
  * the same change. Old blobs in users' localStorage are migrated forward
  * on load; we never write old shapes back.

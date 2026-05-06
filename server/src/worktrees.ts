@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import { createHash } from "node:crypto";
 import { buildRepoCodeGraph, isGraphAnalyzablePath } from "../../web/src/codeGraph.ts";
 import type { CodeGraph } from "../../web/src/types.ts";
 
@@ -48,6 +49,18 @@ export interface ListResult {
   worktrees: Worktree[];
 }
 
+/**
+ * Live-reload probe: HEAD sha plus a digest of the working tree. The digest
+ * comes from `git status --porcelain=v2 -z` (cheap; no diff content) so the
+ * polling endpoint stays well under the cost of a full diff. `dirtyHash` is
+ * null when the tree is clean.
+ */
+export interface WorktreeState {
+  sha: string;
+  dirty: boolean;
+  dirtyHash: string | null;
+}
+
 export interface ChangesetResult {
   diff: string;
   sha: string;
@@ -55,6 +68,12 @@ export interface ChangesetResult {
   author: string;
   date: string;
   branch: string | null;
+  /**
+   * Worktree state observed when this changeset was produced. Returned
+   * alongside the diff so the live-reload poll can start with a baseline
+   * without a second round-trip.
+   */
+  state: WorktreeState;
   /**
    * Display label rendered in the topbar after `<branch> → `. May be a
    * short-sha (when the branch has diverged from a base ref), the literal
@@ -231,6 +250,44 @@ export async function listWorktrees(dir: string): Promise<ListResult> {
 }
 
 /**
+ * Probe HEAD + working-tree fingerprint for the live-reload poll. The
+ * dirty digest is computed from `git status --porcelain=v2 -z` — the v2
+ * format includes mode + sha + path for every tracked change, plus untracked
+ * paths, so any edit (staged or unstaged) flips the hash. NUL-separated so
+ * paths with spaces or newlines hash the same way they print.
+ */
+export async function stateFor(worktreePath: string): Promise<WorktreeState> {
+  await assertGitDir(worktreePath);
+  const [sha, statusBuf] = await Promise.all([
+    revParseHead(worktreePath),
+    statusPorcelainV2(worktreePath),
+  ]);
+  if (statusBuf.length === 0) {
+    return { sha, dirty: false, dirtyHash: null };
+  }
+  const dirtyHash = createHash("sha1").update(statusBuf).digest("hex").slice(0, 16);
+  return { sha, dirty: true, dirtyHash };
+}
+
+async function revParseHead(worktreePath: string): Promise<string> {
+  const { stdout } = await execFileAsync(GIT, ["rev-parse", "HEAD"], {
+    cwd: worktreePath,
+  });
+  return stdout.trim();
+}
+
+async function statusPorcelainV2(worktreePath: string): Promise<Buffer> {
+  // `--porcelain=v2 -z` emits NUL-terminated entries with mode/sha/path,
+  // covering staged + unstaged + untracked. Empty stdout = clean tree.
+  const { stdout } = await execFileAsync(
+    GIT,
+    ["status", "--porcelain=v2", "-z", "--untracked-files=normal"],
+    { cwd: worktreePath, maxBuffer: 8 * 1024 * 1024, encoding: "buffer" },
+  );
+  return stdout;
+}
+
+/**
  * Return the latest commit on `path` (default HEAD) as a unified diff plus
  * metadata. Uses `git show --format=… --patch` and parses the trailing
  * metadata block we ask for.
@@ -300,7 +357,8 @@ export async function changesetFor(
     }
   }
 
-  return { diff, sha, subject, author, date, branch, parentSha, fileContents };
+  const state = await stateFor(worktreePath);
+  return { diff, sha, subject, author, date, branch, parentSha, fileContents, state };
 }
 
 /**
@@ -416,6 +474,7 @@ export async function branchChangeset(
       : effectiveBase.slice(0, 7)
     : null;
 
+  const state = await stateFor(worktreePath);
   return {
     diff,
     sha: headSha,
@@ -425,6 +484,92 @@ export async function branchChangeset(
     branch,
     parentSha: baseLabel,
     fileContents,
+    state,
+  };
+}
+
+/**
+ * Dirty-only changeset: `git diff HEAD` for the current working tree. Used
+ * when the live-reload banner offers to refresh into the uncommitted state.
+ * Synthesizes `dirty:<dirtyHash>` as the changeset id so the review state
+ * machinery can distinguish two dirty snapshots.
+ *
+ * If the tree is clean by the time we run, returns an empty diff and lets
+ * the caller decide whether to fall back to the regular changeset path.
+ */
+export async function dirtyChangesetFor(
+  worktreePath: string,
+): Promise<ChangesetResult> {
+  await assertGitDir(worktreePath);
+
+  const headSha = await revParseHead(worktreePath);
+
+  // Tracked dirty diff via `git diff HEAD`. Exits 1 when changes are present
+  // — that's not an error.
+  const trackedDiff = await safeGitDiff(["diff", "HEAD"], worktreePath);
+
+  // Untracked, synthesized as new-file diffs. Same treatment as branchChangeset.
+  let untrackedDiff = "";
+  try {
+    const { stdout: untrackedList } = await execFileAsync(
+      GIT,
+      ["ls-files", "--others", "--exclude-standard"],
+      { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+    );
+    const files = untrackedList.split("\n").filter(Boolean);
+    for (const rel of files) {
+      try {
+        const synth = await synthesiseNewFileDiff(worktreePath, rel);
+        if (synth) untrackedDiff += synth;
+      } catch {
+        // Skip unreadable/binary/vanished files.
+      }
+    }
+  } catch {
+    // ls-files failure is non-fatal.
+  }
+
+  const diff = trackedDiff + untrackedDiff;
+
+  let branch: string | null = null;
+  try {
+    const { stdout: br } = await execFileAsync(
+      GIT,
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: worktreePath },
+    );
+    const trimmed = br.trim();
+    branch = trimmed && trimmed !== "HEAD" ? trimmed : null;
+  } catch {
+    branch = null;
+  }
+
+  const fileContents: Record<string, string> = {};
+  for (const p of extractRenderablePaths(diff)) {
+    try {
+      const content = await fs.readFile(path.join(worktreePath, p), "utf8");
+      fileContents[p] = content;
+    } catch {
+      // missing / unreadable — frontend falls back to in-diff content
+    }
+  }
+
+  const state = await stateFor(worktreePath);
+  // Synthesize a stable id that changes with the tree. Falls back to the
+  // HEAD sha when the tree is clean (race with a commit landing between
+  // the client probe and this call).
+  const sha = state.dirtyHash ? `dirty:${state.dirtyHash}` : headSha;
+
+  return {
+    diff,
+    sha,
+    subject: state.dirty ? "Uncommitted changes" : "(no uncommitted changes)",
+    author: "(working tree)",
+    date: new Date().toISOString(),
+    branch,
+    parentSha: headSha.slice(0, 7),
+    fileContents,
+    state,
   };
 }
 

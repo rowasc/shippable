@@ -371,9 +371,25 @@ export interface AgentContextSlice {
 }
 
 /**
+ * Worktree probe for the live-reload poll. `sha` is the real HEAD sha;
+ * `dirtyHash` is null on a clean tree and a digest of `git status --porcelain=v2`
+ * otherwise. The pair (sha, dirtyHash) is the comparison key — any change in
+ * either signals drift.
+ */
+export interface WorktreeState {
+  sha: string;
+  dirty: boolean;
+  dirtyHash: string | null;
+}
+
+/**
  * Worktree provenance carried alongside a ChangeSet so the agent-context panel
  * knows what to fetch. Set when the changeset was loaded from a worktree;
  * null otherwise (URL ingest, paste, file upload).
+ *
+ * `state` is the worktree's observed (sha, dirty, dirtyHash) at load time.
+ * The live-reload poll diffs against this baseline; null on legacy persisted
+ * recents written before the field existed.
  */
 export interface WorktreeSource {
   worktreePath: string;
@@ -386,6 +402,18 @@ export interface WorktreeSource {
    * Absent / false means a normal committed view.
    */
   dirty?: boolean;
+  state?: WorktreeState;
+}
+
+/**
+ * Polling-baseline shape passed into the live-reload hook + banner. Derived
+ * from the active ChangeSet's `worktreeSource`; null when no worktree is
+ * loaded or when state wasn't captured (legacy data).
+ */
+export interface WorktreeProvenance {
+  path: string;
+  branch: string | null;
+  state: WorktreeState;
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {

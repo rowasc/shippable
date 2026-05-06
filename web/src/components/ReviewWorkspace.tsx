@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Dispatch } from "react";
+import type { Dispatch, ReactNode } from "react";
 import { changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
 import type { Action } from "../state";
 import {
@@ -92,6 +92,9 @@ interface Props {
     cs: ChangeSet,
     source: RecentSource,
   ) => void;
+  /** Live-reload banner (idle / stale / gone) — null when no worktree
+   *  changeset is loaded. Rendered between the topbar and the main view. */
+  liveReloadBar?: ReactNode;
 }
 
 export function ReviewWorkspace({
@@ -104,6 +107,7 @@ export function ReviewWorkspace({
   onLoadChangeset,
   currentSource,
   onReloadChangeset,
+  liveReloadBar,
 }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
@@ -835,6 +839,8 @@ export function ReviewWorkspace({
           × reset
         </button>
       </header>
+
+      {liveReloadBar}
 
       <div
         className={`main ${showInspector ? "main--with-inspector" : ""} ${
