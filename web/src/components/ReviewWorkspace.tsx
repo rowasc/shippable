@@ -686,7 +686,8 @@ export function ReviewWorkspace({
               setDrafts((prev) => ({ ...prev, [key]: body }))
             }
             onSubmitReply={(key, body) => {
-              const replyId = `r-${Date.now()}`;
+              const createdAt = new Date();
+              const replyId = `r-${createdAt.getTime()}`;
               dispatch({
                 type: "ADD_REPLY",
                 targetKey: key,
@@ -694,7 +695,7 @@ export function ReviewWorkspace({
                   id: replyId,
                   author: "you",
                   body,
-                  createdAt: new Date().toISOString(),
+                  createdAt: createdAt.toISOString(),
                   enqueuedCommentId: null,
                 },
               });
