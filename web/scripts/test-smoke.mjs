@@ -19,12 +19,6 @@ const SMOKES = [
   { id: "coderunner-php-worker", file: "smoke-coderunner-php-worker.mjs", default: true },
   { id: "coderunner-free", file: "smoke-coderunner-free.mjs", default: true },
   {
-    id: "prompts",
-    file: "smoke-prompts.mjs",
-    default: false,
-    blockedReason: "needs the separate prompt library server on :3001",
-  },
-  {
     id: "md-preview",
     file: "smoke-md-preview.mjs",
     default: true,
