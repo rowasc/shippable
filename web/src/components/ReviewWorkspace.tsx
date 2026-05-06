@@ -23,13 +23,24 @@ import { runPrompt } from "../promptRun";
 import { buildSymbolIndex } from "../symbols";
 import type { SymbolIndex } from "../symbols";
 import type {
+  AgentContextSlice,
+  AgentSessionRef,
   ChangeSet,
   Cursor,
   EvidenceRef,
   ReviewState,
   Reply,
+  WorktreeSource,
 } from "../types";
 import { blockCommentKey, lineNoteReplyKey, noteKey, userCommentKey } from "../types";
+import {
+  enqueueComment,
+  fetchAgentContextForWorktree,
+  fetchMcpStatus,
+  unenqueueComment,
+} from "../agentContextClient";
+import { deriveCommentPayload } from "../agentCommentPayload";
+import { useDeliveredPolling } from "../useDeliveredPolling";
 import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
 import { useApiKey } from "../useApiKey";
@@ -95,6 +106,118 @@ export function ReviewWorkspace({
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = buildSymbolIndex(cs);
+
+  // Agent-context state. Provenance lives on cs.worktreeSource so it
+  // survives reloads and changeset switches; the slice/sessions/error are
+  // transient and per-cs.
+  const [agentSlice, setAgentSlice] = useState<AgentContextSlice | null>(null);
+  const [agentSessions, setAgentSessions] = useState<AgentSessionRef[]>([]);
+  const [pinnedSession, setPinnedSession] = useState<string | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentRefreshTick, setAgentRefreshTick] = useState(0);
+  // MCP-install status with retry+backoff. The dev server's port briefly
+  // disappears during `tsx watch` reloads; a single attempt can hit
+  // ECONNREFUSED and leave the banner stuck "unknown". After ~31s of
+  // attempts we give up silently — the install affordance stays visible
+  // until the user dismisses it.
+  const [mcpStatus, setMcpStatus] = useState<{ installed: boolean } | null>(
+    null,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    let attempt = 0;
+    const tryFetch = () => {
+      fetchMcpStatus()
+        .then((s) => {
+          if (!cancelled) setMcpStatus(s);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          attempt += 1;
+          if (attempt >= 5) return;
+          const delay = Math.min(1000 * 2 ** attempt, 10000);
+          timer = window.setTimeout(tryFetch, delay);
+        });
+    };
+    tryFetch();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, []);
+
+  const activeWorktreeSource: WorktreeSource | null = cs.worktreeSource ?? null;
+  const wtPath = activeWorktreeSource?.worktreePath ?? null;
+  const wtSha = activeWorktreeSource?.commitSha ?? null;
+
+  // Collect every Reply.enqueuedCommentId across all threads — the polling
+  // hook subtracts the delivered set internally to compute pending pips.
+  const allEnqueuedIds: string[] = [];
+  for (const list of Object.values(state.replies)) {
+    for (const r of list) {
+      if (r.enqueuedCommentId) allEnqueuedIds.push(r.enqueuedCommentId);
+    }
+  }
+  const {
+    delivered: deliveredComments,
+    lastSuccessfulPollAt: deliveredLastSuccessAt,
+    error: deliveredErrorState,
+  } = useDeliveredPolling({
+    worktreePath: wtPath,
+    enqueuedIds: allEnqueuedIds,
+  });
+
+  const wantedFetchKey =
+    wtPath && wtSha
+      ? `${wtPath}|${wtSha}|${pinnedSession ?? ""}|${agentRefreshTick}`
+      : null;
+  // "Adjusting state during render" pattern (mirrors usePlan): when the
+  // fetch key transitions, flip loading/error synchronously here so the
+  // effect body stays free of sync setState.
+  const [lastFetchKey, setLastFetchKey] = useState<string | null>(null);
+  if (lastFetchKey !== wantedFetchKey) {
+    setLastFetchKey(wantedFetchKey);
+    if (wantedFetchKey) {
+      setAgentLoading(true);
+      setAgentError(null);
+    } else {
+      setAgentLoading(false);
+    }
+  }
+  useEffect(() => {
+    if (!wantedFetchKey || !wtPath || !wtSha) return;
+    let cancelled = false;
+    fetchAgentContextForWorktree({
+      worktreePath: wtPath,
+      commitSha: wtSha,
+      pinnedSessionFilePath: pinnedSession,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        if (!res) {
+          setAgentSlice(null);
+          setAgentSessions([]);
+        } else {
+          setAgentSlice(res.slice);
+          setAgentSessions(res.candidates);
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setAgentError(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (!cancelled) setAgentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // wtPath/wtSha/pinnedSession are folded into wantedFetchKey.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantedFetchKey]);
+
   const {
     plan,
     status: planStatus,
@@ -563,14 +686,16 @@ export function ReviewWorkspace({
               setDrafts((prev) => ({ ...prev, [key]: body }))
             }
             onSubmitReply={(key, body) => {
+              const replyId = `r-${Date.now()}`;
               dispatch({
                 type: "ADD_REPLY",
                 targetKey: key,
                 reply: {
-                  id: `r-${Date.now()}`,
+                  id: replyId,
                   author: "you",
                   body,
                   createdAt: new Date().toISOString(),
+                  enqueuedCommentId: null,
                 },
               });
               setDrafts((prev) => {
@@ -580,10 +705,44 @@ export function ReviewWorkspace({
                 return next;
               });
               setDraftingKey(null);
+              // Fire-and-forget enqueue when a worktree is loaded.
+              // Non-worktree loads (paste/url/upload) save the Reply
+              // locally only; the pip never appears.
+              if (activeWorktreeSource) {
+                const derived = deriveCommentPayload(key, cs);
+                if (derived) {
+                  enqueueComment({
+                    worktreePath: activeWorktreeSource.worktreePath,
+                    commitSha: activeWorktreeSource.commitSha,
+                    comment: { ...derived, body },
+                  })
+                    .then((r) =>
+                      dispatch({
+                        type: "PATCH_REPLY_ENQUEUED_ID",
+                        targetKey: key,
+                        replyId,
+                        enqueuedCommentId: r.id,
+                      }),
+                    )
+                    .catch((err: unknown) => {
+                      console.error("[shippable] enqueueComment failed:", err);
+                    });
+                }
+              }
             }}
-            onDeleteReply={(key, replyId) =>
-              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId })
-            }
+            onDeleteReply={(key, replyId) => {
+              const target = state.replies[key]?.find((r) => r.id === replyId);
+              const enqueuedId = target?.enqueuedCommentId ?? null;
+              if (enqueuedId && activeWorktreeSource) {
+                unenqueueComment({
+                  worktreePath: activeWorktreeSource.worktreePath,
+                  id: enqueuedId,
+                }).catch((err: unknown) => {
+                  console.error("[shippable] unenqueueComment failed:", err);
+                });
+              }
+              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId });
+            }}
             onVerifyAiNote={(recipe) => {
               setRunRequest((prev) => ({
                 tick: (prev?.tick ?? 0) + 1,
@@ -591,6 +750,31 @@ export function ReviewWorkspace({
                 inputs: recipe.inputs,
               }));
             }}
+            agentContext={
+              activeWorktreeSource
+                ? {
+                    slice: agentSlice,
+                    candidates: agentSessions,
+                    selectedSessionFilePath:
+                      pinnedSession ?? agentSlice?.session.filePath ?? null,
+                    loading: agentLoading,
+                    error: agentError,
+                    mcpStatus,
+                    delivered: deliveredComments,
+                    lastSuccessfulPollAt: deliveredLastSuccessAt,
+                    deliveredError: deliveredErrorState,
+                    onPickSession: (fp) => setPinnedSession(fp),
+                    onRefresh: () => setAgentRefreshTick((t) => t + 1),
+                    onSendToAgent: async (message) => {
+                      await enqueueComment({
+                        worktreePath: activeWorktreeSource.worktreePath,
+                        commitSha: activeWorktreeSource.commitSha,
+                        comment: { kind: "freeform", body: message },
+                      });
+                    },
+                  }
+                : undefined
+            }
           />
         )}
       </div>
@@ -688,6 +872,13 @@ export function ReviewWorkspace({
             // source metadata. Tag as a "paste" so it still lands in
             // recents; it's a reasonable approximation for the prototype.
             onLoadChangeset(newCs, {}, { kind: "paste" });
+            // Clear any prior slice/sessions so the fresh load doesn't
+            // briefly show the previous worktree's transcript while the
+            // new fetch runs. Provenance lives on cs.worktreeSource.
+            setPinnedSession(null);
+            setAgentSlice(null);
+            setAgentSessions([]);
+            setAgentError(null);
             setShowLoad(false);
           }}
         />
