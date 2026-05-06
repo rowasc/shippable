@@ -11,12 +11,6 @@ const DEFAULT_PORT = Number.parseInt(process.env.SMOKE_PORT ?? "5198", 10);
 
 const SMOKES = [
   { id: "coderunner", file: "smoke-coderunner.mjs", default: true },
-  {
-    id: "coderunner-modes",
-    file: "smoke-coderunner-modes.mjs",
-    default: false,
-    blockedReason: "still targets the removed selection-pill runner flow",
-  },
   { id: "coderunner-microscope", file: "smoke-coderunner-microscope.mjs", default: true },
   { id: "coderunner-timeout", file: "smoke-coderunner-timeout.mjs", default: true },
   { id: "coderunner-sandbox", file: "smoke-coderunner-sandbox.mjs", default: true },
