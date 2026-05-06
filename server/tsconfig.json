@@ -15,5 +15,10 @@
     "forceConsistentCasingInFileNames": true,
     "rootDir": ".."
   },
-  "include": ["src/**/*.ts", "../web/src/types.ts", "../web/src/plan.ts"]
+  "include": [
+    "src/**/*.ts",
+    "../web/src/types.ts",
+    "../web/src/plan.ts",
+    "../web/src/definitionTypes.ts"
+  ]
 }

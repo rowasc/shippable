@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import type { Dispatch } from "react";
 import { changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
 import type { Action } from "../state";
+import {
+  fetchDefinition,
+  fetchDefinitionCapabilities,
+  supportsDefinitionLanguage,
+  type DefinitionCapabilities,
+  type DefinitionClickTarget,
+  type DefinitionLocation,
+} from "../definitionNav";
 import { maybeSuggest } from "../guide";
 import { usePlan } from "../usePlan";
 import { Sidebar } from "./Sidebar";
@@ -68,6 +76,7 @@ interface Props {
     replies: Record<string, Reply[]>,
     source: RecentSource,
   ) => void;
+  currentSource: RecentSource | null;
 }
 
 export function ReviewWorkspace({
@@ -78,6 +87,7 @@ export function ReviewWorkspace({
   themeId,
   setThemeId,
   onLoadChangeset,
+  currentSource,
 }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
@@ -94,6 +104,11 @@ export function ReviewWorkspace({
   const [mouseTip, setMouseTip] = useState<string | null>(null);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
+  const [definitionCapabilities, setDefinitionCapabilities] =
+    useState<DefinitionCapabilities | null>(null);
+  const [definitionPeek, setDefinitionPeek] = useState<DefinitionPeekState>({
+    kind: "idle",
+  });
 
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
   const mouseTipTimeoutRef = useRef<number | null>(null);
@@ -103,6 +118,7 @@ export function ReviewWorkspace({
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = buildSymbolIndex(cs);
+  const clickableSymbols = new Set(symbolIndex.keys());
 
   // Agent-context state. Provenance lives on cs.worktreeSource so it
   // survives reloads and changeset switches; the slice/sessions/error are
@@ -215,7 +231,6 @@ export function ReviewWorkspace({
     // wtPath/wtSha/pinnedSession are folded into wantedFetchKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wantedFetchKey]);
-
   const {
     plan,
     status: planStatus,
@@ -403,6 +418,39 @@ export function ReviewWorkspace({
       mouseTipTimeoutRef.current = null;
     }, 2600);
   }
+  const currentWorkspaceRoot =
+    currentSource?.kind === "worktree"
+      ? currentSource.path
+      : (cs.worktreeSource?.worktreePath ?? null);
+  const definitionScopeKey = `${cs.id}:${file.id}:${currentWorkspaceRoot ?? ""}`;
+  const definitionLanguageSupported = supportsDefinitionLanguage(file.language);
+  const canUseServerDefinitions =
+    currentWorkspaceRoot !== null &&
+    definitionCapabilities?.available === true &&
+    definitionLanguageSupported;
+  const allowAnyIdentifier = canUseServerDefinitions;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchDefinitionCapabilities()
+      .then((capabilities) => {
+        if (!cancelled) setDefinitionCapabilities(capabilities);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setDefinitionCapabilities({
+            available: false,
+            supportedLanguages: ["js", "jsx", "ts", "tsx"],
+            requiresWorktree: true,
+            resolver: null,
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -513,6 +561,102 @@ export function ReviewWorkspace({
     setRuns((prev) => prev.filter((r) => r.id !== id));
   }
 
+  async function handleSymbolClick(target: DefinitionClickTarget) {
+    const inDiffTarget = symbolIndex.get(target.symbol);
+    if (inDiffTarget) {
+      dispatch({ type: "SET_CURSOR", cursor: inDiffTarget });
+      setDefinitionPeek({ kind: "idle" });
+      return;
+    }
+
+    if (currentWorkspaceRoot === null) {
+      setDefinitionPeek({
+        kind: "unsupported",
+        symbol: target.symbol,
+        message: "Load the diff from a local worktree before asking the server for definitions.",
+        scopeKey: definitionScopeKey,
+      });
+      return;
+    }
+    if (!definitionLanguageSupported) {
+      setDefinitionPeek({
+        kind: "unsupported",
+        symbol: target.symbol,
+        message: `Definition lookup currently supports JS/TS only. ${file.path} is ${file.language}.`,
+        scopeKey: definitionScopeKey,
+      });
+      return;
+    }
+    if (definitionCapabilities?.available === false) {
+      setDefinitionPeek({
+        kind: "unsupported",
+        symbol: target.symbol,
+        message: definitionCapabilities.reason ?? "Definition lookup is unavailable.",
+        scopeKey: definitionScopeKey,
+      });
+      return;
+    }
+    if (!canUseServerDefinitions) {
+      setDefinitionPeek({
+        kind: "unsupported",
+        symbol: target.symbol,
+        message: "Definition lookup is still initializing.",
+        scopeKey: definitionScopeKey,
+      });
+      return;
+    }
+
+    setDefinitionPeek({ kind: "loading", symbol: target.symbol, scopeKey: definitionScopeKey });
+    try {
+      const response = await fetchDefinition({
+        file: target.file,
+        language: target.language,
+        line: target.line,
+        col: target.col,
+        workspaceRoot: currentWorkspaceRoot,
+      });
+      if (response.status === "unsupported") {
+        setDefinitionPeek({
+          kind: "unsupported",
+          symbol: target.symbol,
+          message: response.reason,
+          scopeKey: definitionScopeKey,
+        });
+        return;
+      }
+      if (response.status === "error") {
+        setDefinitionPeek({
+          kind: "error",
+          symbol: target.symbol,
+          message: response.error,
+          scopeKey: definitionScopeKey,
+        });
+        return;
+      }
+      const jumpTarget = response.definitions
+        .map((definition) => resolveDefinitionToCursor(cs, definition))
+        .find((cursor): cursor is Cursor => cursor !== null);
+      if (jumpTarget) {
+        dispatch({ type: "SET_CURSOR", cursor: jumpTarget });
+        setDefinitionPeek({ kind: "idle" });
+        return;
+      }
+      setDefinitionPeek({
+        kind: "results",
+        symbol: target.symbol,
+        definitions: response.definitions,
+        scopeKey: definitionScopeKey,
+      });
+    } catch (err) {
+      setDefinitionPeek({
+        kind: "error",
+        symbol: target.symbol,
+        message: err instanceof Error ? err.message : String(err),
+        scopeKey: definitionScopeKey,
+      });
+    }
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -533,6 +677,11 @@ export function ReviewWorkspace({
         <span className="topbar__branch">
           {cs.branch} → {cs.base}
         </span>
+        <DefinitionStatusChip
+          currentSource={currentSource}
+          fileLanguage={file.language}
+          capabilities={definitionCapabilities}
+        />
         <span className="topbar__spacer" />
         <span className="topbar__author">@{cs.author}</span>
         <ThemePicker value={themeId} onChange={setThemeId} />
@@ -631,32 +780,43 @@ export function ReviewWorkspace({
           wide={sidebarWide}
           onToggleWide={() => setSidebarWide((v) => !v)}
         />
-        <DiffView
-          viewModel={buildDiffViewModel({
-            file,
-            currentHunkId: hunk.id,
-            cursorLineIdx: state.cursor.lineIdx,
-            read: state.readLines,
-            isFileReviewed: state.reviewedFiles.has(file.id),
-            acked: state.ackedNotes,
-            replies: state.replies,
-            expandLevelAbove: state.expandLevelAbove,
-            expandLevelBelow: state.expandLevelBelow,
-            fileFullyExpanded: state.fullExpandedFiles.has(file.id),
-            filePreviewing: state.previewedFiles.has(file.id),
-            imageAssets: cs.imageAssets,
-            selection: state.selection,
-          })}
-          onSetExpandLevel={(hunkId, dir, level) =>
-            dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
-          }
-          onToggleExpandFile={(fileId) =>
-            dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
-          }
-          onTogglePreviewFile={(fileId) =>
-            dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId })
-          }
-        />
+        <div className="reviewpane">
+          <DefinitionPeek
+            peek={definitionPeek.kind !== "idle" && definitionPeek.scopeKey === definitionScopeKey
+              ? definitionPeek
+              : { kind: "idle" }}
+            onDismiss={() => setDefinitionPeek({ kind: "idle" })}
+          />
+          <DiffView
+            viewModel={buildDiffViewModel({
+              file,
+              currentHunkId: hunk.id,
+              cursorLineIdx: state.cursor.lineIdx,
+              read: state.readLines,
+              isFileReviewed: state.reviewedFiles.has(file.id),
+              acked: state.ackedNotes,
+              replies: state.replies,
+              expandLevelAbove: state.expandLevelAbove,
+              expandLevelBelow: state.expandLevelBelow,
+              fileFullyExpanded: state.fullExpandedFiles.has(file.id),
+              filePreviewing: state.previewedFiles.has(file.id),
+              imageAssets: cs.imageAssets,
+              selection: state.selection,
+            })}
+            onSetExpandLevel={(hunkId, dir, level) =>
+              dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
+            }
+            onToggleExpandFile={(fileId) =>
+              dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
+            }
+            onTogglePreviewFile={(fileId) =>
+              dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId })
+            }
+            clickableSymbols={clickableSymbols}
+            allowAnyIdentifier={allowAnyIdentifier}
+            onSymbolClick={handleSymbolClick}
+          />
+        </div>
         {showInspector && (
           <Inspector
             viewModel={buildInspectorViewModel({
@@ -910,11 +1070,8 @@ export function ReviewWorkspace({
       {showLoad && (
         <LoadModal
           onClose={() => setShowLoad(false)}
-          onLoad={(newCs) => {
-            // LoadModal currently only knows the parsed ChangeSet — no
-            // source metadata. Tag as a "paste" so it still lands in
-            // recents; it's a reasonable approximation for the prototype.
-            onLoadChangeset(newCs, {}, { kind: "paste" });
+          onLoad={(newCs, source) => {
+            onLoadChangeset(newCs, {}, source);
             // Clear any prior slice/sessions so the fresh load doesn't
             // briefly show the previous worktree's transcript while the
             // new fetch runs. Provenance lives on cs.worktreeSource.
@@ -945,6 +1102,104 @@ export function ReviewWorkspace({
         })}
       />
     </div>
+  );
+}
+
+type DefinitionPeekState =
+  | { kind: "idle" }
+  | { kind: "loading"; symbol: string; scopeKey: string }
+  | { kind: "unsupported"; symbol: string; message: string; scopeKey: string }
+  | { kind: "error"; symbol: string; message: string; scopeKey: string }
+  | {
+      kind: "results";
+      symbol: string;
+      definitions: DefinitionLocation[];
+      scopeKey: string;
+    };
+
+function DefinitionStatusChip({
+  currentSource,
+  fileLanguage,
+  capabilities,
+}: {
+  currentSource: RecentSource | null;
+  fileLanguage: string;
+  capabilities: DefinitionCapabilities | null;
+}) {
+  let label = "def: checking";
+  let title = "Checking definition-navigation support.";
+  let tone = "muted";
+
+  if (currentSource?.kind !== "worktree") {
+    label = "def: worktree only";
+    title = "Load this diff from a local worktree before asking the server for definitions.";
+  } else if (!supportsDefinitionLanguage(fileLanguage)) {
+    label = "def: JS/TS only";
+    title = `Definition lookup currently supports JS/TS only. Current file language: ${fileLanguage}.`;
+  } else if (capabilities?.available) {
+    label = "def: TS LSP";
+    title = "Go-to-definition is using typescript-language-server against the loaded worktree root.";
+    tone = "ok";
+  } else if (capabilities?.available === false) {
+    label = "def: unavailable";
+    title = capabilities.reason ?? "Definition lookup is unavailable.";
+    tone = "bad";
+  }
+
+  return (
+    <span className={`topbar__meta-chip topbar__meta-chip--${tone}`} title={title}>
+      {label}
+    </span>
+  );
+}
+
+function DefinitionPeek({
+  peek,
+  onDismiss,
+}: {
+  peek: DefinitionPeekState;
+  onDismiss: () => void;
+}) {
+  if (peek.kind === "idle") return null;
+
+  return (
+    <section className={`definition-peek definition-peek--${peek.kind}`}>
+      <div className="definition-peek__header">
+        <strong>definition</strong>
+        {" symbol "}
+        <code>{peek.symbol}</code>
+        <button className="definition-peek__close" onClick={onDismiss}>
+          ×
+        </button>
+      </div>
+      {peek.kind === "loading" && (
+        <div className="definition-peek__body">Resolving against the workspace root…</div>
+      )}
+      {peek.kind === "unsupported" && (
+        <div className="definition-peek__body">{peek.message}</div>
+      )}
+      {peek.kind === "error" && (
+        <div className="definition-peek__body">{peek.message}</div>
+      )}
+      {peek.kind === "results" && (
+        <div className="definition-peek__body">
+          {peek.definitions.length === 0 ? (
+            <div>No definition result came back from the language server.</div>
+          ) : (
+            peek.definitions.map((definition) => (
+              <article key={`${definition.uri}:${definition.line}:${definition.col}`}>
+                <div className="definition-peek__path">
+                  {definition.file}:{definition.line + 1}
+                </div>
+                <pre className="definition-peek__preview">
+                  {definition.preview || "No preview available."}
+                </pre>
+              </article>
+            ))
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -989,6 +1244,26 @@ function resolveEvidenceToCursor(
       return symbols.get(ev.name) ?? null;
     }
   }
+}
+
+function resolveDefinitionToCursor(
+  cs: ChangeSet,
+  definition: DefinitionLocation,
+): Cursor | null {
+  if (!definition.workspaceRelativePath) return null;
+  const file = cs.files.find((entry) => entry.path === definition.workspaceRelativePath);
+  if (!file) return null;
+  for (const hunk of file.hunks) {
+    const lineIdx = hunk.lines.findIndex((line) => line.newNo === definition.line + 1);
+    if (lineIdx === -1) continue;
+    return {
+      changesetId: cs.id,
+      fileId: file.id,
+      hunkId: hunk.id,
+      lineIdx,
+    };
+  }
+  return null;
 }
 
 function cycleChangeset(

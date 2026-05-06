@@ -118,6 +118,41 @@ const highlighterPromise = createHighlighterCore({
 
 const htmlCache = new Map<string, Promise<string>>();
 const lineHtmlCache = new Map<string, Promise<string[]>>();
+const CLICKABLE_SCOPE_PREFIXES = [
+  "variable",
+  "entity.name",
+  "support.function",
+  "support.class",
+  "support.type",
+  "meta.function-call",
+] as const;
+const NON_CLICKABLE_SCOPE_PREFIXES = [
+  "variable.language",
+  "variable.parameter",
+] as const;
+const IDENTIFIER_RE = /^[A-Za-z_$][\w$]*$/;
+
+interface TokenScope {
+  scopeName?: string;
+}
+
+interface TokenExplanation {
+  scopes?: TokenScope[];
+}
+
+interface HighlightToken {
+  content: string;
+  color?: string;
+  bgColor?: string;
+  fontStyle?: number;
+  htmlStyle?: Record<string, string>;
+  explanation?: TokenExplanation[];
+}
+
+export interface HighlightLineOptions {
+  clickableSymbols?: Iterable<string>;
+  allowAnyIdentifier?: boolean;
+}
 
 export function normalizeHighlightLanguage(language?: string): string {
   const raw = language?.trim().toLowerCase();
@@ -154,16 +189,17 @@ export async function highlightLines(
   lines: string[],
   language?: string,
   colorMode?: ColorMode,
+  options?: HighlightLineOptions,
 ): Promise<{ language: string; lines: string[] }> {
   const normalized = normalizeHighlightLanguage(language);
   const themeName = shikiThemeFor(activeThemeId, colorMode);
-  const key = `${themeName}::${normalized}\u0000${lines.join("\n")}`;
+  const key = `${themeName}::${normalized}::${clickableSymbolsCacheKey(options?.clickableSymbols)}::${options?.allowAnyIdentifier ? "any" : "known"}\u0000${lines.join("\n")}`;
 
   let linePromise = lineHtmlCache.get(key);
   if (!linePromise) {
     linePromise = normalized === "text"
       ? Promise.resolve(lines.map(renderPlainLineHtml))
-      : renderLineHtml(lines, normalized, themeName);
+      : renderLineHtml(lines, normalized, themeName, options);
     lineHtmlCache.set(key, linePromise);
   }
 
@@ -181,20 +217,40 @@ async function renderHtml(code: string, language: string, themeName: string): Pr
   });
 }
 
-async function renderLineHtml(lines: string[], language: string, themeName: string): Promise<string[]> {
+async function renderLineHtml(
+  lines: string[],
+  language: string,
+  themeName: string,
+  options?: HighlightLineOptions,
+): Promise<string[]> {
   if (lines.length === 0) return [];
 
   const highlighter = await highlighterPromise;
   const tokens = highlighter.codeToTokens(lines.join("\n"), {
     lang: language as never,
     theme: themeName,
+    includeExplanation: "scopeName",
   });
+
+  const clickableSymbols = options?.clickableSymbols
+    ? new Set(options.clickableSymbols)
+    : null;
 
   return tokens.tokens.map((lineTokens, i) => {
     if (lineTokens.length === 0) {
       return renderPlainLineHtml(lines[i] ?? "");
     }
-    return lineTokens.map(renderTokenSpan).join("");
+    let col = 0;
+    return lineTokens.map((token) => {
+      const html = renderTokenSpan(token as HighlightToken, {
+        line: i,
+        col,
+        clickableSymbols,
+        allowAnyIdentifier: options?.allowAnyIdentifier ?? false,
+      });
+      col += token.content.length;
+      return html;
+    }).join("");
   });
 }
 
@@ -216,13 +272,19 @@ function escapeHtml(text: string): string {
     .replaceAll(">", "&gt;");
 }
 
-function renderTokenSpan(token: {
-  content: string;
-  color?: string;
-  bgColor?: string;
-  fontStyle?: number;
-  htmlStyle?: Record<string, string>;
-}): string {
+function escapeHtmlAttr(text: string): string {
+  return escapeHtml(text).replaceAll('"', "&quot;");
+}
+
+function renderTokenSpan(
+  token: HighlightToken,
+  meta: {
+    line: number;
+    col: number;
+    clickableSymbols: ReadonlySet<string> | null;
+    allowAnyIdentifier: boolean;
+  },
+): string {
   const content = token.content === " " ? "&nbsp;" : escapeHtml(token.content);
   const styleParts: string[] = [];
   if (token.color) styleParts.push(`color:${token.color}`);
@@ -233,5 +295,66 @@ function renderTokenSpan(token: {
     }
   }
   const style = styleParts.length > 0 ? ` style="${styleParts.join(";")}"` : "";
-  return `<span class="shiki-token"${style}>${content}</span>`;
+  const scopeNames = extractScopeNames(token);
+  const symbol = resolveClickableSymbol(
+    token,
+    scopeNames,
+    meta.clickableSymbols,
+    meta.allowAnyIdentifier,
+  );
+  const classes = ["shiki-token"];
+  if (symbol) classes.push("shiki-token--symbol");
+  const attrs = [
+    `class="${classes.join(" ")}"`,
+    `data-token-line="${meta.line}"`,
+    `data-token-col="${meta.col}"`,
+  ];
+  if (scopeNames.length > 0) {
+    attrs.push(`data-token-scopes="${escapeHtmlAttr(scopeNames.join(" "))}"`);
+  }
+  if (symbol) {
+    attrs.push(`data-symbol="${escapeHtmlAttr(symbol)}"`);
+    attrs.push('role="button"');
+    attrs.push('tabindex="0"');
+    attrs.push(`title="jump to ${escapeHtmlAttr(symbol)}"`);
+  }
+  return `<span ${attrs.join(" ")}${style}>${content}</span>`;
+}
+
+function clickableSymbolsCacheKey(clickableSymbols?: Iterable<string>): string {
+  if (!clickableSymbols) return "";
+  return [...clickableSymbols].sort().join(",");
+}
+
+function extractScopeNames(token: HighlightToken): string[] {
+  const names = token.explanation
+    ?.flatMap((step) => step.scopes ?? [])
+    .map((scope) => scope.scopeName?.trim() ?? "")
+    .filter(Boolean) ?? [];
+  return [...new Set(names)];
+}
+
+function resolveClickableSymbol(
+  token: HighlightToken,
+  scopeNames: string[],
+  clickableSymbols: ReadonlySet<string> | null,
+  allowAnyIdentifier: boolean,
+): string | null {
+  const symbol = token.content.trim();
+  if (!IDENTIFIER_RE.test(symbol)) return null;
+  if (!allowAnyIdentifier && (!clickableSymbols || !clickableSymbols.has(symbol))) {
+    return null;
+  }
+  if (scopeNames.length === 0) return null;
+  if (scopeNames.some((scope) => matchesScopePrefix(scope, NON_CLICKABLE_SCOPE_PREFIXES))) {
+    return null;
+  }
+  if (!scopeNames.some((scope) => matchesScopePrefix(scope, CLICKABLE_SCOPE_PREFIXES))) {
+    return null;
+  }
+  return symbol;
+}
+
+function matchesScopePrefix(scope: string, prefixes: readonly string[]): boolean {
+  return prefixes.some((prefix) => scope === prefix || scope.startsWith(`${prefix}.`));
 }

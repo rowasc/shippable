@@ -1,8 +1,14 @@
 # Click-through symbol navigation — design plan
 
-## Status: early conceptual draft
+## Status: partially implemented first slice
 
-⚠️ Very early vibes-driven draft. Needs review, edits, and more reasoning around the design before we can actually do it.
+The broad architecture here is still a draft. The first honest end-to-end slice now exists with deliberate limits:
+
+- deployment shape: local dev server or desktop sidecar with a real checkout on disk
+- changeset source: worktree-loaded diffs first; `SHIPPABLE_WORKSPACE_ROOT` is only a fallback for non-worktree diffs
+- language coverage: JS/TS only for the real LSP path
+- resolver: `typescript-language-server` discovered on `PATH` or via `SHIPPABLE_TYPESCRIPT_LSP`
+- UI honesty: pasted/url/file-loaded diffs show "worktree only", non-JS/TS files show "JS/TS only", and missing LSP binaries surface as unavailable rather than pretending clicks work
 
 ## Goal
 
@@ -307,13 +313,21 @@ These are cheap to set now and annoying to back out later:
 
 ## Implementation order
 
-Each step is independently shippable and proves out one assumption.
+Each step is independently shippable and proves out one assumption. The important correction: the first useful product slice is **not** "hook up LSP." It's "make highlighted identifiers navigable when the diff already tells us where the definition lives."
 
-### Step 1 — Frontend: clickable tokens, no resolution
-Annotate Shiki tokens with line/col + scope, add `data-file` on line containers, add a delegated click handler that `console.log`s `{file, line, col, identifier}`. Validates the cross-language identifier-detection approach and the token plumbing before any resolver work.
+### Step 1 — Frontend: clickable tokens + in-diff symbol jumps
+Annotate Shiki tokens with scope metadata and symbol names, then wire clicks on identifiers that match the existing diff `StructureMap` / `SymbolIndex`. A click jumps to the defining hunk **within the current changeset only**. No server, no LSP, no fake precision claim. This proves the UX, validates the token plumbing, and gives reviewers an immediately useful feature on top of data we already compute.
 
 ### Step 2 — Server resolver chain + grep floor
-Backend: `Workspace`, `LocalWorkspace` (declaring `unbounded` + `disk-allowed`), `Resolver`/`ResolverChain` types, `GrepResolver`, `POST /api/definition`. Workspace root configured via `SHIPPABLE_WORKSPACE_ROOT` env var. Frontend: dispatcher (server-only for now), peek panel that opens on click, shows results, handles multi-result. End-to-end working for any language, fuzzy precision.
+Backend: `Workspace`, `LocalWorkspace` (declaring `unbounded` + `disk-allowed`), `Resolver`/`ResolverChain` types, `GrepResolver`, `POST /api/definition`. Workspace root configured via `SHIPPABLE_WORKSPACE_ROOT` env var. Frontend: dispatcher (server-only for now) plus a peek panel for results that are **not** already satisfiable from the in-diff symbol graph. End-to-end working for any language, fuzzy precision.
+
+What actually landed first, because it was the smallest non-fake slice:
+
+- `GET /api/definition/capabilities` + `POST /api/definition`
+- workspace root resolved from the loaded worktree path, falling back to `SHIPPABLE_WORKSPACE_ROOT`
+- generic clickable identifier tokens for JS/TS files only when the server says the LSP path is available
+- real `typescript-language-server` subprocess for definition lookup
+- direct jump when the returned definition is already inside the loaded diff; otherwise a peek card with file path + preview
 
 ### Step 3 — Server-side `LspResolver` + bundled LSPs (Tier 1b)
 Adds the generic LSP host. Pick two languages with mature LSPs to validate the abstraction — a proven path is intelephense (PHP) and gopls (Go). Each new language is one module file. The sidecar (in desktop) and dev server both run the LSP subprocess; same code path.
@@ -322,7 +336,7 @@ Adds the generic LSP host. Pick two languages with mature LSPs to validate the a
 Add `LspDiscovery` and a settings field per language ("path to PHP language server"). Probe order: explicit config → project-local `vendor/bin/` or `node_modules/.bin/` → common global install locations → fall through to bundled. The probe is still the same `LspResolver`; only the binary path differs.
 
 ### Step 5 — Browser resolver dispatcher + TypeScript via `@typescript/vfs`
-First browser resolver. Web Worker, lazy-imported on first TS click. TS clicks become exact, locally, with no server roundtrip. Adds the `browser → server` dispatcher walk. Validates that the Workspace shape works on both sides.
+First browser resolver. Web Worker, lazy-imported on first TS click. TS clicks become exact, locally, with no server roundtrip. Adds the `browser → server` dispatcher walk. Validates that the `Workspace` shape works on both sides.
 
 ### Step 6 — Tree-sitter Tier-2 resolver (server)
 Fills the long tail for languages without a configured LSP. Most useful for the remote GitHub path where we won't always have a relevant LSP available.

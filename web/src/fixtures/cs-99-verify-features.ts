@@ -433,6 +433,7 @@ export const CS_99: ChangeSet = {
           oldCount: 9,
           newStart: 1,
           newCount: 9,
+          definesSymbols: ["formatCents"],
           referencesSymbols: ["formatCents"],
           aiReviewed: true,
           aiSummary:

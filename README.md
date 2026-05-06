@@ -42,6 +42,12 @@ npm run typecheck  # tsc --noEmit
 npm run test       # vitest run
 ```
 
+For the first real go-to-definition slice, the server can also resolve JS/TS definitions against a local checkout. Assumptions:
+
+- load the diff from the worktree picker so the frontend can pass the checkout root to the server, or set `SHIPPABLE_WORKSPACE_ROOT=/abs/path/to/checkout` as a fallback for non-worktree diffs
+- install `typescript-language-server` on `PATH`, or point `SHIPPABLE_TYPESCRIPT_LSP` at the binary explicitly
+- this first slice is intentionally narrow: worktree-backed diffs only, JS/TS files only, no browser-only fallback yet
+
 The bundled desktop app reads from the same Keychain entry, so this one setup serves both surfaces.
 
 The backend listens on `http://127.0.0.1:3001` and allows these browser origins by default:
@@ -55,7 +61,13 @@ If you want a different browser-origin allowlist, set:
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-Endpoints: `GET /api/health`, `POST /api/plan` ({changeset} → {plan}), `POST /api/review` (streaming), `GET /api/library/prompts`, `POST /api/worktrees/list`, `POST /api/worktrees/changeset`. The model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
+API endpoints:
+
+- `POST /api/plan` — accepts `{ changeset: ChangeSet }`, returns `{ plan: ReviewPlan }`
+- `GET /api/definition/capabilities` — reports whether the first JS/TS LSP slice is available
+- `POST /api/definition` — accepts `{ file, language, line, col, workspaceRoot? }`, returns definition locations or an honest unsupported/error response
+
+The plan model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
 
 Three entry points:
 

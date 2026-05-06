@@ -105,6 +105,7 @@ export default function App() {
     }
     return loadRecents();
   });
+  const [currentSource, setCurrentSource] = useState<RecentSource | null>(boot.source);
   const [drafts, setDrafts] = useState<Record<string, string>>(
     () => hydrated.drafts,
   );
@@ -124,6 +125,7 @@ export default function App() {
     source: RecentSource,
   ) {
     dispatch({ type: "LOAD_CHANGESET", changeset: cs, replies });
+    setCurrentSource(source);
     setRecents(pushRecent(cs, replies, source));
   }
 
@@ -146,6 +148,7 @@ export default function App() {
       themeId={themeId}
       setThemeId={setThemeId}
       onLoadChangeset={handleLoadChangeset}
+      currentSource={currentSource}
     />
   );
 }

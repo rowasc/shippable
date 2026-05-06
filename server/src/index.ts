@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
+import { getDefinitionCapabilities, resolveDefinition } from "./definitions.ts";
 import { generatePlan } from "./plan.ts";
 import * as library from "./library.ts";
 import * as prompts from "./prompts.ts";
@@ -10,6 +11,7 @@ import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
 import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
+import type { DefinitionRequest } from "../../web/src/definitionTypes.ts";
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = "127.0.0.1";
@@ -50,6 +52,12 @@ export function createApp(): Server {
     }
     if (req.method === "POST" && req.url === "/api/review") {
       return handleReview(req, res, origin);
+    }
+    if (req.method === "GET" && req.url === "/api/definition/capabilities") {
+      return handleDefinitionCapabilities(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/definition") {
+      return handleDefinition(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/library/refresh") {
       return handleLibraryRefresh(req, res, origin);
@@ -213,6 +221,40 @@ async function handleReview(
   const body = await readBody(req);
   writeCorsHeaders(res, origin);
   await streamReview(body, req, res);
+}
+
+async function handleDefinitionCapabilities(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(getDefinitionCapabilities()));
+}
+
+async function handleDefinition(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: DefinitionRequest;
+  try {
+    parsed = JSON.parse(body) as DefinitionRequest;
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+
+  const result = await resolveDefinition(parsed);
+  writeCorsHeaders(res, origin);
+  res.writeHead(result.status === "error" ? 502 : 200, {
+    "Content-Type": "application/json",
+  });
+  res.end(JSON.stringify(result));
 }
 
 async function handleListPrompts(

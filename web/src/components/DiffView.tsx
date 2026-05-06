@@ -1,6 +1,7 @@
 import "./DiffView.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { highlightLines } from "../highlight";
+import type { DefinitionClickTarget } from "../definitionNav";
 import type { DiffLine } from "../types";
 import type {
   DiffLineViewModel,
@@ -16,6 +17,9 @@ interface Props {
   onSetExpandLevel: (hunkId: string, dir: "above" | "below", level: number) => void;
   onToggleExpandFile: (fileId: string) => void;
   onTogglePreviewFile: (fileId: string) => void;
+  clickableSymbols?: ReadonlySet<string>;
+  allowAnyIdentifier?: boolean;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }
 
 export function DiffView({
@@ -23,6 +27,9 @@ export function DiffView({
   onSetExpandLevel,
   onToggleExpandFile,
   onTogglePreviewFile,
+  clickableSymbols,
+  allowAnyIdentifier,
+  onSymbolClick,
 }: Props) {
   const cursorRef = useRef<HTMLDivElement>(null);
 
@@ -95,15 +102,22 @@ export function DiffView({
           path={viewModel.path}
           language={viewModel.language}
           lines={viewModel.fullFileLines}
+          clickableSymbols={clickableSymbols}
+          allowAnyIdentifier={allowAnyIdentifier}
+          onSymbolClick={onSymbolClick}
         />
       ) : (
         viewModel.hunks.map((h) => (
           <HunkBlock
             key={h.id}
             hunk={h}
+            path={viewModel.path}
             language={viewModel.language}
             onSetExpandLevel={(dir, level) => onSetExpandLevel(h.id, dir, level)}
             cursorRef={cursorRef}
+            clickableSymbols={clickableSymbols}
+            allowAnyIdentifier={allowAnyIdentifier}
+            onSymbolClick={onSymbolClick}
           />
         ))
       )}
@@ -154,14 +168,22 @@ function ModeToggle({
 
 function HunkBlock({
   hunk,
+  path,
   language,
   onSetExpandLevel,
   cursorRef,
+  clickableSymbols,
+  allowAnyIdentifier,
+  onSymbolClick,
 }: {
   hunk: HunkViewModel;
+  path: string;
   language: string;
   onSetExpandLevel: (dir: "above" | "below", level: number) => void;
   cursorRef: React.RefObject<HTMLDivElement | null>;
+  clickableSymbols?: ReadonlySet<string>;
+  allowAnyIdentifier?: boolean;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
   return (
     <section className={`hunk ${hunk.isCurrent ? "hunk--current" : ""}`}>
@@ -197,13 +219,37 @@ function HunkBlock({
         />
       )}
       {hunk.contextAbove.length > 0 && (
-        <ContextLinesBlock lines={hunk.contextAbove} language={language} prefix="ea" />
+        <ContextLinesBlock
+          path={path}
+          lines={hunk.contextAbove}
+          language={language}
+          prefix="ea"
+          clickableSymbols={clickableSymbols}
+          allowAnyIdentifier={allowAnyIdentifier}
+          onSymbolClick={onSymbolClick}
+        />
       )}
 
-      <HunkLinesBlock lines={hunk.lines} language={language} cursorRef={cursorRef} />
+      <HunkLinesBlock
+        path={path}
+        lines={hunk.lines}
+        language={language}
+        cursorRef={cursorRef}
+        clickableSymbols={clickableSymbols}
+        allowAnyIdentifier={allowAnyIdentifier}
+        onSymbolClick={onSymbolClick}
+      />
 
       {hunk.contextBelow.length > 0 && (
-        <ContextLinesBlock lines={hunk.contextBelow} language={language} prefix="eb" />
+        <ContextLinesBlock
+          path={path}
+          lines={hunk.contextBelow}
+          language={language}
+          prefix="eb"
+          clickableSymbols={clickableSymbols}
+          allowAnyIdentifier={allowAnyIdentifier}
+          onSymbolClick={onSymbolClick}
+        />
       )}
       {hunk.expandBelow && (
         <ExpandBar
@@ -257,11 +303,17 @@ function ExpandBar({
 }
 
 function ContextLine({
+  filePath,
+  language,
   line,
   highlightedHtml,
+  onSymbolClick,
 }: {
+  filePath: string;
+  language: string;
   line: DiffLine;
   highlightedHtml?: string;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
   return (
     <div className="line line--context line--ctx-expand">
@@ -269,7 +321,14 @@ function ContextLine({
       <span className="line__new">{line.newNo ?? ""}</span>
       <span className="line__ai" aria-hidden="true">{" "}</span>
       <span className="line__sign">{" "}</span>
-      <LineText text={line.text} highlightedHtml={highlightedHtml} />
+      <LineText
+        filePath={filePath}
+        language={language}
+        text={line.text}
+        sourceLine={line.newNo ?? null}
+        highlightedHtml={highlightedHtml}
+        onSymbolClick={onSymbolClick}
+      />
     </div>
   );
 }
@@ -278,12 +337,23 @@ function FullFileView({
   path,
   language,
   lines,
+  clickableSymbols,
+  allowAnyIdentifier,
+  onSymbolClick,
 }: {
   path: string;
   language: string;
   lines: FullFileLineViewModel[];
+  clickableSymbols?: ReadonlySet<string>;
+  allowAnyIdentifier?: boolean;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
-  const highlightedLines = useHighlightedLines(lines, language);
+  const highlightedLines = useHighlightedLines(
+    lines,
+    language,
+    clickableSymbols,
+    allowAnyIdentifier,
+  );
   return (
     <section className="hunk hunk--full">
       <header className="hunk__h">
@@ -301,7 +371,14 @@ function FullFileView({
             <span className="line__new">{line.newNo ?? ""}</span>
             <span className="line__ai" aria-hidden="true">{" "}</span>
             <span className="line__sign">{line.sign}</span>
-            <LineText text={line.text} highlightedHtml={highlightedLines?.[i]} />
+            <LineText
+              filePath={path}
+              language={language}
+              text={line.text}
+              sourceLine={line.newNo ?? null}
+              highlightedHtml={highlightedLines?.[i]}
+              onSymbolClick={onSymbolClick}
+            />
           </div>
         ))}
       </div>
@@ -310,13 +387,19 @@ function FullFileView({
 }
 
 function Line({
+  filePath,
+  language,
   line,
   highlightedHtml,
   cursorRef,
+  onSymbolClick,
 }: {
+  filePath: string;
+  language: string;
   line: DiffLineViewModel;
   highlightedHtml?: string;
   cursorRef?: React.RefObject<HTMLDivElement | null>;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
   const sign = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
   const sev = line.aiNote?.severity;
@@ -338,28 +421,51 @@ function Line({
         {line.aiGlyph}
       </span>
       <span className="line__sign">{sign}</span>
-      <LineText text={line.text} highlightedHtml={highlightedHtml} />
+      <LineText
+        filePath={filePath}
+        language={language}
+        text={line.text}
+        sourceLine={line.newNo ?? null}
+        highlightedHtml={highlightedHtml}
+        onSymbolClick={onSymbolClick}
+      />
     </div>
   );
 }
 
 function ContextLinesBlock({
+  path,
   lines,
   language,
   prefix,
+  clickableSymbols,
+  allowAnyIdentifier,
+  onSymbolClick,
 }: {
+  path: string;
   lines: DiffLine[];
   language: string;
   prefix: string;
+  clickableSymbols?: ReadonlySet<string>;
+  allowAnyIdentifier?: boolean;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
-  const highlightedLines = useHighlightedLines(lines, language);
+  const highlightedLines = useHighlightedLines(
+    lines,
+    language,
+    clickableSymbols,
+    allowAnyIdentifier,
+  );
   return (
     <div className="hunk__body hunk__body--context">
       {lines.map((line, i) => (
         <ContextLine
           key={`${prefix}-${i}`}
+          filePath={path}
+          language={language}
           line={line}
           highlightedHtml={highlightedLines?.[i]}
+          onSymbolClick={onSymbolClick}
         />
       ))}
     </div>
@@ -367,23 +473,39 @@ function ContextLinesBlock({
 }
 
 function HunkLinesBlock({
+  path,
   lines,
   language,
   cursorRef,
+  clickableSymbols,
+  allowAnyIdentifier,
+  onSymbolClick,
 }: {
+  path: string;
   lines: DiffLineViewModel[];
   language: string;
   cursorRef: React.RefObject<HTMLDivElement | null>;
+  clickableSymbols?: ReadonlySet<string>;
+  allowAnyIdentifier?: boolean;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
-  const highlightedLines = useHighlightedLines(lines, language);
+  const highlightedLines = useHighlightedLines(
+    lines,
+    language,
+    clickableSymbols,
+    allowAnyIdentifier,
+  );
   return (
     <div className="hunk__body">
       {lines.map((line, i) => (
         <Line
           key={i}
+          filePath={path}
+          language={language}
           line={line}
           highlightedHtml={highlightedLines?.[i]}
           cursorRef={line.isCursor ? cursorRef : undefined}
+          onSymbolClick={onSymbolClick}
         />
       ))}
     </div>
@@ -391,18 +513,48 @@ function HunkLinesBlock({
 }
 
 function LineText({
+  filePath,
+  language,
   text,
+  sourceLine,
   highlightedHtml,
+  onSymbolClick,
 }: {
+  filePath: string;
+  language: string;
   text: string;
+  sourceLine: number | null;
   highlightedHtml?: string;
+  onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
   if (!highlightedHtml) {
     return <span className="line__text">{text || " "}</span>;
   }
+
+  const activateSymbol = (target: EventTarget | null) => {
+    if (!onSymbolClick || !(target instanceof HTMLElement)) return;
+    const token = target.closest<HTMLElement>("[data-symbol]");
+    const symbol = token?.dataset.symbol;
+    const rawCol = token?.dataset.tokenCol;
+    const col = rawCol ? Number(rawCol) : Number.NaN;
+    if (!symbol || sourceLine == null || !Number.isFinite(col)) return;
+    onSymbolClick({
+      symbol,
+      file: filePath,
+      language,
+      line: sourceLine - 1,
+      col,
+    });
+  };
+
   return (
     <span
       className="line__text line__text--highlighted"
+      onClick={(event) => activateSymbol(event.target)}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        activateSymbol(event.target);
+      }}
       dangerouslySetInnerHTML={{ __html: highlightedHtml }}
     />
   );
@@ -411,15 +563,24 @@ function LineText({
 function useHighlightedLines(
   lines: Array<{ text: string }>,
   language: string,
+  clickableSymbols?: ReadonlySet<string>,
+  allowAnyIdentifier?: boolean,
 ): string[] | null {
-  const requestKey = `${language}\u0000${lines.map((line) => line.text).join("\n")}`;
   const lineTexts = useMemo(() => lines.map((line) => line.text), [lines]);
+  const symbolKey = useMemo(
+    () => [...(clickableSymbols ?? [])].sort().join(","),
+    [clickableSymbols],
+  );
+  const requestKey = `${language}::${symbolKey}::${allowAnyIdentifier ? "any" : "known"}\u0000${lineTexts.join("\n")}`;
   const [result, setResult] = useState<{ key: string; lines: string[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    void highlightLines(lineTexts, language).then((next) => {
+    void highlightLines(lineTexts, language, undefined, {
+      clickableSymbols,
+      allowAnyIdentifier,
+    }).then((next) => {
       if (!cancelled) {
         setResult({ key: requestKey, lines: next.lines });
       }
@@ -428,7 +589,7 @@ function useHighlightedLines(
     return () => {
       cancelled = true;
     };
-  }, [language, lineTexts, requestKey]);
+  }, [allowAnyIdentifier, clickableSymbols, language, lineTexts, requestKey]);
 
   return result?.key === requestKey ? result.lines : null;
 }

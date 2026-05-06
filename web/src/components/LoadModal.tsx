@@ -2,16 +2,17 @@ import "./LoadModal.css";
 import { useRef, useState } from "react";
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
+import type { RecentSource } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
 import { CopyButton } from "./CopyButton";
 
 interface Props {
   /**
-   * Worktree-loaded changesets carry `cs.worktreeSource`; URL / paste /
-   * file-upload loads leave it undefined. Downstream code reads the field
-   * directly off the ChangeSet, so this signature stays simple.
+   * Keep both the parsed ChangeSet and the actual load provenance.
+   * Definition-nav and recents both need the real source shape, and
+   * worktree-backed loads should not get collapsed into "paste".
    */
-  onLoad: (cs: ChangeSet) => void;
+  onLoad: (cs: ChangeSet, source: RecentSource) => void;
   onClose: () => void;
 }
 
@@ -31,21 +32,26 @@ export function LoadModal({ onLoad, onClose }: Props) {
     onClose();
   }
 
-  function handleParsedText(text: string, id: string, title?: string) {
+  function handleParsedText(
+    text: string,
+    id: string,
+    source: RecentSource,
+    title?: string,
+  ) {
     try {
       const cs = parseDiff(text, { id, title });
       if (cs.files.length === 0) {
         setErr("No files parsed from that diff — is it empty or malformed?");
         return;
       }
-      onLoad(cs);
+      onLoad(cs, source);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "parse failed");
     }
   }
 
   const worktrees = useWorktreeLoader({
-    onLoad: (cs: ChangeSet) => onLoad(cs),
+    onLoad: (cs: ChangeSet, source: RecentSource) => onLoad(cs, source),
   });
 
   async function loadFromUrl() {
@@ -56,7 +62,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
       const text = await res.text();
-      handleParsedText(text, idFromUrl(url), titleFromUrl(url));
+      handleParsedText(text, idFromUrl(url), { kind: "url", url }, titleFromUrl(url));
     } catch (e) {
       // TypeError on the fetch promise typically means CORS / network
       // refused — distinguish so users don't waste time looking for a
@@ -77,7 +83,10 @@ export function LoadModal({ onLoad, onClose }: Props) {
     setErr(null);
     try {
       const text = await f.text();
-      handleParsedText(text, idFromFilename(f.name), f.name);
+      handleParsedText(text, idFromFilename(f.name), {
+        kind: "file",
+        filename: f.name,
+      }, f.name);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "read failed");
     }
@@ -86,7 +95,12 @@ export function LoadModal({ onLoad, onClose }: Props) {
   function loadFromPaste() {
     if (!pasted.trim()) return;
     setErr(null);
-    handleParsedText(pasted, `pasted-${Date.now().toString(36)}`, "pasted diff");
+    handleParsedText(
+      pasted,
+      `pasted-${Date.now().toString(36)}`,
+      { kind: "paste" },
+      "pasted diff",
+    );
   }
 
   return (

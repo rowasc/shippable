@@ -289,6 +289,17 @@
 .line__text--highlighted .shiki-token {
   background: transparent;
 }
+.line__text--highlighted .shiki-token--symbol {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.line__text--highlighted .shiki-token--symbol:hover,
+.line__text--highlighted .shiki-token--symbol:focus-visible {
+  color: var(--accent) !important;
+  outline: none;
+}
 .line__text--highlighted .line {
   display: inline;
   padding: 0;
