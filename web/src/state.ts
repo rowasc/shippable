@@ -1,8 +1,38 @@
 import type { Cursor, ChangeSet, LineSelection, Reply, ReviewState } from "./types";
 import { noteKey } from "./types";
-import { SEED_REPLIES } from "./fixtures";
 
-export function initialState(seed: ChangeSet[]): ReviewState {
+/**
+ * Sentinel cursor used while no changeset is loaded (welcome screen).
+ * Reading any field on it before LOAD_CHANGESET is a bug — render code
+ * must check `state.changesets.length === 0` first.
+ */
+export const EMPTY_CURSOR: Cursor = {
+  changesetId: "",
+  fileId: "",
+  hunkId: "",
+  lineIdx: 0,
+};
+
+export function initialState(
+  seed: ChangeSet[],
+  seedReplies: Record<string, Reply[]> = {},
+): ReviewState {
+  if (seed.length === 0) {
+    return {
+      cursor: EMPTY_CURSOR,
+      changesets: [],
+      readLines: {},
+      reviewedFiles: new Set(),
+      dismissedGuides: new Set(),
+      ackedNotes: new Set(),
+      replies: { ...seedReplies },
+      expandLevelAbove: {},
+      expandLevelBelow: {},
+      fullExpandedFiles: new Set(),
+      previewedFiles: new Set(),
+      selection: null,
+    };
+  }
   const cs = seed[0];
   const file = cs.files[0];
   const hunk = file.hunks[0];
@@ -13,7 +43,7 @@ export function initialState(seed: ChangeSet[]): ReviewState {
     reviewedFiles: new Set(),
     dismissedGuides: new Set(),
     ackedNotes: new Set(),
-    replies: { ...SEED_REPLIES },
+    replies: { ...seedReplies },
     expandLevelAbove: {},
     expandLevelBelow: {},
     fullExpandedFiles: new Set(),
@@ -50,7 +80,7 @@ export type Action =
   | { type: "SET_CURSOR"; cursor: Cursor; selection?: LineSelection | null }
   | { type: "COLLAPSE_SELECTION" }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
-  | { type: "LOAD_CHANGESET"; changeset: ChangeSet }
+  | { type: "LOAD_CHANGESET"; changeset: ChangeSet; replies?: Record<string, Reply[]> }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
@@ -71,6 +101,13 @@ export type Action =
   | { type: "TOGGLE_FILE_REVIEWED"; fileId: string };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
+  // Welcome mode (no changesets) — only LOAD_CHANGESET is meaningful.
+  // Everything else assumes a current changeset/file/hunk and would
+  // crash on the sentinel cursor. The UI also blocks these dispatches,
+  // so this is a defensive belt to the suspenders above.
+  if (state.changesets.length === 0 && action.type !== "LOAD_CHANGESET") {
+    return state;
+  }
   switch (action.type) {
     case "MOVE_LINE":
       return moveLine(
@@ -129,6 +166,12 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         },
         selection: null,
         readLines: addLine(state.readLines, hunk.id, 0),
+        // Seed replies merge in alongside whatever the user has already
+        // authored — never overwrite. Useful for stubs that ship with
+        // canned threads, and for recents that round-trip the same map.
+        replies: action.replies
+          ? { ...action.replies, ...state.replies }
+          : state.replies,
       };
     }
     case "DISMISS_GUIDE": {

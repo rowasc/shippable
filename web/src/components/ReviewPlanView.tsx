@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import "./ReviewPlanView.css";
 import type {
   Claim,
@@ -6,9 +7,12 @@ import type {
   ReviewPlan,
   StructureMap,
   StructureMapFile,
+  ChangeSet,
 } from "../types";
+import { buildPlanDiagram } from "../planDiagram";
 import { Reference } from "./Reference";
 import { CopyButton } from "./CopyButton";
+import { PlanDiagramView } from "./PlanDiagramView";
 
 interface Props {
   plan: ReviewPlan;
@@ -27,6 +31,7 @@ interface Props {
    *  is shown when status === "idle" — we don't auto-send because the diff
    *  leaves the user's machine. */
   onGenerateAi?: () => void;
+  changeset?: ChangeSet;
 }
 
 export function ReviewPlanView({
@@ -36,7 +41,14 @@ export function ReviewPlanView({
   status,
   error,
   onGenerateAi,
+  changeset,
 }: Props) {
+  const [showDiagram, setShowDiagram] = useState(false);
+  const diagram = useMemo(
+    () => (showDiagram ? buildPlanDiagram(plan, changeset?.graph) : null),
+    [changeset?.graph, plan, showDiagram],
+  );
+
   return (
     <section className="plan">
       <header className="plan__h">
@@ -71,7 +83,13 @@ export function ReviewPlanView({
       </header>
 
       <IntentSection intent={plan.intent} onNavigate={onNavigate} />
-      <MapSection map={plan.map} onNavigate={onNavigate} />
+      <MapSection
+        map={plan.map}
+        onNavigate={onNavigate}
+        showDiagram={showDiagram}
+        onToggleDiagram={() => setShowDiagram((value) => !value)}
+        diagram={diagram}
+      />
       <EntrySection
         entryPoints={plan.entryPoints}
         files={plan.map.files}
@@ -130,13 +148,28 @@ function ClaimRow({
 function MapSection({
   map,
   onNavigate,
+  showDiagram,
+  onToggleDiagram,
+  diagram,
 }: {
   map: StructureMap;
   onNavigate?: (ev: EvidenceRef) => void;
+  showDiagram: boolean;
+  onToggleDiagram: () => void;
+  diagram: ReturnType<typeof buildPlanDiagram> | null;
 }) {
   return (
     <section className="plan__sec">
-      <div className="plan__sec-h">Map</div>
+      <div className="plan__sec-head">
+        <div className="plan__sec-h">Map</div>
+        <button
+          type="button"
+          className="plan__sec-btn"
+          onClick={onToggleDiagram}
+        >
+          {showDiagram ? "hide diagram" : "generate diagram"}
+        </button>
+      </div>
       <ul className="plan__files">
         {map.files.map((f) => (
           <FileRow
@@ -178,6 +211,7 @@ function MapSection({
           ))}
         </ul>
       )}
+      {diagram && <PlanDiagramView diagram={diagram} />}
     </section>
   );
 }

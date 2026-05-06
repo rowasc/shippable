@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import { buildRepoCodeGraph, isGraphAnalyzablePath } from "../../web/src/codeGraph.ts";
+import type { CodeGraph } from "../../web/src/types.ts";
 
 // PROTOTYPE: thin wrapper around `git worktree list --porcelain` and
 // `git show`. Production hardening is needed before this ships outside dev:
@@ -72,6 +74,13 @@ export interface ChangesetResult {
   fileContents: Record<string, string>;
 }
 
+const MAX_REPO_GRAPH_FILES = 400;
+const MAX_REPO_GRAPH_FILE_BYTES = 256 * 1024;
+
+export type PickDirectoryResult =
+  | { path: string }
+  | { cancelled: true };
+
 /**
  * Validate that `dir` is an absolute path that exists, is a directory, and
  * contains a `.git` entry (file for worktrees, dir for the main repo).
@@ -108,6 +117,67 @@ async function assertGitDir(dir: string): Promise<void> {
     await fs.stat(path.join(dir, ".git"));
   } catch {
     throw new Error(`dir does not look like a git repo (no .git entry): ${dir}`);
+  }
+}
+
+async function normalizeDefaultDirectory(
+  startPath: string | undefined,
+): Promise<string | null> {
+  if (!startPath || !path.isAbsolute(startPath)) return null;
+  try {
+    const stat = await fs.stat(startPath);
+    if (!stat.isDirectory()) return null;
+    return startPath;
+  } catch {
+    return null;
+  }
+}
+
+function toAppleScriptString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export async function pickDirectory(
+  startPath?: string,
+): Promise<PickDirectoryResult> {
+  if (process.platform !== "darwin") {
+    throw new Error("directory chooser is only wired up on macOS right now");
+  }
+
+  const defaultDir = await normalizeDefaultDirectory(startPath);
+  const args: string[] = [];
+  if (defaultDir) {
+    args.push(
+      "-e",
+      `set chosenFolder to choose folder with prompt "Choose a local repo or worktrees folder" default location POSIX file "${toAppleScriptString(defaultDir)}"`,
+    );
+  } else {
+    args.push(
+      "-e",
+      'set chosenFolder to choose folder with prompt "Choose a local repo or worktrees folder"',
+    );
+  }
+  args.push("-e", "return POSIX path of chosenFolder");
+
+  try {
+    const { stdout } = await execFileAsync("/usr/bin/osascript", args, {
+      maxBuffer: 128 * 1024,
+    });
+    const chosen = stdout.trim();
+    if (!chosen) {
+      throw new Error("folder chooser returned an empty path");
+    }
+    return { path: chosen };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (
+      message.includes("User canceled") ||
+      message.includes("User cancelled") ||
+      message.includes("(-128)")
+    ) {
+      return { cancelled: true };
+    }
+    throw err;
   }
 }
 
@@ -170,16 +240,7 @@ export async function changesetFor(
   ref: string = "HEAD",
 ): Promise<ChangesetResult> {
   await assertGitDir(worktreePath);
-  // Restrict ref to a conservative shape: HEAD, HEAD~N, branch names, sha.
-  // Refuses anything with shell metacharacters or whitespace. The leading-`-`
-  // check is a belt-and-suspenders guard against option-as-ref attacks; the
-  // `--end-of-options` separator below is the primary defense.
-  if (ref.startsWith("-")) {
-    throw new Error(`ref must not start with '-': ${ref}`);
-  }
-  if (!/^[A-Za-z0-9_./~^@-]{1,200}$/.test(ref)) {
-    throw new Error(`invalid ref: ${ref}`);
-  }
+  validateRef(ref);
 
   // Use a delimiter that's vanishingly unlikely to occur in commit metadata
   // so we can split metadata from the diff body cleanly. %P is the
@@ -457,6 +518,42 @@ async function synthesiseNewFileDiff(
   return header + body + (body.length > 0 ? "\n" : "");
 }
 
+export async function repoGraphFor(
+  worktreePath: string,
+  ref: string = "HEAD",
+): Promise<CodeGraph> {
+  await assertGitDir(worktreePath);
+  validateRef(ref);
+
+  const { stdout } = await execFileAsync(
+    GIT,
+    ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "--end-of-options", ref],
+    { cwd: worktreePath, maxBuffer: 8 * 1024 * 1024 },
+  );
+
+  const paths = stdout
+    .split("\0")
+    .filter((value) => value.length > 0)
+    .filter(isGraphAnalyzablePath)
+    .slice(0, MAX_REPO_GRAPH_FILES);
+
+  const sources: Array<{ path: string; text: string }> = [];
+  for (const filePath of paths) {
+    try {
+      const { stdout: content } = await execFileAsync(
+        GIT,
+        ["show", "--end-of-options", `${ref}:${filePath}`],
+        { cwd: worktreePath, maxBuffer: MAX_REPO_GRAPH_FILE_BYTES },
+      );
+      sources.push({ path: filePath, text: content });
+    } catch {
+      // Skip files that are too large or unreadable at this ref.
+    }
+  }
+
+  return buildRepoCodeGraph(sources);
+}
+
 /**
  * Pull repo-relative paths of files we want to ship post-change content for
  * (currently any `.md` file added or modified in the diff). Skips deletions
@@ -473,4 +570,13 @@ function extractRenderablePaths(diff: string): string[] {
     if (path.endsWith(".md")) out.add(path);
   }
   return Array.from(out);
+}
+
+function validateRef(ref: string): void {
+  if (ref.startsWith("-")) {
+    throw new Error(`ref must not start with '-': ${ref}`);
+  }
+  if (!/^[A-Za-z0-9_./~^@-]{1,200}$/.test(ref)) {
+    throw new Error(`invalid ref: ${ref}`);
+  }
 }

@@ -1,8 +1,8 @@
 import "./LoadModal.css";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
-import { apiUrl } from "../apiUrl";
+import { useWorktreeLoader } from "../useWorktreeLoader";
 import { CopyButton } from "./CopyButton";
 
 interface Props {
@@ -15,47 +15,12 @@ interface Props {
   onClose: () => void;
 }
 
-// PROTOTYPE: localStorage key for the last-used worktrees parent dir.
-const WORKTREES_DIR_KEY = "shippable.worktreesDir";
-
-interface Worktree {
-  path: string;
-  branch: string | null;
-  head: string;
-  isMain: boolean;
-}
-
 export function LoadModal({ onLoad, onClose }: Props) {
   const [url, setUrl] = useState("");
   const [pasted, setPasted] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-
-  // Worktrees pane state. The whole pane hides itself if a probe of
-  // /api/health on mount fails — keeps the browser-only fallback clean.
-  const [serverAvailable, setServerAvailable] = useState<boolean | null>(null);
-  const [wtDir, setWtDir] = useState(
-    () => localStorage.getItem(WORKTREES_DIR_KEY) ?? "",
-  );
-  const [wtBusy, setWtBusy] = useState(false);
-  const [wtList, setWtList] = useState<Worktree[] | null>(null);
-  const [wtLoadingPath, setWtLoadingPath] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(await apiUrl("/api/health"));
-        if (!cancelled) setServerAvailable(res.ok);
-      } catch {
-        if (!cancelled) setServerAvailable(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const urlIsValid = isValidHttpUrl(url);
 
@@ -78,6 +43,10 @@ export function LoadModal({ onLoad, onClose }: Props) {
       setErr(e instanceof Error ? e.message : "parse failed");
     }
   }
+
+  const worktrees = useWorktreeLoader({
+    onLoad: (cs: ChangeSet) => onLoad(cs),
+  });
 
   async function loadFromUrl() {
     if (!urlIsValid) return;
@@ -120,97 +89,6 @@ export function LoadModal({ onLoad, onClose }: Props) {
     handleParsedText(pasted, `pasted-${Date.now().toString(36)}`, "pasted diff");
   }
 
-  async function scanWorktrees() {
-    const dir = wtDir.trim();
-    if (!dir) return;
-    setErr(null);
-    setWtBusy(true);
-    setWtList(null);
-    try {
-      const res = await fetch(await apiUrl("/api/worktrees/list"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dir }),
-      });
-      const json = (await res.json()) as
-        | { worktrees: Worktree[] }
-        | { error: string };
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
-      localStorage.setItem(WORKTREES_DIR_KEY, dir);
-      setWtList(json.worktrees);
-      if (json.worktrees.length === 0) {
-        setErr(`No worktrees found in ${dir}.`);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(`Scan failed: ${msg}`);
-    } finally {
-      setWtBusy(false);
-    }
-  }
-
-  async function loadFromWorktree(wt: Worktree) {
-    setErr(null);
-    setWtLoadingPath(wt.path);
-    try {
-      const res = await fetch(await apiUrl("/api/worktrees/changeset"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: wt.path }),
-      });
-      const json = (await res.json()) as
-        | {
-            diff: string;
-            sha: string;
-            subject: string;
-            author: string;
-            date: string;
-            branch: string | null;
-            parentSha: string | null;
-            fileContents?: Record<string, string>;
-          }
-        | { error: string };
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
-      try {
-        const cs = parseDiff(json.diff, {
-          id: `wt-${json.sha.slice(0, 12)}`,
-          title: json.subject || `${wt.branch ?? "detached"} @ ${json.sha.slice(0, 7)}`,
-          author: json.author,
-          head: json.branch ?? json.sha.slice(0, 7),
-          // Topbar shows `<branch> → <base>`. Parent short-sha makes that
-          // meaningful; the literal "base" placeholder we'd inherit otherwise
-          // looks like a bug.
-          base: json.parentSha ?? `${json.sha.slice(0, 7)}^`,
-          fileContents: json.fileContents,
-        });
-        if (cs.files.length === 0) {
-          setErr("Latest commit produced no parseable diff (empty or merge?).");
-          return;
-        }
-        // Stamp provenance directly on the ChangeSet so it travels with the
-        // data through persistence + changeset switches. The redundant
-        // second arg to onLoad is gone — App.tsx reads cs.worktreeSource.
-        cs.worktreeSource = {
-          worktreePath: wt.path,
-          commitSha: json.sha,
-          branch: json.branch ?? null,
-        };
-        onLoad(cs);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : "parse failed");
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(`Load failed: ${msg}`);
-    } finally {
-      setWtLoadingPath(null);
-    }
-  }
-
   return (
     <div className="modal" onClick={tryCloseFromBackdrop}>
       <div className="modal__box" onClick={(e) => e.stopPropagation()}>
@@ -224,40 +102,77 @@ export function LoadModal({ onLoad, onClose }: Props) {
         {/* Worktrees pane: only renders when the local server is reachable.
          *  In no-server / browser-only modes this section is hidden and the
          *  three classic loaders below remain fully functional. */}
-        {serverAvailable && (
+        {worktrees.serverAvailable && (
           <section className="modal__sec">
-            <div className="modal__sec-h">From a worktrees directory</div>
+            <div className="modal__sec-h">From a local repo or worktrees folder</div>
             <p className="modal__hint">
-              Absolute path to a directory containing one or more git worktrees
-              (e.g. a repo root, or <code>.claude/worktrees</code>). Reads the
-              latest commit on the worktree you pick.
+              Choose a repo root or worktrees folder. Shippable scans it and
+              loads the latest committed diff from the worktree you pick.
             </p>
-            <div className="modal__row">
-              <input
-                className="modal__input"
-                type="text"
-                placeholder="/Users/you/code/my-repo"
-                value={wtDir}
-                onChange={(e) => setWtDir(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && scanWorktrees()}
-              />
+            <div className="modal__picker-actions">
               <button
                 className="modal__btn modal__btn--primary"
-                onClick={scanWorktrees}
-                disabled={wtBusy || !wtDir.trim()}
+                onClick={worktrees.pickDirectory}
+                disabled={worktrees.wtPickerBusy}
               >
-                {wtBusy ? "scanning…" : "scan"}
+                {worktrees.wtPickerBusy ? "opening…" : "choose folder…"}
+              </button>
+              {worktrees.wtDir.trim() && (
+                <button
+                  className="modal__btn"
+                  onClick={() => worktrees.scanWorktrees()}
+                  disabled={worktrees.wtBusy}
+                >
+                  {worktrees.wtBusy ? "scanning…" : "rescan"}
+                </button>
+              )}
+              <button
+                className="modal__btn"
+                onClick={() => worktrees.setShowManualPath((shown) => !shown)}
+              >
+                {worktrees.showManualPath ? "hide path input" : "paste path instead"}
               </button>
             </div>
-            {wtList && wtList.length > 0 && (
+            {worktrees.wtDir.trim() && (
+              <div className="modal__picked-path">
+                Current folder: <code>{worktrees.wtDir}</code>
+              </div>
+            )}
+            {worktrees.showManualPath && (
+              <div className="modal__manual">
+                <div className="modal__row">
+                  <input
+                    className="modal__input"
+                    type="text"
+                    placeholder="/Users/you/code/my-repo"
+                    value={worktrees.wtDir}
+                    onChange={(e) => worktrees.setWtDir(e.target.value)}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && worktrees.scanWorktrees()
+                    }
+                  />
+                  <button
+                    className="modal__btn"
+                    onClick={() => worktrees.scanWorktrees()}
+                    disabled={worktrees.wtBusy || !worktrees.wtDir.trim()}
+                  >
+                    {worktrees.wtBusy ? "scanning…" : "scan"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {worktrees.err && (
+              <p className="modal__hint modal__hint--error">{worktrees.err}</p>
+            )}
+            {worktrees.wtList && worktrees.wtList.length > 0 && (
               <ul className="modal__wt-list">
-                {wtList.map((wt) => (
+                {worktrees.wtList.map((wt) => (
                   <li key={wt.path}>
                     <button
                       type="button"
                       className="modal__wt-row"
-                      onClick={() => loadFromWorktree(wt)}
-                      disabled={wtLoadingPath !== null}
+                      onClick={() => worktrees.loadFromWorktree(wt)}
+                      disabled={worktrees.wtLoadingPath !== null}
                     >
                       <span className="modal__wt-branch">
                         {wt.branch ?? "(detached)"}
@@ -268,7 +183,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
                       <span className="modal__wt-path">{wt.path}</span>
                       <span className="modal__wt-head">
                         {wt.head.slice(0, 7)}
-                        {wtLoadingPath === wt.path && " · loading…"}
+                        {worktrees.wtLoadingPath === wt.path && " · loading…"}
                       </span>
                     </button>
                   </li>

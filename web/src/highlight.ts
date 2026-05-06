@@ -45,6 +45,15 @@ export function setHighlightTheme(themeId: ThemeId): void {
   activeThemeId = themeId;
 }
 
+type ColorMode = "light" | "dark";
+
+function shikiThemeFor(themeId: ThemeId, colorMode: ColorMode | undefined): string {
+  if (!colorMode) return shikiThemeNameFor(themeId);
+  const activeScheme = THEMES[themeId]?.colorScheme;
+  if (activeScheme === colorMode) return shikiThemeNameFor(themeId);
+  return colorMode === "light" ? THEME_LIGHT : THEME_DARK;
+}
+
 const SUPPORTED_LANGUAGES = [
   "text",
   "bash",
@@ -121,9 +130,10 @@ export function normalizeHighlightLanguage(language?: string): string {
 export async function highlightCode(
   code: string,
   language?: string,
+  colorMode?: ColorMode,
 ): Promise<{ html: string; language: string }> {
   const normalized = normalizeHighlightLanguage(language);
-  const themeName = shikiThemeNameFor(activeThemeId);
+  const themeName = shikiThemeFor(activeThemeId, colorMode);
   const key = `${themeName}::${normalized}\u0000${code}`;
 
   let htmlPromise = htmlCache.get(key);
@@ -143,9 +153,10 @@ export async function highlightCode(
 export async function highlightLines(
   lines: string[],
   language?: string,
+  colorMode?: ColorMode,
 ): Promise<{ language: string; lines: string[] }> {
   const normalized = normalizeHighlightLanguage(language);
-  const themeName = shikiThemeNameFor(activeThemeId);
+  const themeName = shikiThemeFor(activeThemeId, colorMode);
   const key = `${themeName}::${normalized}\u0000${lines.join("\n")}`;
 
   let linePromise = lineHtmlCache.get(key);

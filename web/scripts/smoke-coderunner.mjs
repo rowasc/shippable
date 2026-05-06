@@ -1,8 +1,8 @@
-// Smoke test for the CodeRunner prototype.
+// Smoke test for the current CodeRunner UI.
 //
-// Boots Chrome via playwright-core, opens the dev server (assumed running on
-// http://localhost:5173), selects a TS function, runs it with an input, and
-// asserts the output. Exits non-zero on failure.
+// The old selection-pill flow is gone; the stable entrypoint is the topbar
+// free runner. This smoke opens that panel, runs a trivial TS snippet, and
+// asserts the output.
 
 import { chromium } from "playwright-core";
 
@@ -20,32 +20,15 @@ async function main() {
   // Dismiss the plan overlay if present.
   await page.keyboard.press("Escape").catch(() => {});
 
-  // Inject a known arrow function into the first diff line and select it.
-  // Synthetic: avoids depending on the fixture having a self-contained
-  // runnable function on a single line.
-  const lineHandle = await page.waitForSelector(".diff .line .line__text");
-  const selectedText = await page.evaluate((node) => {
-    node.textContent = "(a) => a * 2";
-    const sel = window.getSelection();
-    sel?.removeAllRanges();
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    sel?.addRange(range);
-    return node.textContent;
-  }, lineHandle);
-  console.log("selected:", JSON.stringify(selectedText));
+  await page.click('button[title*="free code runner"]');
+  await page.waitForSelector(
+    ".coderunner__panel.coderunner--free, .coderunner--free .coderunner__panel",
+    { timeout: 5000 },
+  );
 
-  // The pill should appear.
-  const pill = await page.waitForSelector(".coderunner__pill", { timeout: 3000 });
-  console.log("pill text:", await pill.textContent());
-
-  // Click into the panel.
-  await pill.click();
-  await page.waitForSelector(".coderunner__panel", { timeout: 5000 });
-
-  // Fill any inputs with sane values, then run.
-  const inputs = await page.$$(".coderunner__input-box");
-  for (const i of inputs) await i.fill("21");
+  await page.fill(".coderunner__source-edit", "(a) => a * 2");
+  await page.waitForTimeout(100);
+  await page.fill(".coderunner__input-box", "21");
   await page.click(".coderunner__run");
   await page.waitForSelector(".coderunner__out", { timeout: 4000 });
 

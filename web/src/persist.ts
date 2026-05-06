@@ -16,6 +16,13 @@ import type { ChangeSet, Cursor, Reply, ReviewState } from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
+/**
+ * Head schema version. To bump it: add a `migrations[N]` entry below in
+ * the same change. Old blobs in users' localStorage are migrated forward
+ * on load; we never write old shapes back.
+ */
+const CURRENT_VERSION = 1;
+
 /** What we actually serialize — Sets become arrays, ephemeral fields drop. */
 interface PersistedSnapshot {
   v: 1;
@@ -27,6 +34,46 @@ interface PersistedSnapshot {
   ackedNotes: string[];
   replies: Record<string, Reply[]>;
   drafts: Record<string, string>;
+}
+
+/**
+ * Forward-only migration table. `migrations[N]` takes a snapshot at version
+ * N-1 and returns one at version N. The loader walks from the stored
+ * snapshot's `v` up to `CURRENT_VERSION`; a missing step (gap in the table
+ * or unknown future version) is the fail-closed signal.
+ *
+ * Keys must be contiguous and end at `CURRENT_VERSION`. To bump to v: 2:
+ *   2: (v1) => ({ ...(v1 as PersistedSnapshot), v: 2, /* new fields *\/ }),
+ *
+ * No backwards migrations — once written, `v: N` blobs only travel forward.
+ */
+const migrations: Record<number, (prev: unknown) => unknown> = {
+  // empty: v: 1 is the head.
+};
+
+/**
+ * Walk the migration table from the parsed blob's `v` up to CURRENT_VERSION.
+ * Returns null if the blob isn't a versioned object, the version is unknown
+ * (future, or a gap in the table), or any migration throws. Callers treat
+ * null as "no useful snapshot" — the existing failure mode for malformed
+ * data — so old clients seeing a future version skip rather than corrupt.
+ */
+function migrateToHead(parsed: unknown): unknown | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const v = (parsed as { v?: unknown }).v;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return null;
+  if (v > CURRENT_VERSION) return null;
+  let cur: unknown = parsed;
+  for (let target = v + 1; target <= CURRENT_VERSION; target++) {
+    const step = migrations[target];
+    if (!step) return null;
+    try {
+      cur = step(cur);
+    } catch {
+      return null;
+    }
+  }
+  return cur;
 }
 
 /** What hydration returns after validation. Both fields default to "no
@@ -91,6 +138,55 @@ export function clearSession(): void {
 }
 
 /**
+ * Raw snapshot read without changeset validation. Used at boot to decide
+ * which changeset to hydrate (the snapshot's cursor.changesetId tells us
+ * what to look up in stubs/recents), before we have a changesets array
+ * to pass to loadSession. Returns null if the storage entry is missing
+ * or malformed.
+ */
+export function peekSession(): PersistedSnapshot | null {
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const migrated = migrateToHead(parsed);
+  return isPersistedSnapshot(migrated) ? migrated : null;
+}
+
+/**
+ * Heuristic for "the user actually did something." Just visiting the app
+ * triggers a debounced save of the seeded state (cursor on line 0, one
+ * read line), so existence-of-snapshot alone isn't a useful signal — we
+ * need to look at what's *in* it.
+ */
+export function hasProgress(s: PersistedSnapshot): boolean {
+  if (s.reviewedFiles.length > 0) return true;
+  if (s.ackedNotes.length > 0) return true;
+  for (const arr of Object.values(s.readLines)) {
+    if (arr.length > 1) return true;
+  }
+  for (const v of Object.values(s.drafts)) {
+    if (v && v.trim()) return true;
+  }
+  // Replies: any reply whose author isn't a seeded teammate. Hard to
+  // detect precisely from this layer, but presence of replies on a
+  // userCommentKey-prefixed key is a strong "user did this" signal.
+  for (const key of Object.keys(s.replies)) {
+    if (key.startsWith("user:") || key.startsWith("block:")) return true;
+  }
+  return false;
+}
+
+/**
  * Read + validate the persisted snapshot. Returns hydrated state shaped
  * to overlay onto initialState. Cursor is validated against the loaded
  * changesets — if the persisted file/hunk no longer exists, we fall back
@@ -112,11 +208,12 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
   } catch {
     return empty;
   }
-  if (!isPersistedSnapshot(parsed)) return empty;
+  const snapshot = migrateToHead(parsed);
+  if (!isPersistedSnapshot(snapshot)) return empty;
 
   // Validate the cursor against current changesets — fixtures change
   // between runs (or the user loaded an entirely different set).
-  const cursor = validateCursor(parsed.cursor, changesets);
+  const cursor = validateCursor(snapshot.cursor, changesets);
 
   // Rehydrate Sets and Maps. Drop entries whose hunk/file ids don't
   // exist in the current changesets — stale data from older fixtures
@@ -126,21 +223,25 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
   const validFileIds = collectFileIds(changesets);
 
   const readLines: Record<string, Set<number>> = {};
-  for (const [hunkId, arr] of Object.entries(parsed.readLines)) {
+  for (const [hunkId, arr] of Object.entries(snapshot.readLines)) {
     if (!validHunkIds.has(hunkId)) continue;
     readLines[hunkId] = new Set(arr.filter((n) => Number.isFinite(n)));
   }
+
+  // When changesets is empty (welcome boot), there's no fallback cursor to
+  // resolve — return null state so the caller knows nothing to overlay.
+  if (!cursor && changesets.length === 0) return empty;
 
   return {
     state: {
       cursor: cursor ?? defaultCursor(changesets),
       readLines,
-      reviewedFiles: new Set(parsed.reviewedFiles.filter((id) => validFileIds.has(id))),
-      dismissedGuides: new Set(parsed.dismissedGuides),
-      ackedNotes: new Set(parsed.ackedNotes),
-      replies: filterRepliesByHunk(parsed.replies, validHunkIds),
+      reviewedFiles: new Set(snapshot.reviewedFiles.filter((id) => validFileIds.has(id))),
+      dismissedGuides: new Set(snapshot.dismissedGuides),
+      ackedNotes: new Set(snapshot.ackedNotes),
+      replies: filterRepliesByHunk(snapshot.replies, validHunkIds),
     },
-    drafts: filterDraftsByHunk(parsed.drafts, validHunkIds),
+    drafts: filterDraftsByHunk(snapshot.drafts, validHunkIds),
   };
 }
 

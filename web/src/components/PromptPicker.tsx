@@ -1,6 +1,7 @@
 import "./LoadModal.css";
 import "./PromptPicker.css";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   type Prompt,
   type AutoFillContext,
@@ -238,13 +239,14 @@ interface FormProps {
 }
 
 function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
-  const [values, setValues] = useState<Record<string, string>>(() => {
+  const initialValues = useMemo(() => {
     const initial: Record<string, string> = {};
     for (const a of prompt.args) {
       initial[a.name] = resolveAuto(a.auto, context) ?? "";
     }
     return initial;
-  });
+  }, [prompt, context]);
+  const [values, setValues] = useState<Record<string, string>>(initialValues);
 
   const missingRequired = prompt.args
     .filter((a) => a.required && (values[a.name] ?? "").trim().length === 0)
@@ -263,6 +265,8 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
       {prompt.args.map((arg) => {
         const isLong = !!arg.auto;
         const value = values[arg.name] ?? "";
+        const sourceLabel = describeAutoSource(arg.auto, context);
+        const edited = !!arg.auto && value !== initialValues[arg.name];
         return (
           <div key={arg.name} className="picker__arg">
             <label className="picker__arg-label">
@@ -271,6 +275,12 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
                 <span className="picker__arg-required">required</span>
               )}
             </label>
+            {sourceLabel && (
+              <div className="picker__arg-source">
+                {sourceLabel}
+                {edited && <span className="picker__arg-edited"> · edited</span>}
+              </div>
+            )}
             {isLong ? (
               <textarea
                 className="picker__arg-textarea"
@@ -316,5 +326,30 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
       </div>
     </section>
   );
+}
+
+function describeAutoSource(
+  hint: string | undefined,
+  ctx: AutoFillContext,
+): ReactNode {
+  if (!hint) return null;
+  switch (hint) {
+    case "selection": {
+      const info = ctx.selectionInfo;
+      if (info.kind === "lines") {
+        const span = info.hi - info.lo + 1;
+        return `auto-filled from your line selection — lines ${info.lo}–${info.hi} (${span} of ${info.hunkLines})`;
+      }
+      return `auto-filled from the current hunk — all ${info.hunkLines} lines (no line selection)`;
+    }
+    case "file":
+      return "auto-filled with the current file path";
+    case "changeset.title":
+      return "auto-filled with the changeset title";
+    case "changeset.diff":
+      return "auto-filled with the full changeset diff";
+    default:
+      return "auto-filled";
+  }
 }
 

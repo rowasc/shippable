@@ -5,6 +5,15 @@
 //! Without that feature keyring 3.x falls back to an in-memory mock store —
 //! `set_password` succeeds but nothing persists past process exit. Make sure
 //! `Cargo.toml` carries `features = ["apple-native", ...]`.
+//!
+//! How it works:
+//! - `Entry::new(service, account)` resolves one native Keychain item.
+//! - `SERVICE` is fixed to the app namespace (`"shippable"`), so every caller
+//!   is operating inside the same credential bucket.
+//! - `account` identifies the specific secret in that bucket, such as
+//!   `"ANTHROPIC_API_KEY"`.
+//! - The Tauri commands below validate the requested account name first, then
+//!   forward to the native Keychain through `keyring`.
 
 use keyring::{Entry, Error};
 
@@ -35,12 +44,15 @@ pub fn get(account: &str) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+/// Frontend-safe wrapper around `get`. The allowlist keeps the webview from
+/// probing arbitrary Keychain accounts through the Tauri bridge.
 pub fn keychain_get(account: String) -> Result<Option<String>, String> {
     validate_account(&account)?;
     get(&account)
 }
 
 #[tauri::command]
+/// Stores or overwrites the named credential in the app's Keychain service.
 pub fn keychain_set(account: String, password: String) -> Result<(), String> {
     validate_account(&account)?;
     entry(&account)?
@@ -49,6 +61,7 @@ pub fn keychain_set(account: String, password: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+/// Deletes the named credential. Missing entries are treated as already-clean.
 pub fn keychain_remove(account: String) -> Result<(), String> {
     validate_account(&account)?;
     match entry(&account)?.delete_credential() {

@@ -15,6 +15,7 @@ const HAND_TUNED_THEMES = {
     colorScheme: "dark",
     vars: {
       "bg": "#0b0e14",
+      "bg-1": "#0b0e14",
       "bg-2": "#11151c",
       "bg-3": "#161b24",
       "fg": "#c7cbd1",
@@ -51,6 +52,7 @@ const HAND_TUNED_THEMES = {
     colorScheme: "dark",
     vars: {
       "bg": "#1b0a18",
+      "bg-1": "#1b0a18",
       "bg-2": "#260f25",
       "bg-3": "#321432",
       "fg": "#ffd6ec",
@@ -87,6 +89,7 @@ const HAND_TUNED_THEMES = {
     colorScheme: "light",
     vars: {
       "bg": "#fff5f9",
+      "bg-1": "#fff5f9",
       "bg-2": "#ffe9f2",
       "bg-3": "#ffd9e8",
       "fg": "#4a1530",
@@ -123,6 +126,7 @@ const HAND_TUNED_THEMES = {
     colorScheme: "light",
     vars: {
       "bg": "#f5f7fb",
+      "bg-1": "#f5f7fb",
       "bg-2": "#ebeff5",
       "bg-3": "#dde5ef",
       "fg": "#233142",

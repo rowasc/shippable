@@ -1,4 +1,5 @@
-import type { ChangeSet, DiffFile, DiffLine, FileStatus, Hunk } from "./types";
+import { buildDiffCodeGraph } from "./codeGraph";
+import type { ChangeSet, CodeGraph, DiffFile, DiffLine, FileStatus, Hunk } from "./types";
 
 /**
  * Parse a unified-diff text (git-style or plain) into a ChangeSet.
@@ -28,11 +29,13 @@ export function parseDiff(
      * full file. Files not in the map are unaffected.
      */
     fileContents?: Record<string, string>;
+    /** Optional pre-computed graph, usually from a worktree-backed endpoint. */
+    graph?: CodeGraph;
   } = {
     id: "loaded",
   },
 ): ChangeSet {
-  const files: DiffFile[] = [];
+  const parsedFiles: DiffFile[] = [];
   const lines = text.split(/\r?\n/);
   let i = 0;
 
@@ -46,13 +49,17 @@ export function parseDiff(
       const { file, next } = parseFile(lines, i, meta.id);
       if (file) {
         const extra = meta.fileContents?.[file.path];
-        files.push(extra ? { ...file, postChangeText: extra } : file);
+        parsedFiles.push(extra ? { ...file, postChangeText: extra } : file);
       }
       i = next;
     } else {
       i++;
     }
   }
+
+  const enriched = buildDiffCodeGraph(parsedFiles);
+  const files = enriched.files;
+  const graph = meta.graph ?? enriched.graph;
 
   return {
     id: meta.id,
@@ -63,6 +70,7 @@ export function parseDiff(
     createdAt: new Date().toISOString(),
     description: "",
     files,
+    graph,
   };
 }
 
@@ -198,11 +206,6 @@ function parseHunk(
 
     if (l.startsWith("\\ ")) {
       // "\ No newline at end of file" — skip the pseudo-line.
-      i++;
-      continue;
-    }
-    if (l.length === 0) {
-      // empty trailing line at EOF of the diff — skip.
       i++;
       continue;
     }

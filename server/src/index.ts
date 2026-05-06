@@ -60,8 +60,14 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/worktrees/list") {
       return handleWorktreesList(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/pick-directory") {
+      return handleWorktreesPickDirectory(req, res, origin);
+    }
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return handleWorktreesChangeset(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/worktrees/graph") {
+      return handleWorktreesGraph(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/sessions") {
       return handleWorktreesSessions(req, res, origin);
@@ -112,6 +118,12 @@ async function handlePlan(
   res: ServerResponse,
   origin: string | null,
 ) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    return;
+  }
   const body = await readBody(req);
   let parsed: { changeset?: ChangeSet };
   try {
@@ -177,6 +189,12 @@ async function handleReview(
   res: ServerResponse,
   origin: string | null,
 ) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    return;
+  }
   const ip = req.socket.remoteAddress ?? "unknown";
   const gate = checkReviewRateLimit(ip);
   if (!gate.allowed) {
@@ -346,6 +364,43 @@ async function handleWorktreesChangeset(
   }
 }
 
+async function handleWorktreesGraph(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; ref?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const ref = typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : "HEAD";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string, ref?: string }" }));
+    return;
+  }
+  try {
+    const graph = await worktrees.repoGraphFor(wtPath, ref);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ graph }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/graph err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
 async function handleWorktreesSessions(
   req: IncomingMessage,
   res: ServerResponse,
@@ -376,6 +431,41 @@ async function handleWorktreesSessions(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/sessions err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesPickDirectory(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { startPath?: unknown } = {};
+  if (body.trim().length > 0) {
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid JSON body" }));
+      return;
+    }
+  }
+  const startPath =
+    typeof parsed.startPath === "string" && parsed.startPath.length > 0
+      ? parsed.startPath
+      : undefined;
+  try {
+    const result = await worktrees.pickDirectory(startPath);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/pick-directory err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));

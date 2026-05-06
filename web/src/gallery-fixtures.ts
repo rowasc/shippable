@@ -1,6 +1,7 @@
 import type { AiNote, DiffLine, ReviewPlan, ReviewState } from "./types";
 import { blockCommentKey, noteKey, lineNoteReplyKey, teammateReplyKey } from "./types";
-import { CHANGESETS, SEED_REPLIES } from "./fixtures";
+import { CS_42, REPLIES_42 } from "./fixtures/cs-42-preferences";
+import { CS_57 } from "./fixtures/cs-57-session-race";
 import { initialState } from "./state";
 import { planReview } from "./plan";
 
@@ -56,7 +57,7 @@ function markLines(
 // The raw initialState for cs-42, cursor at hunk 1 line 0.
 // Shows a fresh review with no lines marked, no notes acked.
 
-const cs42 = CHANGESETS[0]; // "Add user preferences panel"
+const cs42 = CS_42; // "Add user preferences panel"
 const emptyState = initialState([cs42]);
 
 export const fixtureEmpty: GalleryFixture = {
@@ -102,7 +103,7 @@ export const fixtureMidReview: GalleryFixture = {
     },
     readLines: midReadLines,
     ackedNotes: new Set([noteKey(storageH2.id, 6)]),
-    replies: { ...SEED_REPLIES },
+    replies: { ...REPLIES_42 },
   },
   fileId: storageFile.id,
   hunkId: storageH2.id,
@@ -148,7 +149,7 @@ const EXTRA_NOTES_BY_LINE_IDX: Record<number, AiNote> = {
 // ── 3. ai-saturated ────────────────────────────────────────────────────────
 // Synthetic variant of cs-42's PreferencesPanel hunk with extra aiNotes layered
 // on, to stress-test how DiffView + Inspector handle a densely-annotated hunk.
-// Gallery-local: does not mutate the shared CHANGESETS fixture.
+// Gallery-local: does not mutate the shared CS_42 fixture.
 
 const prefFile = cs42.files[2]; // src/components/PreferencesPanel.tsx
 const prefH1 = prefFile.hunks[0];
@@ -209,7 +210,7 @@ export const fixtureAiSaturated: GalleryFixture = {
 // Note: the fixture data has two hunks with teammateReview on cs-57. We pick
 // auth.ts#h2 (verdict: "approve") for the most visually interesting state.
 
-const cs57 = CHANGESETS[1]; // "Fix race condition in session hydration"
+const cs57 = CS_57; // "Fix race condition in session hydration"
 const authFile = cs57.files[2]; // server/middleware/auth.ts
 const authH2 = authFile.hunks[1];
 
@@ -320,7 +321,7 @@ export const fixtureFileReviewed: GalleryFixture = {
     },
     readLines: reviewedAllReadLines,
     reviewedFiles: new Set([storageFile.id]),
-    replies: { ...SEED_REPLIES },
+    replies: { ...REPLIES_42 },
   },
   fileId: storageFile.id,
   hunkId: storageH1.id,

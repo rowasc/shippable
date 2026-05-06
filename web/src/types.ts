@@ -76,6 +76,24 @@ export interface DiffFile {
   postChangeText?: string;
 }
 
+export interface CodeGraphNode {
+  path: string;
+  isTest: boolean;
+}
+
+export interface CodeGraphEdge {
+  fromPath: string;
+  toPath: string;
+  labels: string[];
+  kind: "import" | "symbol";
+}
+
+export interface CodeGraph {
+  scope: "diff" | "repo";
+  nodes: CodeGraphNode[];
+  edges: CodeGraphEdge[];
+}
+
 export interface ChangeSet {
   id: string;
   title: string;
@@ -91,6 +109,12 @@ export interface ChangeSet {
    * from a markdown file's directory plus its relative image reference.
    */
   imageAssets?: Record<string, string>;
+  /**
+   * Optional dependency graph attached by the ingest path. Pasted/uploaded
+   * diffs can derive a diff-scoped graph from changed hunks; worktree-backed
+   * loads may attach a repo-scoped graph built from the checkout on disk.
+   */
+  graph?: CodeGraph;
   /**
    * Set when this ChangeSet was loaded from a local worktree — carries the
    * path + sha so the agent-context panel knows what to fetch. Travelling

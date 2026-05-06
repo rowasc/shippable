@@ -27,3 +27,6 @@
   color: var(--accent);
   font-variant-numeric: tabular-nums;
 }
+.statusbar__hint--tip {
+  color: var(--yellow);
+}

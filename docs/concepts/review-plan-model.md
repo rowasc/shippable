@@ -35,6 +35,7 @@ What it means:
 - Lists symbols defined in the diff and where else in the diff they are referenced.
 - Gives the reviewer a quick dependency picture instead of making them infer it from raw hunks.
 - Acts as the bridge between "what changed" and "where should I read first."
+- Also acts as the source for on-demand review diagrams: the UI can derive a Mermaid graph locally from the file/symbol relationships without storing a generated artifact yet.
 
 ### entryPoints
 The suggested places to begin reading.

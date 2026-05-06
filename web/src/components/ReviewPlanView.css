@@ -70,6 +70,31 @@
   color: var(--fg-dim);
   margin-bottom: 10px;
 }
+.plan__sec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.plan__sec-head .plan__sec-h {
+  margin-bottom: 0;
+}
+.plan__sec-btn {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  text-transform: lowercase;
+}
+.plan__sec-btn:hover {
+  background: var(--bg-1);
+  border-color: var(--border-active);
+}
 .plan__empty {
   color: var(--fg-mute);
   font-style: italic;

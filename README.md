@@ -76,15 +76,13 @@ Shippable can also ship as a native macOS app. The React frontend gets wrapped i
 ```
 brew tap oven-sh/bun && brew install bun
 cargo install tauri-cli --version "^2.0"
-(cd server && bun install)
-(cd web && npm install)
+npm run desktop:setup
 ```
 
 ### Build
 
 ```
-(cd server && bun run build:sidecar)   # compile the backend to src-tauri/binaries/
-cargo tauri build                       # bundle frontend + sidecar into .app + .dmg
+npm run build:dmg
 ```
 
 Output:
@@ -92,7 +90,12 @@ Output:
 - `src-tauri/target/release/bundle/macos/Shippable.app`
 - `src-tauri/target/release/bundle/dmg/Shippable_0.1.0_aarch64.dmg`
 
-`cargo tauri build` does **not** invoke `bun run build:sidecar` — re-run it manually whenever you change anything in `server/src/`.
+`npm run build:dmg` is the canonical entrypoint from the repo root. It first runs `cargo tauri build -b app`, and `src-tauri/tauri.conf.json` already wires in the required pre-build steps:
+
+- compile `server/` into the bundled sidecar binary
+- build `web/` into `web/dist`
+
+The repo intentionally creates the final `.dmg` with `hdiutil` after Tauri produces the `.app`. Tauri's built-in DMG step relies on Finder AppleScript and is brittle in headless or sandboxed environments.
 
 The .dmg is unsigned, so first launch trips macOS Gatekeeper — right-click the .app in Finder → Open → confirm once. Subsequent launches don't prompt.
 
@@ -108,4 +111,4 @@ security delete-generic-password -s shippable -a ANTHROPIC_API_KEY
 
 ### Iterating
 
-For quick iteration on the Rust shell or the frontend, `cargo tauri dev` runs the React app via Vite in a native window with hot reload. The bundled-sidecar path still applies — if `src-tauri/binaries/shippable-server-aarch64-apple-darwin` is missing, the app launches but AI plans fail. Either run `bun run build:sidecar` once before `cargo tauri dev`, or run the standalone `server/` separately and stick to the browser dev flow above.
+For quick iteration on the Rust shell or the frontend, `npm run desktop:dev` runs the React app via Vite in a native window with hot reload. The pre-dev hook in `src-tauri/tauri.conf.json` compiles the bundled sidecar first, so you don't need to remember a separate `bun run build:sidecar` step.

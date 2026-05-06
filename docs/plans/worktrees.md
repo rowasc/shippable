@@ -4,6 +4,8 @@ The reviewer today is fed by URL, file upload, or paste. None of those match the
 
 This pairs with `auto-mode-sandbox.md`. The sandbox is where agents *do* the work (`.claude/worktrees/<name>` is its convention). This is where you *review* the work. They meet at the worktree boundary.
 
+Directory selection is now split into a focused follow-up plan: see [worktree-directory-picker.md](./worktree-directory-picker.md). The short version: the current path textbox needs to become a chooser-first flow in both Tauri and browser-dev, with the browser chooser opened through the local server so the existing git-backed path API stays intact.
+
 ## Goal
 
 What this enables:
@@ -125,6 +127,7 @@ This section records decisions made while scoping the agent-context UX (the "Cla
 - `web/src/types.ts` — possibly extends `ChangeSet` or adds a sibling `WorktreeSource` for provenance.
 - `web/src/persist.ts` — per-worktree review cursor in localStorage.
 - `server/src/index.ts` — new endpoints `GET /api/worktrees`, `GET /api/worktrees/diff`. Origin allowlist + path validation belong here.
+- `server/src/index.ts` — worktree endpoints, including the optional repo-graph endpoint used by the plan diagram to show unchanged neighbors from the checkout.
 - `server/src/` (new) — a `git` wrapper module. `execFile`-based, narrowly scoped commands.
 - `src-tauri/` — eventually a native equivalent so desktop doesn't need the Node sidecar for this.
 - `docs/plans/auto-mode-sandbox.md` — touch up to mention the reviewer integration once slice (d) is real.

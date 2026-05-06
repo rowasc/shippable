@@ -1,26 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadSession, saveSession } from "./persist";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it } from "vitest";
+import { loadSession, peekSession, saveSession } from "./persist";
 import { initialState } from "./state";
 import type { ChangeSet, DiffFile, DiffLine, Hunk, Reply } from "./types";
 import { lineNoteReplyKey } from "./types";
 
-// Minimal in-memory localStorage shim so vitest's node env can drive the
-// persist module. We only need get/set/remove for these round-trips.
-function installLocalStorageStub(): void {
-  const store = new Map<string, string>();
-  const stub = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-    key: () => null,
-    length: 0,
-  };
-  Object.defineProperty(globalThis, "localStorage", {
-    configurable: true,
-    value: stub,
-  });
-}
+const STORAGE_KEY = "shippable:review:v1";
 
 function makeLines(n: number): DiffLine[] {
   return Array.from({ length: n }, (_, i) => ({
@@ -57,9 +42,6 @@ function makeChangeset(): ChangeSet {
   };
 }
 
-beforeEach(() => {
-  installLocalStorageStub();
-});
 afterEach(() => {
   localStorage.clear();
 });
@@ -86,7 +68,7 @@ describe("persist — Reply.enqueuedCommentId migration", () => {
       replies: { [key]: [legacyReply] },
       drafts: {},
     };
-    localStorage.setItem("shippable:review:v1", JSON.stringify(snapshot));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 
     const hydrated = loadSession([cs]);
     expect(hydrated.state).not.toBeNull();
@@ -131,7 +113,7 @@ describe("persist — Reply.enqueuedCommentId migration", () => {
       replies: { [key]: [legacyReply] },
       drafts: {},
     };
-    localStorage.setItem("shippable:review:v1", JSON.stringify(snapshot));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
 
     const hydrated = loadSession([cs]);
     const replies = hydrated.state!.replies[key];
@@ -157,5 +139,46 @@ describe("persist — Reply.enqueuedCommentId migration", () => {
 
     const hydrated = loadSession([cs]);
     expect(hydrated.state!.replies[key][0].enqueuedCommentId).toBe("cmt_42");
+  });
+});
+
+// Bug class: an older client encountering a snapshot written by a newer
+// version of the app must not pretend to load it. The migration table is
+// forward-only, so a v: 999 blob has no path back to the head we know about.
+// Failing closed = same behavior as a malformed blob: peek → null,
+// load → empty hydration. Anything else risks corrupt state on disk.
+describe("persist — unknown future version fails closed", () => {
+  it("peekSession returns null for v greater than CURRENT_VERSION", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 999,
+        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        ackedNotes: [],
+        replies: {},
+        drafts: {},
+      }),
+    );
+    expect(peekSession()).toBeNull();
+  });
+
+  it("loadSession returns empty hydration for v greater than CURRENT_VERSION", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 999,
+        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        ackedNotes: [],
+        replies: {},
+        drafts: {},
+      }),
+    );
+    expect(loadSession([])).toEqual({ state: null, drafts: {} });
   });
 });

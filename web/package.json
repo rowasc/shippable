@@ -13,6 +13,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:smoke": "node scripts/test-smoke.mjs",
     "test:watch": "vitest",
     "demo": "node scripts/generate-demo.mjs",
     "tauri:dev": "cd ../src-tauri && cargo tauri dev",
