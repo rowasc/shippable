@@ -17,12 +17,6 @@ const SMOKES = [
   { id: "coderunner-ts-transpile", file: "smoke-coderunner-ts-transpile.mjs", default: true },
   { id: "themes", file: "smoke-themes.mjs", default: true },
   {
-    id: "coderunner-php",
-    file: "smoke-coderunner-php.mjs",
-    default: false,
-    blockedReason: "still targets the removed selection-pill runner flow",
-  },
-  {
     id: "coderunner-richphp",
     file: "smoke-coderunner-richphp.mjs",
     default: false,
