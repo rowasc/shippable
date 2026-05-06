@@ -56,6 +56,14 @@ export interface ChangesetResult {
   date: string;
   branch: string | null;
   /**
+   * Display label rendered in the topbar after `<branch> → `. May be a
+   * short-sha (when the branch has diverged from a base ref), the literal
+   * string "working tree" (when the branch is at parity with its base and
+   * the diff is uncommitted-only), or null (no base ref could be resolved
+   * — caller falls back to a placeholder).
+   */
+  parentSha: string | null;
+  /**
    * Post-change content for files the frontend can render specially —
    * currently markdown files for the preview pane. Keys are repo-relative
    * paths matching the `+++ b/<path>` lines in the diff. Files deleted in
@@ -235,9 +243,11 @@ export async function changesetFor(
   validateRef(ref);
 
   // Use a delimiter that's vanishingly unlikely to occur in commit metadata
-  // so we can split metadata from the diff body cleanly.
+  // so we can split metadata from the diff body cleanly. %P is the
+  // space-separated list of parent SHAs — empty for the very first commit
+  // on a branch.
   const SEP = "<<<SHIPPABLE-WT-SEP>>>";
-  const fmt = `%H%n%s%n%an <%ae>%n%aI%n${SEP}`;
+  const fmt = `%H%n%s%n%an <%ae>%n%aI%n%P%n${SEP}`;
   const { stdout } = await execFileAsync(
     GIT,
     ["show", `--format=${fmt}`, "--patch", "--end-of-options", ref],
@@ -251,7 +261,10 @@ export async function changesetFor(
   const meta = stdout.slice(0, sepIdx).split("\n");
   // Skip the newline that follows SEP.
   const diff = stdout.slice(sepIdx + SEP.length).replace(/^\n/, "");
-  const [sha = "", subject = "", author = "", date = ""] = meta;
+  const [sha = "", subject = "", author = "", date = "", parentsRaw = ""] =
+    meta;
+  const firstParent = parentsRaw.trim().split(/\s+/).filter(Boolean)[0] ?? "";
+  const parentSha = firstParent ? firstParent.slice(0, 7) : null;
 
   // Resolve the branch name for the worktree (best effort; detached heads
   // return an empty string).
@@ -287,7 +300,222 @@ export async function changesetFor(
     }
   }
 
-  return { diff, sha, subject, author, date, branch, fileContents };
+  return { diff, sha, subject, author, date, branch, parentSha, fileContents };
+}
+
+/**
+ * "Branch view" of a worktree: cumulative diff of *all* the work this branch
+ * represents — committed since divergence from main/upstream, plus tracked
+ * uncommitted changes, plus untracked-but-not-ignored files. This is the
+ * default for the LoadModal because reviewers thinking "what does this
+ * worktree contain?" expect everything in flight, not just the latest commit.
+ *
+ * Base resolution attempts in order: `@{upstream}`, `origin/main`,
+ * `origin/master`, `main`, `master`. When none resolve, the diff is empty
+ * (branch is at parity and has no work-in-progress).
+ *
+ * Untracked files are synthesised as new-file diffs because `git diff
+ * --no-index` doesn't always emit the `a/`/`b/` prefixes parseDiff expects;
+ * synthesising keeps the diff parser predictable. Binary detection uses a
+ * NUL-byte heuristic in the first 8KB.
+ */
+export async function branchChangeset(
+  worktreePath: string,
+): Promise<ChangesetResult> {
+  await assertGitDir(worktreePath);
+
+  const headSha = (
+    await execFileAsync(GIT, ["rev-parse", "HEAD"], { cwd: worktreePath })
+  ).stdout.trim();
+
+  // Pull HEAD's metadata for display. Subject/author/date describe the latest
+  // commit even when most of the diff is uncommitted — best we can do without
+  // a richer "many commits + dirty tree" UI.
+  const SEP = "<<<SHIPPABLE-WT-SEP>>>";
+  const fmt = `%s%n%an <%ae>%n%aI%n${SEP}`;
+  const { stdout: metaOut } = await execFileAsync(
+    GIT,
+    ["log", "-1", `--format=${fmt}`, "--end-of-options", headSha],
+    { cwd: worktreePath },
+  );
+  const sepIdx = metaOut.indexOf(SEP);
+  const meta = sepIdx >= 0 ? metaOut.slice(0, sepIdx).split("\n") : [];
+  const [subject = "", author = "", date = ""] = meta;
+
+  let branch: string | null = null;
+  try {
+    const { stdout: br } = await execFileAsync(
+      GIT,
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: worktreePath },
+    );
+    const trimmed = br.trim();
+    branch = trimmed && trimmed !== "HEAD" ? trimmed : null;
+  } catch {
+    branch = null;
+  }
+
+  const baseRef = await resolveBaseRef(worktreePath);
+  const mergeBase = baseRef ? await resolveMergeBase(worktreePath, baseRef, headSha) : null;
+  const effectiveBase = mergeBase ?? null;
+
+  // Tracked diff: cumulative committed-since-base + uncommitted-tracked.
+  // `git diff <base>` (no `..HEAD`) compares base to working tree.
+  let trackedDiff = "";
+  if (effectiveBase) {
+    trackedDiff = await safeGitDiff(
+      ["diff", "--end-of-options", effectiveBase],
+      worktreePath,
+    );
+  }
+
+  // Untracked: synthesise new-file diffs so parseDiff handles them uniformly.
+  let untrackedDiff = "";
+  try {
+    const { stdout: untrackedList } = await execFileAsync(
+      GIT,
+      ["ls-files", "--others", "--exclude-standard"],
+      { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+    );
+    const files = untrackedList.split("\n").filter(Boolean);
+    for (const rel of files) {
+      try {
+        const synth = await synthesiseNewFileDiff(worktreePath, rel);
+        if (synth) untrackedDiff += synth;
+      } catch {
+        // Unreadable / binary / vanished — skip rather than fail the request.
+      }
+    }
+  } catch {
+    // ls-files failure is non-fatal; tracked diff is still useful.
+  }
+
+  const diff = trackedDiff + untrackedDiff;
+
+  // Post-change content for markdown previews. Read from the working tree —
+  // covers committed-changed, uncommitted-modified, and untracked-new in one
+  // motion. Files that vanished are silently skipped.
+  const fileContents: Record<string, string> = {};
+  for (const p of extractRenderablePaths(diff)) {
+    try {
+      const content = await fs.readFile(path.join(worktreePath, p), "utf8");
+      fileContents[p] = content;
+    } catch {
+      // missing / unreadable — frontend falls back to in-diff content
+    }
+  }
+
+  // Topbar label for `<branch> → <base>`:
+  //   - "working tree" when merge-base == HEAD (branch at parity, only
+  //     uncommitted/untracked are interesting)
+  //   - merge-base short-sha when the branch has diverged
+  //   - null when no base could be resolved at all (no upstream/main/master)
+  const baseLabel: string | null = effectiveBase
+    ? effectiveBase === headSha
+      ? "working tree"
+      : effectiveBase.slice(0, 7)
+    : null;
+
+  return {
+    diff,
+    sha: headSha,
+    subject: subject || "(no commit subject)",
+    author,
+    date,
+    branch,
+    parentSha: baseLabel,
+    fileContents,
+  };
+}
+
+async function resolveBaseRef(worktreePath: string): Promise<string | null> {
+  const candidates = ["@{upstream}", "origin/main", "origin/master", "main", "master"];
+  for (const c of candidates) {
+    try {
+      const { stdout } = await execFileAsync(
+        GIT,
+        ["rev-parse", "--verify", "--end-of-options", `${c}^{commit}`],
+        { cwd: worktreePath },
+      );
+      const sha = stdout.trim();
+      if (sha) return sha;
+    } catch {
+      // try next
+    }
+  }
+  return null;
+}
+
+async function resolveMergeBase(
+  worktreePath: string,
+  base: string,
+  ref: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      GIT,
+      ["merge-base", "--end-of-options", base, ref],
+      { cwd: worktreePath },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run git diff and tolerate exit code 1 (which `git diff` and
+ * `git diff --no-index` use to signal "differences detected" — we want the
+ * stdout in that case, not a thrown error).
+ */
+async function safeGitDiff(
+  args: string[],
+  cwd: string,
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync(GIT, args, {
+      cwd,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (e) {
+    const err = e as { code?: number; stdout?: string };
+    if (err.code === 1 && typeof err.stdout === "string") return err.stdout;
+    throw e;
+  }
+}
+
+/**
+ * Build a synthetic "new file" diff entry for an untracked file. Skips
+ * files that look binary (NUL byte in first 8KB) and files larger than a
+ * conservative cap — both kept out of the human-reviewable diff.
+ */
+async function synthesiseNewFileDiff(
+  worktreePath: string,
+  rel: string,
+): Promise<string> {
+  const abs = path.join(worktreePath, rel);
+  const stat = await fs.stat(abs);
+  if (!stat.isFile()) return "";
+  if (stat.size > 2 * 1024 * 1024) return ""; // conservative cap on huge new files
+  const buf = await fs.readFile(abs);
+  // Binary heuristic: NUL byte in the first 8KB.
+  const probe = buf.subarray(0, Math.min(8192, buf.length));
+  if (probe.includes(0)) return "";
+  const text = buf.toString("utf8");
+  const lines = text.split("\n");
+  // If the file ends with a trailing newline, split leaves an empty trailing
+  // entry — drop it so the line count matches what reviewers expect.
+  const hasTrailingNewline = text.endsWith("\n");
+  if (hasTrailingNewline && lines[lines.length - 1] === "") lines.pop();
+  const body = lines.map((l) => "+" + l).join("\n");
+  const header =
+    `diff --git a/${rel} b/${rel}\n` +
+    `new file mode 100644\n` +
+    `--- /dev/null\n` +
+    `+++ b/${rel}\n` +
+    `@@ -0,0 +1,${lines.length} @@\n`;
+  return header + body + (body.length > 0 ? "\n" : "");
 }
 
 export async function repoGraphFor(

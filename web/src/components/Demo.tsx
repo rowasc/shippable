@@ -1391,6 +1391,7 @@ function WorkspaceStage({
                   author: "you",
                   body,
                   createdAt: new Date().toISOString(),
+                  enqueuedCommentId: null,
                 },
               });
               setDrafts((prev) => {

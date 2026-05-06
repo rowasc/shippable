@@ -115,6 +115,13 @@ export interface ChangeSet {
    * loads may attach a repo-scoped graph built from the checkout on disk.
    */
   graph?: CodeGraph;
+  /**
+   * Set when this ChangeSet was loaded from a local worktree — carries the
+   * path + sha so the agent-context panel knows what to fetch. Travelling
+   * with the ChangeSet (rather than as separate App state) means the
+   * provenance survives page reloads and changeset switches.
+   */
+  worktreeSource?: WorktreeSource;
 }
 
 export interface Cursor {
@@ -129,6 +136,13 @@ export interface Reply {
   author: string;
   body: string;
   createdAt: string;
+  /**
+   * Server-assigned id once the reply has been enqueued for the agent. `null`
+   * after a failed enqueue (the parent surfaces a "Save again" affordance);
+   * absent on legacy fixture/persisted replies that pre-date the queue —
+   * those rehydrate to `null` via the persist-layer migration.
+   */
+  enqueuedCommentId?: string | null;
 }
 
 /**
@@ -230,6 +244,67 @@ export interface ReviewPlan {
   entryPoints: EntryPoint[];
 }
 
+// ── Agent context (Claude Code session matched to a worktree) ────────────
+// These mirror the server-side shapes in `server/src/agent-context.ts`. See
+// `docs/concepts/agent-context.md` for the wider design.
+
+export interface AgentSessionRef {
+  sessionId: string;
+  filePath: string;
+  startedAt: string;
+  lastEventAt: string;
+  taskTitle: string | null;
+  turnCount: number;
+  cwds: string[];
+}
+
+export interface AgentToolCallSummary {
+  name: string;
+  filePath: string | null;
+  oneLine: string;
+}
+
+export interface AgentMessage {
+  uuid: string;
+  role: "user" | "assistant" | "system";
+  timestamp: string;
+  text: string;
+  toolCalls: AgentToolCallSummary[];
+}
+
+export interface AgentTodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm?: string;
+}
+
+export interface AgentContextSlice {
+  session: AgentSessionRef;
+  commitSha: string | null;
+  fromTime: string | null;
+  toTime: string;
+  task: string | null;
+  followUps: string[];
+  todos: AgentTodoItem[];
+  filesTouched: string[];
+  messages: AgentMessage[];
+  tokensIn: number;
+  tokensOut: number;
+  durationMs: number;
+  model: string | null;
+}
+
+/**
+ * Worktree provenance carried alongside a ChangeSet so the agent-context panel
+ * knows what to fetch. Set when the changeset was loaded from a worktree;
+ * null otherwise (URL ingest, paste, file upload).
+ */
+export interface WorktreeSource {
+  worktreePath: string;
+  commitSha: string;
+  branch: string | null;
+}
+
 export function noteKey(hunkId: string, lineIdx: number): string {
   return `${hunkId}:${lineIdx}`;
 }
@@ -253,4 +328,37 @@ export function userCommentKey(hunkId: string, lineIdx: number): string {
  */
 export function blockCommentKey(hunkId: string, lo: number, hi: number): string {
   return `block:${hunkId}:${lo}-${hi}`;
+}
+
+// ── Agent comment queue (mirror of server/src/agent-queue.ts) ────────────
+// These shapes travel verbatim across the `/api/agent/*` endpoints. Keep in
+// sync with the server-side definitions; they're the wire format for the
+// pull channel described in docs/plans/share-review-comments.md.
+
+export type CommentKind =
+  | "line"
+  | "block"
+  | "reply-to-ai-note"
+  | "reply-to-teammate"
+  | "reply-to-hunk-summary"
+  | "freeform";
+
+export interface Comment {
+  id: string;
+  kind: CommentKind;
+  /** Repo-relative path. Omitted (undefined) for `freeform`. */
+  file?: string;
+  /** `"118"` or `"72-79"` — string so single lines and ranges both fit. */
+  lines?: string;
+  body: string;
+  commitSha: string;
+  /** Prior comment id this entry replaces. `null` when not an edit. */
+  supersedes: string | null;
+  /** ISO timestamp stamped at enqueue. */
+  enqueuedAt: string;
+}
+
+export interface DeliveredComment extends Comment {
+  /** ISO timestamp stamped when the comment was moved out of pending. */
+  deliveredAt: string;
 }

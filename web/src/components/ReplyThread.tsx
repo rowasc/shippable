@@ -1,6 +1,6 @@
 import "./ReplyThread.css";
 import { useEffect, useRef } from "react";
-import type { Cursor, Reply } from "../types";
+import type { Cursor, DeliveredComment, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { RichText } from "./RichText";
 
@@ -22,6 +22,12 @@ interface Props {
   onDeleteReply: (replyId: string) => void;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
+  /**
+   * Map keyed by `Comment.id` of comments the agent has fetched. Drives the
+   * `✓ delivered` pip on each Reply whose `enqueuedCommentId` is in the map.
+   * Empty/missing → no replies render the delivered glyph (only ◌ queued).
+   */
+  deliveredById?: Record<string, DeliveredComment>;
 }
 
 export function ReplyThread({
@@ -35,6 +41,7 @@ export function ReplyThread({
   onDeleteReply,
   symbols,
   onJump,
+  deliveredById,
 }: Props) {
   // A non-empty draft on a closed composer means the user closed without
   // sending. Surface a hint so they know it's still waiting.
@@ -63,6 +70,7 @@ export function ReplyThread({
               <span className="reply__author">@{r.author}</span>
               <span className="reply__sep">·</span>
               <span className="reply__time">{timeAgo(r.createdAt)}</span>
+              <ReplyPip reply={r} deliveredById={deliveredById} />
               {r.author === "you" && (
                 <button
                   className="reply__delete"
@@ -155,6 +163,58 @@ function Composer({
       </div>
     </div>
   );
+}
+
+/**
+ * Per-reply queued/delivered pip. Three states:
+ *   - no pip when `enqueuedCommentId` is null (reply hasn't been enqueued
+ *     yet, or the enqueue POST failed — see § Pip semantics);
+ *   - `◌ queued` when the id is set but no DeliveredComment with that id
+ *     has been observed;
+ *   - `✓ delivered` when the delivered map carries the id.
+ *
+ * Tooltips are exact strings from the share-review-comments plan. The queued
+ * tooltip uses `Reply.createdAt` as the enqueue-time proxy: for fresh replies
+ * the two are stamped within milliseconds of each other (the App dispatches
+ * ADD_REPLY then fires `enqueueComment` in parallel) and we don't store the
+ * enqueue moment locally yet.
+ */
+function ReplyPip({
+  reply,
+  deliveredById,
+}: {
+  reply: Reply;
+  deliveredById?: Record<string, DeliveredComment>;
+}) {
+  const enqueuedId = reply.enqueuedCommentId ?? null;
+  if (!enqueuedId) return null;
+  const delivered = deliveredById?.[enqueuedId] ?? null;
+  if (delivered) {
+    return (
+      <span
+        className="reply__pip reply__pip--delivered"
+        title={`Fetched by your agent at ${formatClock(delivered.deliveredAt)}.`}
+      >
+        ✓ delivered
+      </span>
+    );
+  }
+  return (
+    <span
+      className="reply__pip reply__pip--queued"
+      title={`Sent to your agent's queue at ${formatClock(reply.createdAt)}.`}
+    >
+      ◌ queued
+    </span>
+  );
+}
+
+function formatClock(iso: string): string {
+  const ms = Date.parse(iso);
+  if (Number.isNaN(ms)) return "??:??:??";
+  const d = new Date(ms);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function timeAgo(iso: string): string {

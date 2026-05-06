@@ -314,7 +314,15 @@ function filterRepliesByHunk(
   const out: Record<string, Reply[]> = {};
   for (const [key, list] of Object.entries(replies)) {
     if (!list || list.length === 0) continue;
-    if (replyKeyTargetsValidHunk(key, validHunkIds)) out[key] = list;
+    if (replyKeyTargetsValidHunk(key, validHunkIds)) {
+      // Normalize legacy/pre-queue replies missing the enqueuedCommentId
+      // field — slice 2 added it; older snapshots rehydrate to `null`.
+      out[key] = list.map((r) =>
+        r.enqueuedCommentId === undefined
+          ? { ...r, enqueuedCommentId: null }
+          : r,
+      );
+    }
   }
   return out;
 }

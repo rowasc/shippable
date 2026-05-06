@@ -99,6 +99,20 @@ The shape of these will probably move as we build (a) and (b).
 
 - **What about commits from the user, not from agents?** The whole framing has been agent-centric. But a worktree is a worktree — the same UI works for "I committed to my feature branch and want to look at what I just did." Probably fine; flag it if the agent-centric copy in the UI ever feels weird for human-only worktrees.
 
+## Findings (slice d/e — agent context)
+
+This section records decisions made while scoping the agent-context UX (the "Claude → review window" half of slice d/e). Concept doc: `docs/concepts/agent-context.md`. Feature doc: `docs/features/agent-context-panel.md`.
+
+- **Direction is two-way.** Both "agent → reviewer" (read transcript next to diff) and "reviewer → agent" (send feedback) ship together. They share one panel, one mental model.
+- **Source = Claude Code's own JSONL transcripts** at `~/.claude/projects/<hash>/<session-id>.jsonl`. We do *not* require the sandbox to write a sidecar metadata file. The `.claude/worktrees/index.json` registry option in the open-questions section above remains a future enhancer, not a precondition.
+- **Worktree → session mapping is fuzzy by design.** Match by `cwd` field; on multi-match show a session picker; on no-match offer manual attach. Choice persists per `(repo-root, branch)`.
+- **The unit of agent context is a commit, not a session.** A session can produce many commits; the panel slices the transcript by commit boundary so the narrative stays in lockstep with the diff. This is the most important conceptual move and shaped most of the rest.
+- **"Live" = commit-boundary refresh, not turn streaming.** Poll `/api/worktrees/changeset` while the panel is mounted; when HEAD changes, re-fetch context + changeset together. We deliberately don't stream every transcript turn — keeps the surface aligned with what reviewers do.
+- **Reverse direction = MCP pull channel (superseded the file-based hook).** First pass built the `UserPromptSubmit` hook that read `<worktree>/.shippable/inbox.md`; that worked but added an explicit Send click and was Claude-Code-only without per-harness install work. Second pass (shipped in slice 5 of `docs/plans/share-review-comments.md`) replaces it with a pull channel: a small MCP server exposes `shippable_check_review_comments` and the agent fetches when prompted with `check shippable`. The hook + inbox file path is gone from the codebase. The earlier implementation is preserved as a record on the `worktree-agent-context-panel` branch; the live tree no longer carries the inbox/hook machinery or the `info/exclude` rule that ignored it.
+- **UI placement = a new collapsible section inside `Inspector.tsx`**, above AI concerns. No new tab, no new column, no modal. The Inspector's existing `inspector__sec` pattern was the right shape; forking the layout would have cost more than the section itself.
+- **Symbol links from chat hook into the existing symbol graph.** Backtick-quoted spans only, exact-match against symbols *that the diff also touches* — guards the obvious false-positive. Documented in the concept doc's open questions.
+- **Slice (a) is already built**, so this work layers on top of `/api/worktrees/list` and `/api/worktrees/changeset` without revisiting them.
+
 ## What's deliberately out of scope (for now)
 
 - GitHub PRs. That's a separate ingest path, on the roadmap, not this plan.

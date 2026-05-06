@@ -19,10 +19,9 @@ npm install
 npm run dev       # Vite dev server (proxies /api → server on :3001)
 npm run build     # tsc -b && vite build — the canonical "did I break typing" check
 npm run lint      # eslint
+npm run test      # vitest run
 npm run preview   # serve the production build
 ```
-
-There's no test runner wired up yet. `npm run build` is the typecheck for now.
 
 ### Backend (`server/`)
 
@@ -40,6 +39,7 @@ security add-generic-password -s shippable -a ANTHROPIC_API_KEY -w
 export ANTHROPIC_API_KEY=$(security find-generic-password -s shippable -a ANTHROPIC_API_KEY -w)
 npm run dev        # tsx watch on http://127.0.0.1:3001
 npm run typecheck  # tsc --noEmit
+npm run test       # vitest run
 ```
 
 The bundled desktop app reads from the same Keychain entry, so this one setup serves both surfaces.
@@ -62,6 +62,10 @@ Three entry points:
 - `/` is the live app.
 - `/gallery.html` is a screen catalog that renders every UI state against canned fixtures. This is the intended surface for design work — way faster than driving the live app with the keyboard to reach an edge case.
 - `?cs=<id>` on the main app jumps straight to a specific sample ChangeSet, which is handy if you need to reproduce a fixture state manually.
+
+## MCP server
+
+The repo also ships a small TypeScript MCP server at [`mcp-server/`](./mcp-server/README.md) that exposes a `shippable_check_review_comments` tool over stdio. Wire it into Claude Code, Codex CLI, Cursor, or any other MCP-speaking harness, and you can ask your agent `check shippable` to pull pending reviewer feedback from the local server's queue. See `mcp-server/README.md` for per-harness install lines.
 
 ## Building the desktop app
 

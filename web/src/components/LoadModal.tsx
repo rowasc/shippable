@@ -6,6 +6,11 @@ import { useWorktreeLoader } from "../useWorktreeLoader";
 import { CopyButton } from "./CopyButton";
 
 interface Props {
+  /**
+   * Worktree-loaded changesets carry `cs.worktreeSource`; URL / paste /
+   * file-upload loads leave it undefined. Downstream code reads the field
+   * directly off the ChangeSet, so this signature stays simple.
+   */
   onLoad: (cs: ChangeSet) => void;
   onClose: () => void;
 }

@@ -1,5 +1,12 @@
 import "./Inspector.css";
-import type { Cursor, LineSelection, Reply } from "../types";
+import type {
+  AgentContextSlice,
+  AgentSessionRef,
+  Cursor,
+  DeliveredComment,
+  LineSelection,
+  Reply,
+} from "../types";
 import type { SymbolIndex } from "../symbols";
 import { CodeText } from "./CodeText";
 import type {
@@ -9,8 +16,45 @@ import type {
 } from "../view";
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
+import { AgentContextSection } from "./AgentContextSection";
 import { useEffect, useRef } from "react";
 import type { MouseEvent, RefObject } from "react";
+
+/**
+ * Props for the agent-context section. The whole bundle is optional — when a
+ * changeset wasn't loaded from a worktree (URL ingest, paste, file upload)
+ * the parent passes `undefined` and the section doesn't render.
+ */
+export interface AgentContextProps {
+  slice: AgentContextSlice | null;
+  candidates: AgentSessionRef[];
+  selectedSessionFilePath: string | null;
+  loading: boolean;
+  error: string | null;
+  /** Whether a `shippable` MCP entry is detected in the user's Claude
+   *  Code config. `null` while the fetch is in flight or has failed. */
+  mcpStatus: { installed: boolean } | null;
+  /**
+   * Newest-first list of delivered comments for this worktree. Drives the
+   * Delivered (N) details block at the bottom of the panel and (via the
+   * pip seam threaded through to ReplyThread) the per-reply ✓ glyph.
+   */
+  delivered: DeliveredComment[];
+  /**
+   * ISO timestamp of the most recent successful `fetchDelivered` call. `null`
+   * before any successful poll — banner shows "—" in that case. Used by the
+   * panel-level failure banner to render "last checked X min ago."
+   */
+  lastSuccessfulPollAt: string | null;
+  /**
+   * True when the most recent `fetchDelivered` call errored. Drives the
+   * panel-level "Agent status unavailable" banner; pips freeze in place.
+   */
+  deliveredError: boolean;
+  onPickSession: (sessionFilePath: string) => void;
+  onRefresh: () => void;
+  onSendToAgent: (message: string) => Promise<void>;
+}
 
 /**
  * Wraps a jump action so a card's onClick ignores clicks that originated
@@ -58,6 +102,11 @@ interface Props {
    * notes without one don't render the button.
    */
   onVerifyAiNote: (recipe: { source: string; inputs: Record<string, string> }) => void;
+  /**
+   * Agent-context props bundle. Undefined means "no worktree source for this
+   * changeset" — the section is hidden entirely. See AgentContextProps.
+   */
+  agentContext?: AgentContextProps;
 }
 
 export function Inspector({
@@ -73,6 +122,7 @@ export function Inspector({
   onSubmitReply,
   onDeleteReply,
   onVerifyAiNote,
+  agentContext,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -96,6 +146,15 @@ export function Inspector({
   // space back as the only "what am I looking at" cue.
   const cursorOnNote = currentNoteLineIdx !== null;
 
+  // Index delivered comments by id once so each ReplyThread's pip lookup
+  // is O(1). `undefined` when the agent-context bundle is absent (no
+  // worktree loaded) — ReplyThread treats it as "no delivered ids known"
+  // which is the right default for the fixture/URL-ingest case.
+  const deliveredById: Record<string, DeliveredComment> | undefined =
+    agentContext
+      ? Object.fromEntries(agentContext.delivered.map((d) => [d.id, d]))
+      : undefined;
+
   return (
     <aside className="inspector">
       <header className="inspector__h">
@@ -105,6 +164,25 @@ export function Inspector({
           <kbd>i</kbd> · <kbd>a</kbd> ack · <kbd>r</kbd> reply
         </span>
       </header>
+
+      {agentContext && (
+        <AgentContextSection
+          slice={agentContext.slice}
+          candidates={agentContext.candidates}
+          selectedSessionFilePath={agentContext.selectedSessionFilePath}
+          loading={agentContext.loading}
+          error={agentContext.error}
+          symbols={symbols}
+          mcpStatus={agentContext.mcpStatus}
+          delivered={agentContext.delivered}
+          lastSuccessfulPollAt={agentContext.lastSuccessfulPollAt}
+          deliveredError={agentContext.deliveredError}
+          onJump={onJump}
+          onPickSession={agentContext.onPickSession}
+          onRefresh={agentContext.onRefresh}
+          onSendToAgent={agentContext.onSendToAgent}
+        />
+      )}
 
       <section className="inspector__sec">
         <div className="inspector__loc">{vm.locationLabel}</div>
@@ -141,6 +219,7 @@ export function Inspector({
                 symbols={symbols}
                 draftBody={draftFor(row.replyKey)}
                 cardRef={row.isCurrent ? currentNoteRef : undefined}
+                deliveredById={deliveredById}
                 onJump={onJump}
                 onAck={() => {
                   // Extract hunkId from the replyKey ("note:hunkId:lineIdx")
@@ -173,6 +252,7 @@ export function Inspector({
           draftBody={draftFor(vm.aiSummaryReplyKey)}
           jumpTarget={vm.aiSummaryJumpTarget!}
           symbols={symbols}
+          deliveredById={deliveredById}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.aiSummaryReplyKey!)}
           onCloseDraft={onCloseDraft}
@@ -189,6 +269,7 @@ export function Inspector({
           teammate={vm.teammate}
           symbols={symbols}
           draftBody={draftFor(vm.teammate.replyKey)}
+          deliveredById={deliveredById}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.teammate!.replyKey)}
           onCloseDraft={onCloseDraft}
@@ -204,6 +285,7 @@ export function Inspector({
         vm={vm}
         symbols={symbols}
         draftFor={draftFor}
+        deliveredById={deliveredById}
         onJump={onJump}
         onJumpToBlock={onJumpToBlock}
         onStartDraft={onStartDraft}
@@ -220,6 +302,7 @@ function UserCommentsSection({
   vm,
   symbols,
   draftFor,
+  deliveredById,
   onJump,
   onJumpToBlock,
   onStartDraft,
@@ -231,6 +314,7 @@ function UserCommentsSection({
   vm: InspectorViewModel;
   symbols: SymbolIndex;
   draftFor: (key: string) => string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onStartDraft: (key: string) => void;
@@ -269,6 +353,7 @@ function UserCommentsSection({
               row={vm.draftStubRow}
               symbols={symbols}
               draftBody={draftFor(vm.draftStubRow.threadKey)}
+              deliveredById={deliveredById}
               onJump={onJump}
               onClickLineNo={() => onJump(vm.draftStubRow!.jumpTarget)}
               onStartDraft={() => onStartDraft(vm.draftStubRow!.threadKey)}
@@ -290,6 +375,7 @@ function UserCommentsSection({
               row={row}
               symbols={symbols}
               draftBody={draftFor(row.threadKey)}
+              deliveredById={deliveredById}
               onJump={onJump}
               onClickLineNo={() => {
                 if (row.rangeHiLineIdx !== undefined && onJumpToBlock) {
@@ -321,6 +407,7 @@ function UserThreadCard({
   row,
   symbols,
   draftBody,
+  deliveredById,
   onJump,
   onClickLineNo,
   onStartDraft,
@@ -332,6 +419,7 @@ function UserThreadCard({
   row: UserCommentRowItem;
   symbols: SymbolIndex;
   draftBody: string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
@@ -379,6 +467,7 @@ function UserThreadCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredById={deliveredById}
       />
     </li>
   );
@@ -389,6 +478,7 @@ function NoteCard({
   symbols,
   draftBody,
   cardRef,
+  deliveredById,
   onJump,
   onAck,
   onClickLineNo,
@@ -404,6 +494,7 @@ function NoteCard({
   draftBody: string;
   /** Attached only when this is the cursor's note — drives auto-scroll. */
   cardRef?: RefObject<HTMLLIElement | null>;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onAck: () => void;
   onClickLineNo: () => void;
@@ -477,6 +568,7 @@ function NoteCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredById={deliveredById}
       />
     </li>
   );
@@ -489,6 +581,7 @@ function HunkSummarySection({
   draftBody,
   jumpTarget,
   symbols,
+  deliveredById,
   onJump,
   onStartDraft,
   onCloseDraft,
@@ -503,6 +596,7 @@ function HunkSummarySection({
   draftBody: string;
   jumpTarget: Cursor;
   symbols: SymbolIndex;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -532,6 +626,7 @@ function HunkSummarySection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredById={deliveredById}
         />
       </div>
     </section>
@@ -542,6 +637,7 @@ function TeammateSection({
   teammate,
   symbols,
   draftBody,
+  deliveredById,
   onJump,
   onStartDraft,
   onCloseDraft,
@@ -552,6 +648,7 @@ function TeammateSection({
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
   draftBody: string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -588,6 +685,7 @@ function TeammateSection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredById={deliveredById}
         />
       </div>
     </section>

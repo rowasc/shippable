@@ -85,6 +85,16 @@ export type Action =
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
   | { type: "DELETE_REPLY"; targetKey: string; replyId: string }
+  | {
+      // Patch the server-assigned enqueue id onto a previously-added Reply.
+      // Fired by the App after the parallel /api/agent/enqueue POST resolves.
+      // No-op if the targetKey or replyId is gone (the user deleted the
+      // reply before the network round-trip finished).
+      type: "PATCH_REPLY_ENQUEUED_ID";
+      targetKey: string;
+      replyId: string;
+      enqueuedCommentId: string | null;
+    }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
   | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
@@ -198,6 +208,19 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       if (filtered.length === 0) delete next[action.targetKey];
       else next[action.targetKey] = filtered;
       return { ...state, replies: next };
+    }
+    case "PATCH_REPLY_ENQUEUED_ID": {
+      const existing = state.replies[action.targetKey];
+      if (!existing) return state;
+      const idx = existing.findIndex((r) => r.id === action.replyId);
+      if (idx < 0) return state;
+      const patched = existing.map((r, i) =>
+        i === idx ? { ...r, enqueuedCommentId: action.enqueuedCommentId } : r,
+      );
+      return {
+        ...state,
+        replies: { ...state.replies, [action.targetKey]: patched },
+      };
     }
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";

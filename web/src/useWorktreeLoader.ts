@@ -159,6 +159,11 @@ export function useWorktreeLoader({ onLoad }: Props) {
         setErr("Latest commit produced no parseable diff (empty or merge?).");
         return;
       }
+      cs.worktreeSource = {
+        worktreePath: wt.path,
+        commitSha: json.sha,
+        branch: wt.branch ?? null,
+      };
       onLoad(cs, { kind: "worktree", path: wt.path, branch: wt.branch });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

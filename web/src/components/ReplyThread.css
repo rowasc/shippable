@@ -71,6 +71,41 @@
 .reply__time {
   color: var(--fg-mute);
 }
+.reply__pip {
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  /* Brief flip when the queued → delivered transition lands; both glyph
+   * and color change at once so the eye catches the shift without a toast.
+   * The 180ms transition is short enough to feel instant on a fast network.
+   */
+  transition: color 180ms ease-out, transform 180ms ease-out;
+  display: inline-block;
+}
+.reply__pip--queued {
+  color: var(--fg-mute);
+}
+.reply__pip--delivered {
+  color: var(--green, #6c6);
+  /* Subtle pop on the flip — the transition above interpolates from the
+   * queued grey to the delivered green smoothly. */
+  transform: scale(1);
+  animation: reply-pip-flip 320ms ease-out;
+}
+@keyframes reply-pip-flip {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.4;
+  }
+  60% {
+    transform: scale(1.12);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
 .reply__delete {
   background: transparent;
   border: none;
