@@ -27,8 +27,10 @@ async function main() {
   const requests = [];
   page.on("request", (req) => requests.push(req.url()));
 
-  // Cold load: only TS imports. Should not fetch php-wasm.
-  await page.goto(URL);
+  // Cold load: only TS imports. Should not fetch php-wasm. We land on the
+  // PHP fixture so the app hydrates a `.diff` (the post-welcome boot needs
+  // either a `?cs=` param or a persisted session).
+  await page.goto(URL + "?cs=09");
   await page.waitForSelector(".diff");
   await page.waitForTimeout(500);
 

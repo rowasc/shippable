@@ -16,12 +16,7 @@ const SMOKES = [
   { id: "coderunner-sandbox", file: "smoke-coderunner-sandbox.mjs", default: true },
   { id: "coderunner-ts-transpile", file: "smoke-coderunner-ts-transpile.mjs", default: true },
   { id: "themes", file: "smoke-themes.mjs", default: true },
-  {
-    id: "coderunner-php-worker",
-    file: "smoke-coderunner-php-worker.mjs",
-    default: false,
-    blockedReason: "currently fails under Vite dev because the sandboxed PHP worker loads from origin 'null'",
-  },
+  { id: "coderunner-php-worker", file: "smoke-coderunner-php-worker.mjs", default: true },
   {
     id: "coderunner-free",
     file: "smoke-coderunner-free.mjs",
