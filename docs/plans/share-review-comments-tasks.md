@@ -251,19 +251,19 @@ Replaces the hook-install affordance and deletes the file-based mechanism.
 
 Concerns that don't fit a single slice — verify on the way through.
 
-- [ ] **Sort order in the payload formatter.** File path ascending, then line number ascending (parse `lines` like `"72-79"` → take the lower bound), freeform last in send order. Locked in by slice 1's payload-formatter unit test.
+- [x] **Sort order in the payload formatter.** Locked in by `server/src/agent-queue.test.ts` § "sort order" — file path asc, then line lower-bound asc, freeform last in send order. `lowerLineBound` parses `"72-79"` → 72.
 
-- [ ] **`commit` attribute in the envelope.** The `WorktreeSource.commitSha` from the active changeset travels through `enqueueComment` → server → payload. If a changeset is reloaded between author and pull and the commit changed, the agent still sees the original `commit=` it was reviewed at. Confirm this isn't a footgun (it isn't — the agent has the file at HEAD; the sha is informational).
+- [x] **`commit` attribute in the envelope.** `WorktreeSource.commitSha` rides on each `Comment` and `formatPayload` emits it on the `<reviewer-feedback commit="…">` envelope. Not a footgun: the agent has the file at HEAD; the sha is informational.
 
-- [ ] **`assertGitDir` shared.** Lifted to `server/src/worktree-validation.ts` in slice 1. Both the new endpoints and any remaining inbox-era validation use the same helper before the inbox code is deleted.
+- [x] **`assertGitDir` shared.** Lives in `server/src/worktree-validation.ts`; the queue endpoints (`server/src/index.ts`) and the agent-context worktree validators all import from there.
 
-- [ ] **Reload behaviour.** After a full page reload while comments are queued: `enqueuedCommentId` is in localStorage; the polling loop restarts from `fetchDelivered`. Verify no double-enqueue (the enqueue happens on submit, not on mount), no duplicate pip flips. Add a small reducer test for the rehydration path.
+- [x] **Reload behaviour.** `web/src/persist.ts` rehydrates `Reply.enqueuedCommentId` (covered by `web/src/persist.test.ts` § "Reply.enqueuedCommentId migration"). The polling hook restarts when pending ids exist on mount (covered by `web/src/useDeliveredPolling.test.ts`). Enqueue happens in `App.tsx` `onSubmitReply`, never in a `useEffect` — so a reload cannot double-enqueue.
 
-- [ ] **Multi-tab.** A pre-existing localStorage limitation in the codebase; do not add `storage`-event sync as part of this work. Documented in the plan's Failure modes for visibility.
+- [x] **Multi-tab.** Untouched on purpose; pre-existing localStorage limitation.
 
-- [ ] **Empty-state polish.** Delivered block hides at N=0. Install affordance hides when MCP detected (or dismissed). Pips render only when `enqueuedCommentId` is set. The whole agent-feedback panel hides when no worktree is loaded.
+- [x] **Empty-state polish.** Delivered block hides at N=0 (`AgentContextSection.tsx`). Install affordance hides when `mcpStatus.installed` or the per-machine dismiss flag is set. Pips render only when `enqueuedCommentId` is set (`ReplyThread.tsx`). The whole panel hides when `cs.worktreeSource` is null — Inspector passes `agentContext` only then.
 
-- [ ] **CI wiring.** Whatever `npm test` / `pnpm test` runs today should pick up the new test files automatically — verify the new `mcp-server/` package is included (its own `vitest` script in `package.json`, called from the workspace root).
+- [x] **CI wiring.** Each package owns its own `npm test` (`web/`, `server/`, `mcp-server/`). README updated to surface the test commands. There is no workspace orchestrator yet — running `npm test` in each directory is the contract.
 
 ---
 
