@@ -71,9 +71,9 @@ Anti-patterns scan: no DOM snapshots used as input, no `parseDiff` mocked inside
 
 **Net: 0 deletions, 0 rewrites.** All 112 unit tests earn their keep.
 
-Follow-ups (out of scope for this audit, file as separate cleanup commits):
+Follow-up done as a separate cleanup commit:
 
-- Dead code in `parseDiff.parseHunk`: the `if (l.length === 0)` skip is unreachable in practice — the `else { break }` for unknown prefixes already terminates the hunk loop on an empty line, so removing the explicit skip leaves every test passing. The "skips empty trailing lines inside a hunk" assertion is still real (the parser must not emit a phantom blank line), but it doesn't differentiate the two implementations. Either delete the skip (simpler parser) or extend the test to put an empty line *between* real lines — but no real producer emits that, so deletion is the right move.
+- Removed dead empty-line skip in `parseDiff.parseHunk`: the `if (l.length === 0)` branch was unreachable — the `else { break }` for unknown prefixes already terminates the hunk loop on an empty trailing line. The "skips empty trailing lines inside a hunk" assertion stays (the parser must not emit a phantom blank line); it just no longer differentiates two implementations.
 
 ### Tier 1 - key logic
 

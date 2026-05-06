@@ -209,11 +209,6 @@ function parseHunk(
       i++;
       continue;
     }
-    if (l.length === 0) {
-      // empty trailing line at EOF of the diff — skip.
-      i++;
-      continue;
-    }
 
     const ch = l[0];
     const text = l.slice(1);
