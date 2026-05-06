@@ -17,12 +17,7 @@ const SMOKES = [
   { id: "coderunner-ts-transpile", file: "smoke-coderunner-ts-transpile.mjs", default: true },
   { id: "themes", file: "smoke-themes.mjs", default: true },
   { id: "coderunner-php-worker", file: "smoke-coderunner-php-worker.mjs", default: true },
-  {
-    id: "coderunner-free",
-    file: "smoke-coderunner-free.mjs",
-    default: false,
-    blockedReason: "targets the alternate :5174 fixture and is not part of the main app smoke path",
-  },
+  { id: "coderunner-free", file: "smoke-coderunner-free.mjs", default: true },
   {
     id: "prompts",
     file: "smoke-prompts.mjs",
