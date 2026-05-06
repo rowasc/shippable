@@ -35,23 +35,23 @@ The firewall script self-tests at startup: it fails the container if it can
 reach `https://example.com` (should be blocked) or can't reach
 `https://api.anthropic.com` (should be allowed).
 
-## Run it (Podman, terminal-only)
+## Run it
 
-The `@devcontainers/cli` shells out to a `docker` binary, so on a podman
-host you also need a `docker` CLI pointed at podman's socket. One-time
-setup:
+You need a working `docker` CLI talking to a working Docker engine. On
+macOS the easiest free option is [Colima](https://github.com/abiosoft/colima);
+Docker Desktop also works. Podman's `applehv` VM doesn't ship `ipset`
+kernel modules, so it can't run this firewall — use Colima instead.
+
+One-time setup:
 
 ```sh
-brew install podman docker          # if not already installed
-podman machine init                 # only if no machine exists yet
-podman machine start                # required after every reboot
-
-# tell the docker CLI where podman's socket lives
-echo 'export DOCKER_HOST="unix://$(podman machine inspect --format "{{.ConnectionInfo.PodmanSocket.Path}}" 2>/dev/null)"' >> ~/.zshrc
-source ~/.zshrc
-
-docker ps                           # sanity check: empty list, no error
+brew install docker colima
+colima start --cpu 2 --memory 4 --disk 30
+docker ps                            # sanity check: empty list, no error
 ```
+
+After reboot, `colima start` again (the `--cpu`/`--memory` flags only
+apply on first start — subsequent starts reuse the existing VM).
 
 Build and start the container (slow first time — apt install + Feature
 install):
@@ -74,28 +74,31 @@ source ~/.zshrc
 yolo
 ```
 
-Re-run `up` only when you've edited `.devcontainer/` or rebooted.
+Re-run `up` only when you've edited `.devcontainer/` (use
+`--remove-existing-container` to force a fresh build) or after a reboot.
 
 ## Verify the firewall is active
 
 After `up`, confirm a blocked host fails fast and `iptables` policy is DROP:
 
 ```sh
-npx -y @devcontainers/cli exec --workspace-folder . curl -sI --connect-timeout 3 https://github.com
-# expected: non-zero exit, no headers (network unreachable)
+npx -y @devcontainers/cli exec --workspace-folder . curl -v --connect-timeout 3 https://github.com
+# expected: non-zero exit, "Connection refused" / "Network unreachable"
 
 npx -y @devcontainers/cli exec --workspace-folder . sudo iptables -L OUTPUT -n
 # expected: "Chain OUTPUT (policy DROP)" with one ACCEPT line for the allowed-domains ipset
 ```
 
-If `OUTPUT` shows `policy ACCEPT`, the firewall didn't run — re-run `up`.
+If `OUTPUT` shows `policy ACCEPT`, the firewall didn't run — check `up`'s
+output for a `postStartCommand` failure and re-run with
+`--remove-existing-container`.
 
-## Run it (Docker / VS Code)
+## VS Code
 
-If you have Docker Desktop and the VS Code Dev Containers extension, open
-the repo in VS Code and pick "Reopen in Container." The `postStartCommand`
-runs `init-firewall.sh`; if it fails, the container won't be considered
-ready.
+If you have the Dev Containers extension installed, open the repo and pick
+"Reopen in Container." The `postStartCommand` runs `init-firewall.sh`; if
+it fails, the container won't be considered ready and the extension will
+surface the error.
 
 ## Editing the allowlist
 
@@ -111,9 +114,9 @@ container start, not on each command.
 - **TLS is not inspected.** The allowlist is hostname/IP based. A compromised
   agent could in principle domain-front via an allowlisted CDN. If that
   matters, swap in a TLS-terminating proxy.
-- **Don't mount sensitive sockets or credentials.** Mounting the docker /
-  podman socket, `~/.ssh`, or cloud credential files into the container voids
-  the isolation. Anthropic's docs explicitly warn that with
+- **Don't mount sensitive sockets or credentials.** Mounting the Docker
+  socket, `~/.ssh`, or cloud credential files into the container voids the
+  isolation. Anthropic's docs explicitly warn that with
   `--dangerously-skip-permissions`, a compromised session can exfiltrate
   anything reachable inside the container — including the Claude Code OAuth
   token in `/home/node/.claude` — over any allowlisted domain.
