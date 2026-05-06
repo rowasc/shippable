@@ -35,26 +35,67 @@ The firewall script self-tests at startup: it fails the container if it can
 reach `https://example.com` (should be blocked) or can't reach
 `https://api.anthropic.com` (should be allowed).
 
-## Run it (Podman)
+## Run it (Podman, terminal-only)
 
-Either alias podman or point the devcontainer CLI at podman's socket:
+The `@devcontainers/cli` shells out to a `docker` binary, so on a podman
+host you also need a `docker` CLI pointed at podman's socket. One-time
+setup:
 
 ```sh
-# one-time
-brew install podman
-podman machine init && podman machine start
-export DOCKER_HOST="unix://$(podman info --format '{{.Host.RemoteSocket.Path}}')"
+brew install podman docker          # if not already installed
+podman machine init                 # only if no machine exists yet
+podman machine start                # required after every reboot
 
-# from the repo root
+# tell the docker CLI where podman's socket lives
+echo 'export DOCKER_HOST="unix://$(podman machine inspect --format "{{.ConnectionInfo.PodmanSocket.Path}}" 2>/dev/null)"' >> ~/.zshrc
+source ~/.zshrc
+
+docker ps                           # sanity check: empty list, no error
+```
+
+Build and start the container (slow first time — apt install + Feature
+install):
+
+```sh
 npx -y @devcontainers/cli up --workspace-folder .
+```
+
+Run Claude inside it:
+
+```sh
 npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions
 ```
 
+A handy alias for daily use:
+
+```sh
+echo "alias yolo='npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions'" >> ~/.zshrc
+source ~/.zshrc
+yolo
+```
+
+Re-run `up` only when you've edited `.devcontainer/` or rebooted.
+
+## Verify the firewall is active
+
+After `up`, confirm a blocked host fails fast and `iptables` policy is DROP:
+
+```sh
+npx -y @devcontainers/cli exec --workspace-folder . curl -sI --connect-timeout 3 https://github.com
+# expected: non-zero exit, no headers (network unreachable)
+
+npx -y @devcontainers/cli exec --workspace-folder . sudo iptables -L OUTPUT -n
+# expected: "Chain OUTPUT (policy DROP)" with one ACCEPT line for the allowed-domains ipset
+```
+
+If `OUTPUT` shows `policy ACCEPT`, the firewall didn't run — re-run `up`.
+
 ## Run it (Docker / VS Code)
 
-Open the repo in VS Code with the Dev Containers extension installed and pick
-"Reopen in Container." The `postStartCommand` runs `init-firewall.sh`; if it
-fails, the container won't be considered ready.
+If you have Docker Desktop and the VS Code Dev Containers extension, open
+the repo in VS Code and pick "Reopen in Container." The `postStartCommand`
+runs `init-firewall.sh`; if it fails, the container won't be considered
+ready.
 
 ## Editing the allowlist
 
