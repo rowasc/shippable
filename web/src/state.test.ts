@@ -380,6 +380,98 @@ describe("ADD_REPLY", () => {
     s = reducer(s, { type: "ADD_REPLY", targetKey: "k", reply: r2 });
     expect(s.replies["k"]).toEqual([r1, r2]);
   });
+
+  it("preserves a Reply's enqueuedCommentId on add (defaults to null)", () => {
+    // The App-level submit handler attaches `enqueuedCommentId: null` before
+    // dispatching; the reducer just spreads the reply, so this should pass
+    // verbatim. The patch action below sets the id once the server responds.
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    expect(s.replies["k"][0].enqueuedCommentId).toBeNull();
+  });
+});
+
+// ── PATCH_REPLY_ENQUEUED_ID ────────────────────────────────────────────────
+
+describe("PATCH_REPLY_ENQUEUED_ID", () => {
+  it("sets the enqueuedCommentId on the matching reply", () => {
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "PATCH_REPLY_ENQUEUED_ID",
+      targetKey: "k",
+      replyId: "r1",
+      enqueuedCommentId: "cmt_42",
+    });
+    expect(s2.replies["k"][0].enqueuedCommentId).toBe("cmt_42");
+  });
+
+  it("is a no-op when the targetKey is unknown", () => {
+    const s = reducer(s0, {
+      type: "PATCH_REPLY_ENQUEUED_ID",
+      targetKey: "missing",
+      replyId: "r1",
+      enqueuedCommentId: "cmt_42",
+    });
+    expect(s).toBe(s0);
+  });
+
+  it("is a no-op when the replyId does not match", () => {
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "PATCH_REPLY_ENQUEUED_ID",
+      targetKey: "k",
+      replyId: "nope",
+      enqueuedCommentId: "cmt_42",
+    });
+    expect(s2).toBe(s1);
+  });
+
+  it("leaves sibling replies untouched", () => {
+    const r1 = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "t1",
+      enqueuedCommentId: null,
+    };
+    const r2 = {
+      id: "r2",
+      author: "b",
+      body: "yo",
+      createdAt: "t2",
+      enqueuedCommentId: null,
+    };
+    let s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
+    s = reducer(s, { type: "ADD_REPLY", targetKey: "k", reply: r2 });
+    s = reducer(s, {
+      type: "PATCH_REPLY_ENQUEUED_ID",
+      targetKey: "k",
+      replyId: "r2",
+      enqueuedCommentId: "cmt_99",
+    });
+    expect(s.replies["k"][0].enqueuedCommentId).toBeNull();
+    expect(s.replies["k"][1].enqueuedCommentId).toBe("cmt_99");
+  });
 });
 
 describe("DELETE_REPLY", () => {

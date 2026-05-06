@@ -929,6 +929,7 @@ function FrameStage({
                   author: "you",
                   body,
                   createdAt: new Date().toISOString(),
+                  enqueuedCommentId: null,
                 },
               });
               setDrafts((prev) => {

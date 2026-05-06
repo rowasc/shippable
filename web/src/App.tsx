@@ -31,11 +31,14 @@ import type {
 } from "./types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import {
+  enqueueComment,
   fetchAgentContextForWorktree,
   fetchHookStatus,
   installHook,
   sendInboxMessage,
+  unenqueueComment,
 } from "./agentContextClient";
+import { deriveCommentPayload } from "./agentCommentPayload";
 import { KEYMAP } from "./keymap";
 import { clearSession, loadSession, saveSession } from "./persist";
 import { useApiKey } from "./useApiKey";
@@ -635,14 +638,16 @@ export default function App() {
               setDrafts((prev) => ({ ...prev, [key]: body }))
             }
             onSubmitReply={(key, body) => {
+              const replyId = `r-${Date.now()}`;
               dispatch({
                 type: "ADD_REPLY",
                 targetKey: key,
                 reply: {
-                  id: `r-${Date.now()}`,
+                  id: replyId,
                   author: "you",
                   body,
                   createdAt: new Date().toISOString(),
+                  enqueuedCommentId: null,
                 },
               });
               setDrafts((prev) => {
@@ -652,10 +657,53 @@ export default function App() {
                 return next;
               });
               setDraftingKey(null);
+              // Fire-and-forget: enqueue the reply onto the agent's queue.
+              // Skipped when no worktree is loaded (URL ingest, paste, file
+              // upload) — the Reply still saves locally; pip never appears.
+              if (activeWorktreeSource) {
+                const derived = deriveCommentPayload(key, cs);
+                if (derived) {
+                  enqueueComment({
+                    worktreePath: activeWorktreeSource.worktreePath,
+                    commitSha: activeWorktreeSource.commitSha,
+                    comment: { ...derived, body },
+                  })
+                    .then((r) =>
+                      dispatch({
+                        type: "PATCH_REPLY_ENQUEUED_ID",
+                        targetKey: key,
+                        replyId,
+                        enqueuedCommentId: r.id,
+                      }),
+                    )
+                    .catch((err: unknown) => {
+                      // Leave enqueuedCommentId null so the reply renders
+                      // without a pip. Slice 4 will surface a "Save again"
+                      // affordance; for now, log so the failure isn't
+                      // silent in the console.
+                      console.error("[shippable] enqueueComment failed:", err);
+                    });
+                }
+              }
             }}
-            onDeleteReply={(key, replyId) =>
-              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId })
-            }
+            onDeleteReply={(key, replyId) => {
+              // If the reply has been enqueued, attempt to drop it from the
+              // server's pending queue. The server returns
+              // `{ unenqueued: false }` if the id is already delivered —
+              // that's fine; slice 4 will surface the tooltip. Always
+              // dispatch DELETE_REPLY locally regardless of server outcome.
+              const target = state.replies[key]?.find((r) => r.id === replyId);
+              const enqueuedId = target?.enqueuedCommentId ?? null;
+              if (enqueuedId && activeWorktreeSource) {
+                unenqueueComment({
+                  worktreePath: activeWorktreeSource.worktreePath,
+                  id: enqueuedId,
+                }).catch((err: unknown) => {
+                  console.error("[shippable] unenqueueComment failed:", err);
+                });
+              }
+              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId });
+            }}
             onVerifyAiNote={(recipe) => {
               setRunRequest((prev) => ({
                 tick: (prev?.tick ?? 0) + 1,
@@ -677,10 +725,26 @@ export default function App() {
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                     onSendToAgent: async (message) => {
-                      await sendInboxMessage({
+                      // Slice 2: enqueue a `freeform` comment alongside the
+                      // legacy inbox file write. Slice 5 deletes the inbox
+                      // machinery; until then both fire so existing CC users
+                      // keep working through the file-based hook channel.
+                      const enqueueP = enqueueComment({
+                        worktreePath: activeWorktreeSource.worktreePath,
+                        commitSha: activeWorktreeSource.commitSha,
+                        comment: { kind: "freeform", body: message },
+                      }).catch((err: unknown) => {
+                        console.error(
+                          "[shippable] enqueueComment(freeform) failed:",
+                          err,
+                        );
+                      });
+                      const inboxP = sendInboxMessage({
                         worktreePath: activeWorktreeSource.worktreePath,
                         message,
                       });
+                      // Asymmetric error handling: the legacy inbox write drives the composer's "queued" pip and must surface failures, while the new enqueue is fire-and-forget so a backend hiccup there can't block the visible delivery (this whole comment goes when slice 5 deletes the inbox half).
+                      await Promise.all([enqueueP, inboxP]);
                     },
                     onInstallHook: async () => {
                       const r = await installHook();

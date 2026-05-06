@@ -112,6 +112,13 @@ export interface Reply {
   author: string;
   body: string;
   createdAt: string;
+  /**
+   * Server-assigned id once the reply has been enqueued for the agent. `null`
+   * after a failed enqueue (the parent surfaces a "Save again" affordance);
+   * absent on legacy fixture/persisted replies that pre-date the queue —
+   * those rehydrate to `null` via the persist-layer migration.
+   */
+  enqueuedCommentId?: string | null;
 }
 
 /**
@@ -297,4 +304,37 @@ export function userCommentKey(hunkId: string, lineIdx: number): string {
  */
 export function blockCommentKey(hunkId: string, lo: number, hi: number): string {
   return `block:${hunkId}:${lo}-${hi}`;
+}
+
+// ── Agent comment queue (mirror of server/src/agent-queue.ts) ────────────
+// These shapes travel verbatim across the `/api/agent/*` endpoints. Keep in
+// sync with the server-side definitions; they're the wire format for the
+// pull channel described in docs/plans/share-review-comments.md.
+
+export type CommentKind =
+  | "line"
+  | "block"
+  | "reply-to-ai-note"
+  | "reply-to-teammate"
+  | "reply-to-hunk-summary"
+  | "freeform";
+
+export interface Comment {
+  id: string;
+  kind: CommentKind;
+  /** Repo-relative path. Omitted (undefined) for `freeform`. */
+  file?: string;
+  /** `"118"` or `"72-79"` — string so single lines and ranges both fit. */
+  lines?: string;
+  body: string;
+  commitSha: string;
+  /** Prior comment id this entry replaces. `null` when not an edit. */
+  supersedes: string | null;
+  /** ISO timestamp stamped at enqueue. */
+  enqueuedAt: string;
+}
+
+export interface DeliveredComment extends Comment {
+  /** ISO timestamp stamped when the comment was moved out of pending. */
+  deliveredAt: string;
 }
