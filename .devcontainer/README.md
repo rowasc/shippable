@@ -40,24 +40,29 @@ reach `https://example.com` (should be blocked) or can't reach
 
 ## Run it
 
-With a working `docker` CLI pointing at a running engine:
+One-shot first-time setup (assumes a working `docker` CLI + engine, e.g.
+Colima already running):
 
 ```sh
-# one-time, in ~/.zshrc — used by the bind mount that makes git work in worktrees
-export SHIPPABLE_HOST_REPO=/Users/you/path/to/shippable
-
-npx -y @devcontainers/cli up --workspace-folder .
-npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions
+bash .devcontainer/setup.sh
 ```
 
-Handy alias:
+That script:
+- Adds `SHIPPABLE_HOST_REPO` to `~/.zshrc` (or `~/.bashrc`) pointing at the
+  main repo — used by the bind mount that makes `git` work in worktrees.
+- Adds a `yolo` shell function that builds-or-reuses the container and
+  attaches Claude Code with `--dangerously-skip-permissions`.
+- Builds the container.
+
+After that, from any worktree:
 
 ```sh
-alias yolo='npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions'
+yolo
 ```
 
-Re-run `up` after editing `.devcontainer/` (add `--remove-existing-container`
-to force a fresh build).
+Re-run `bash .devcontainer/setup.sh` if you want to rebuild from scratch
+(it ends with `up`, which picks up `.devcontainer/` changes; pass
+`--remove-existing-container` to `up` directly to force).
 
 ## Verify the firewall is active
 
