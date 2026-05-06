@@ -54,7 +54,26 @@ For each stage of the plan, make **at least** one commit. Commits should be atom
 ### Tier 0 — cleanup and assess
 
 - [ ] Triage blocked smoke tests (`coderunner-modes/php/richphp/php-worker/free`, `prompts`, `md-preview-theme`): fix, port, or delete. No TODO-as-test.
-- [ ] Re-read existing unit tests against principle #1 and #2.
+- [x] Re-read existing unit tests against principle #1 and #2 — see [Audit notes (2026-05-05)](#audit-notes-2026-05-05) below.
+
+#### Audit notes (2026-05-05)
+
+Method: read every assertion against principles #1 and #2; spot-check by mutating the implementation and confirming a test fails.
+
+Per-file verdict:
+
+- **`parseDiff.test.ts` (46 tests) — keep all.** Black-box tests with concrete unified-diff input and assertions on the resulting `ChangeSet`. Verified by mutation: removing `.toLowerCase()` in `guessLanguage` → "matches case-insensitively" fails; deleting the `rename from / rename to` branches → "treats rename as renamed" fails; dropping `oldNo++` on `-` lines → "increments oldNo/newNo across mixed line kinds" fails. No theater. One follow-up flagged below.
+- **`state.test.ts` (58 tests) — keep all.** Drives the public `reducer(state, action)` API; no private helpers tested directly (`addLine`, `applyCursor`, `togglein`, `removeFrom` reached only through actions). Verified by mutation: removing `Math.max(0, action.level)` → "clamps negative levels to 0" fails; dropping the `removeFrom(state.previewedFiles, …)` mutual-exclusion in `TOGGLE_EXPAND_FILE` → "turning on full-expand removes the file from previewedFiles" fails. The `expect(s).toBe(s0)` reference-equality assertions (clamps in `MOVE_HUNK` / `MOVE_FILE`, no-op `DELETE_REPLY`, etc.) pin a load-bearing optimization for React render-skipping — keep. The `initialState` field-shape tests and "DISMISS_GUIDE is idempotent" pass for trivial reasons but would catch real refactors (changing `Set` to array, dropping a field initialization).
+- **`MarkdownView.test.tsx` (6 tests) — keep all.** Mix of pure-function tests for `resolveImageSrc` and SSR snapshots via `renderToStaticMarkup` that assert on substrings (e.g., `'<img src="data:image/png;base64,LOCAL"'`), not on full HTML — survives ReactMarkdown internal markup churn.
+- **`MarkdownView.gate.test.tsx` (2 tests) — keep all.** Verified by mutation: removing the `key={key}` prop on `ResolvedImgGate` → "resets the gate when src changes on the same component instance" fails. This is exactly the kind of test that catches a hidden invariant the type checker can't.
+
+Anti-patterns scan: no DOM snapshots used as input, no `parseDiff` mocked inside `state` tests, no fixture-equals-fixture, no inflation tests.
+
+**Net: 0 deletions, 0 rewrites.** All 112 unit tests earn their keep.
+
+Follow-ups (out of scope for this audit, file as separate cleanup commits):
+
+- Dead code in `parseDiff.parseHunk`: the `if (l.length === 0)` skip is unreachable in practice — the `else { break }` for unknown prefixes already terminates the hunk loop on an empty line, so removing the explicit skip leaves every test passing. The "skips empty trailing lines inside a hunk" assertion is still real (the parser must not emit a phantom blank line), but it doesn't differentiate the two implementations. Either delete the skip (simpler parser) or extend the test to put an empty line *between* real lines — but no real producer emits that, so deletion is the right move.
 
 ### Tier 1 - key logic
 
