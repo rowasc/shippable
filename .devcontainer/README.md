@@ -60,9 +60,20 @@ After that, from any worktree:
 yolo
 ```
 
+To start a fresh task in its own worktree, pass `--worktree=<name>`. `yolo`
+creates a sibling worktree at `../<repo>-<name>/` (with the slashes in
+`<name>` flattened to `-` for the directory), checks out a branch named
+`<name>`, and runs the container there. Re-running with the same name
+reuses the worktree. Anything after the flag is forwarded to `claude`.
+
+```sh
+yolo --worktree=feat/docs-automation
+```
+
 Re-run `bash .devcontainer/setup.sh` if you want to rebuild from scratch
 (it ends with `up`, which picks up `.devcontainer/` changes; pass
-`--remove-existing-container` to `up` directly to force).
+`--remove-existing-container` to `up` directly to force). Re-running
+also upgrades the `yolo` shell function in place.
 
 ## Verify the firewall is active
 

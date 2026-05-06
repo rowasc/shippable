@@ -39,16 +39,58 @@ if grep -q "^alias yolo=" "$shell_rc" 2>/dev/null; then
     echo "removed old 'alias yolo=' from $shell_rc"
 fi
 
-if ! grep -q "^yolo()" "$shell_rc" 2>/dev/null; then
-    cat >> "$shell_rc" <<'EOF'
-
-yolo() {
-    npx -y @devcontainers/cli up --workspace-folder . \
-        && npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions
-}
-EOF
-    echo "added yolo() function to $shell_rc"
+if grep -qE '^(# yolo-begin|yolo\(\) \{)' "$shell_rc" 2>/dev/null; then
+    awk '
+        /^# yolo-begin/      { in_marked=1; next }
+        in_marked && /^# yolo-end/ { in_marked=0; next }
+        in_marked            { next }
+        /^yolo\(\) \{/       { in_legacy=1; next }
+        in_legacy && /^\}$/  { in_legacy=0; next }
+        in_legacy            { next }
+        { print }
+    ' "$shell_rc" > "$shell_rc.tmp" && mv "$shell_rc.tmp" "$shell_rc"
+    echo "removed previous yolo() definition from $shell_rc"
 fi
+
+cat >> "$shell_rc" <<'EOF'
+# yolo-begin (managed by .devcontainer/setup.sh — re-run setup.sh to update)
+yolo() {
+    local worktree_name=""
+    local args=()
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --worktree=*) worktree_name="${arg#--worktree=}" ;;
+            *)            args+=("$arg") ;;
+        esac
+    done
+
+    local workspace="."
+    if [[ -n "$worktree_name" ]]; then
+        : "${SHIPPABLE_HOST_REPO:?yolo: SHIPPABLE_HOST_REPO not set — re-run .devcontainer/setup.sh}"
+        local parent repo_name safe_name
+        parent="$(dirname "$SHIPPABLE_HOST_REPO")"
+        repo_name="$(basename "$SHIPPABLE_HOST_REPO")"
+        safe_name="${worktree_name//\//-}"
+        workspace="$parent/${repo_name}-${safe_name}"
+        if [[ ! -d "$workspace" ]]; then
+            if git -C "$SHIPPABLE_HOST_REPO" show-ref --verify --quiet "refs/heads/$worktree_name"; then
+                git -C "$SHIPPABLE_HOST_REPO" worktree add "$workspace" "$worktree_name" || return 1
+            else
+                git -C "$SHIPPABLE_HOST_REPO" worktree add -b "$worktree_name" "$workspace" || return 1
+            fi
+            echo "yolo: created worktree at $workspace"
+        else
+            echo "yolo: reusing existing worktree at $workspace"
+        fi
+    fi
+
+    npx -y @devcontainers/cli up --workspace-folder "$workspace" \
+        && npx -y @devcontainers/cli exec --workspace-folder "$workspace" claude --dangerously-skip-permissions "${args[@]}"
+}
+# yolo-end
+EOF
+echo "installed yolo() function in $shell_rc"
 
 export SHIPPABLE_HOST_REPO="$repo_root"
 echo "building devcontainer (slow first time)..."
