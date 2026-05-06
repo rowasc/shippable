@@ -1,11 +1,11 @@
 # Sandboxed Claude Code
 
-Run Claude Code with `--dangerously-skip-permissions` inside a container whose
-egress is restricted to a known allowlist: `registry.npmjs.org`,
-`api.anthropic.com`, and a few VS Code endpoints. **No GitHub access by
-default** — neither HTTPS nor SSH. **No telemetry hosts** (sentry, statsig).
-The repo is bind-mounted at `/workspace`; the rest of the container
-filesystem is ephemeral.
+Run Claude Code with `--dangerously-skip-permissions` (or `--permission-mode
+auto` via `yolo --auto`) inside a container whose egress is restricted to a
+known allowlist: `registry.npmjs.org`, `api.anthropic.com`, and a few VS Code
+endpoints. **No GitHub access by default** — neither HTTPS nor SSH. **No
+telemetry hosts** (sentry, statsig). The repo is bind-mounted at `/workspace`;
+the rest of the container filesystem is ephemeral.
 
 ## Layout
 
@@ -51,7 +51,8 @@ That script:
 - Adds `SHIPPABLE_HOST_REPO` to `~/.zshrc` (or `~/.bashrc`) pointing at the
   main repo — used by the bind mount that makes `git` work in worktrees.
 - Adds a `yolo` shell function that builds-or-reuses the container and
-  attaches Claude Code with `--dangerously-skip-permissions`.
+  attaches Claude Code with `--dangerously-skip-permissions`. Pass `--auto`
+  (e.g. `yolo --auto`) to use `--permission-mode auto` instead.
 - Builds the container.
 
 After that, from any worktree:
@@ -120,12 +121,28 @@ The mount is read-write — commits inside the container reach the host's
 real `.git`. A compromised session could rewrite history; if that matters,
 make the mount `readonly` and run `git commit` from the host.
 
-## Sharing host skills/agents/commands
+## Sharing host skills/plugins/agents/commands
 
 Your global `~/.claude/skills/` is bind-mounted read-only at
 `/home/node/.claude/skills` so the same skills you use on the host are
-available inside the container. Auth, settings, and history stay in the
-per-container volume.
+available inside. Auth, settings, and history stay in the per-container
+volume.
+
+Plugins take a different path. The host's `~/.claude/plugins/cache/` is
+bind-mounted at `/host-plugins-cache` (read-only), and `postCreateCommand`
+copies it into the container's writable volume at `~/.claude/plugins/cache/`
+on each container creation. We deliberately seed only the `cache/` subdir
+— `marketplaces/`, `installed_plugins.json`, and `known_marketplaces.json`
+are left out so Claude's plugin loader has no marketplace state to refresh
+(it would otherwise try to `git fetch` over SSH/HTTPS, which the firewall
+blocks).
+
+Plugins are then loaded by direct path: `yolo` enumerates the cached plugin
+version dirs and passes each as `--plugin-dir` to `claude`. This bypasses
+the marketplace machinery entirely — no `enabledPlugins` setting required.
+Caveat: every plugin version present in the host cache gets loaded, even
+ones you've disabled or older versions left over after upgrades. To prune,
+delete the unwanted dir under `~/.claude/plugins/cache/<marketplace>/<plugin>/`.
 
 To share other parts of your host config (also read-only), add to `mounts`
 in `devcontainer.json`:

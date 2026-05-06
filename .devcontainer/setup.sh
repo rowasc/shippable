@@ -56,11 +56,13 @@ cat >> "$shell_rc" <<'EOF'
 # yolo-begin (managed by .devcontainer/setup.sh — re-run setup.sh to update)
 yolo() {
     local worktree_name=""
+    local permission_args=(--dangerously-skip-permissions)
     local args=()
     local arg
     for arg in "$@"; do
         case "$arg" in
             --worktree=*) worktree_name="${arg#--worktree=}" ;;
+            --auto)       permission_args=(--permission-mode auto) ;;
             *)            args+=("$arg") ;;
         esac
     done
@@ -85,14 +87,29 @@ yolo() {
         fi
     fi
 
+    local plugin_args=()
+    local plugin_dir
+    local host_plugins="$HOME/.claude/plugins"
+    local container_plugins="/home/node/.claude/plugins"
+    if [[ -d "$host_plugins/cache" ]]; then
+        while IFS= read -r plugin_dir; do
+            plugin_args+=(--plugin-dir "${plugin_dir/$host_plugins/$container_plugins}")
+        done < <(find "$host_plugins/cache" -mindepth 3 -maxdepth 3 -type d 2>/dev/null)
+    fi
+
     npx -y @devcontainers/cli up --workspace-folder "$workspace" \
-        && npx -y @devcontainers/cli exec --workspace-folder "$workspace" claude --dangerously-skip-permissions "${args[@]}"
+        && npx -y @devcontainers/cli exec --workspace-folder "$workspace" claude "${permission_args[@]}" "${plugin_args[@]}" "${args[@]}"
 }
 # yolo-end
 EOF
 echo "installed yolo() function in $shell_rc"
 
 export SHIPPABLE_HOST_REPO="$repo_root"
+
+# Bind-mounted into the container; Docker errors if the source dir is missing
+# on hosts that have never used the plugin system.
+mkdir -p "$HOME/.claude/plugins/cache"
+
 echo "building devcontainer (slow first time)..."
 npx -y @devcontainers/cli up --workspace-folder "$repo_root"
 
