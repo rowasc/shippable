@@ -55,8 +55,16 @@ vi.mock("../usePlan", () => ({
 vi.mock("../definitionNav", () => ({
   fetchDefinitionCapabilities: fetchDefinitionCapabilitiesMock,
   fetchDefinition: fetchDefinitionMock,
-  supportsDefinitionLanguage: (language: string) =>
-    ["js", "jsx", "ts", "tsx", "javascript", "typescript"].includes(language),
+  isProgrammingLanguage: (language: string) =>
+    [
+      "js", "jsx", "ts", "tsx", "javascript", "typescript",
+      "php", "phtml",
+    ].includes(language),
+  findCapabilityForLanguage: (
+    caps: { languages?: Array<{ languageIds: string[] }> } | null,
+    language: string,
+  ) =>
+    caps?.languages?.find((c) => c.languageIds.includes(language)) ?? null,
 }));
 
 vi.mock("../useApiKey", () => ({
@@ -122,10 +130,18 @@ window.HTMLElement.prototype.scrollIntoView = vi.fn();
 describe("ReviewWorkspace symbol navigation", () => {
   it("falls through to the server definition endpoint for worktree-backed TS diffs", async () => {
     fetchDefinitionCapabilitiesMock.mockResolvedValue({
-      available: true,
-      supportedLanguages: ["js", "jsx", "ts", "tsx"],
+      languages: [
+        {
+          id: "ts",
+          languageIds: ["ts", "tsx", "js", "jsx"],
+          available: true,
+          resolver: "typescript-language-server",
+          source: "path",
+          recommendedSetup: [],
+        },
+      ],
       requiresWorktree: true,
-      resolver: "typescript-language-server",
+      anyAvailable: true,
     });
     fetchDefinitionMock.mockResolvedValue({
       status: "ok",

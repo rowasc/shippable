@@ -42,26 +42,27 @@ npm run typecheck  # tsc --noEmit
 npm run test       # vitest run
 ```
 
-#### Optional: enable click-through symbol navigation (JS/TS)
+#### Optional: enable click-through symbol navigation
 
-The server can resolve JS/TS go-to-definition against a local checkout. The feature is off by default; turn it on with two steps:
+The server can resolve go-to-definition against a local checkout per language. Each language module discovers its own LSP independently, so installing one is enough — others can come later. Today: JS/TS via `typescript-language-server` and PHP via `intelephense` (or `phpactor` as a fallback).
 
-1. **Install `typescript-language-server`.** Either globally:
+1. **Install at least one LSP.** Pick the languages you actually review.
 
-   ```
-   npm install -g typescript typescript-language-server
-   ```
+   | Language | Recommended (one-line install)                                       | Alternative                                               | Explicit-path env var               |
+   |----------|----------------------------------------------------------------------|-----------------------------------------------------------|-------------------------------------|
+   | JS / TS  | `npm install -g typescript typescript-language-server`               | —                                                         | `SHIPPABLE_TYPESCRIPT_LSP`          |
+   | PHP      | `npm install -g intelephense`                                        | `composer global require phpactor/phpactor`               | `SHIPPABLE_PHP_LSP`                 |
 
-   …or pin to a specific binary with `SHIPPABLE_TYPESCRIPT_LSP=/abs/path/to/typescript-language-server`.
+   A one-shot `npm run setup:lsp` is planned — see [`docs/plans/lsp-setup-script.md`](docs/plans/lsp-setup-script.md). Until that lands, run the install lines you want and restart the server.
 
 2. **Load the diff from a worktree.** Open the worktree picker and pick a checkout — the frontend passes its path to the server. For diffs that don't come from a worktree (pasted, URL-loaded, fixture), set `SHIPPABLE_WORKSPACE_ROOT=/abs/path/to/checkout` before starting the server as a fallback root.
 
-Verify it's working: hit `GET http://127.0.0.1:3001/api/definition/capabilities` — you want `{"available": true, "resolver": "typescript-language-server", ...}`. The diff toolbar will also show a `def: TS LSP` chip when the file is JS/TS and the server is reachable; otherwise it shows the reason (`def: worktree only`, `def: JS/TS only`, `def: unavailable`).
+Verify it's working: hit `GET http://127.0.0.1:3001/api/definition/capabilities` — each entry in `languages[]` reports `available`, `resolver` (binary basename), `source` (where we found it), and `recommendedSetup` if it's missing. The diff toolbar shows a per-language chip: `def: TS LSP` / `def: PHP LSP` when ready, `def: TS, PHP only` for a programming language we don't yet support, or no chip at all on non-programming files (markdown, json, yaml).
 
 Current limits — see [`docs/plans/plan-symbols.md`](docs/plans/plan-symbols.md) for the roadmap:
 
 - worktree-backed diffs only (or the `SHIPPABLE_WORKSPACE_ROOT` fallback)
-- JS/TS files only — PHP and others are planned in [`docs/plans/lsp-php.md`](docs/plans/lsp-php.md) and the same Tier-1b path
+- adding a new language is a single file in `server/src/languages/`; tracked in [`docs/plans/lsp-php.md`](docs/plans/lsp-php.md)
 - no browser-only fallback yet (every click goes through the server)
 
 The bundled desktop app reads from the same Keychain entry as the dev server, so this one setup serves both surfaces.

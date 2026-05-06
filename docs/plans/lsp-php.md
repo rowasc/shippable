@@ -1,6 +1,10 @@
 # PHP click-through definition support
 
-## Status: not started
+## Status: shipped (Tier 1a, discovery-on-PATH)
+
+PHP definition lookup is wired up end-to-end via `server/src/languages/php.ts`. Intelephense is the recommended LSP (free tier handles definition lookup); phpactor is a pure-OSS fallback. Discovery probes `SHIPPABLE_PHP_LSP` → `intelephense` on `PATH` → `phpactor` on `PATH` → `vendor/bin/phpactor`. The bundled-LSP Tier 1b path (shipping a binary inside the sidecar) is not wired up yet.
+
+The remainder of this doc is the original plan; the `Refactor before adding PHP` section landed as `server/src/languages/{types,discovery,typescript,php,index}.ts`. Open follow-ups are at the bottom.
 
 This is the second language module after JS/TS. It exists to prove out the "small per-language module" claim in [`plan-symbols.md`](plan-symbols.md) — adding a language with a mature LSP should be a small, contained change, not a refactor of the resolver layer.
 

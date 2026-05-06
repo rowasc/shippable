@@ -1,22 +1,25 @@
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import {
+  LANGUAGES,
+  languageForFile,
+  languageForRequestId,
+  lspLanguageIdFor,
+} from "./languages/index.ts";
+import type { LanguageModule } from "./languages/index.ts";
 import type {
   DefinitionCapabilities,
+  DefinitionLanguageCapability,
   DefinitionLocation,
   DefinitionRequest,
   DefinitionResponse,
 } from "../../web/src/definitionTypes.ts";
 
-const TYPESCRIPT_LANGUAGE_SERVER = "typescript-language-server";
-const SUPPORTED_LANGUAGES = ["js", "jsx", "ts", "tsx"] as const;
-const clientCache = new Map<string, Promise<LspClient>>();
-
 interface ResolvedDefinitionRequest {
   file: string;
-  language: typeof SUPPORTED_LANGUAGES[number];
+  module: LanguageModule;
   line: number;
   col: number;
   workspaceRoot: string;
@@ -39,37 +42,53 @@ interface LspLocationLink {
   };
 }
 
+// Cache LSP clients per (workspace, language). The TS server and the PHP
+// server are different long-running subprocesses; we don't want to spawn
+// either eagerly, and we don't want to share one across languages.
+const clientCache = new Map<string, Map<string, Promise<LspClient>>>();
+
 export function getDefinitionCapabilities(): DefinitionCapabilities {
-  const resolved = resolveTypescriptLanguageServer();
-  if (!resolved) {
+  const languages = LANGUAGES.map(toLanguageCapability);
+  return {
+    languages,
+    requiresWorktree: true,
+    anyAvailable: languages.some((l) => l.available),
+  };
+}
+
+function toLanguageCapability(module: LanguageModule): DefinitionLanguageCapability {
+  const discovered = module.discover();
+  if (!discovered) {
     return {
+      id: module.id,
+      languageIds: [...module.languageIds],
       available: false,
-      supportedLanguages: [...SUPPORTED_LANGUAGES],
-      requiresWorktree: true,
       resolver: null,
-      reason:
-        "typescript-language-server not found. Set SHIPPABLE_TYPESCRIPT_LSP or install it on PATH.",
+      source: null,
+      reason: unavailableReason(module),
+      recommendedSetup: module.recommendedSetup.map((r) => ({ ...r })),
     };
   }
   return {
+    id: module.id,
+    languageIds: [...module.languageIds],
     available: true,
-    supportedLanguages: [...SUPPORTED_LANGUAGES],
-    requiresWorktree: true,
-    resolver: TYPESCRIPT_LANGUAGE_SERVER,
+    resolver: path.basename(discovered.command),
+    source: discovered.source,
+    recommendedSetup: module.recommendedSetup.map((r) => ({ ...r })),
   };
+}
+
+function unavailableReason(module: LanguageModule): string {
+  const setup = module.recommendedSetup
+    .map((r) => `  - ${r.label}: ${r.command}`)
+    .join("\n");
+  return `No ${module.id.toUpperCase()} language server discovered. Try one of:\n${setup}`;
 }
 
 export async function resolveDefinition(
   request: DefinitionRequest,
 ): Promise<DefinitionResponse> {
-  const capabilities = getDefinitionCapabilities();
-  if (!capabilities.available) {
-    return {
-      status: "unsupported",
-      reason: capabilities.reason ?? "definition lookup unavailable",
-    };
-  }
-
   let resolved: ResolvedDefinitionRequest;
   try {
     resolved = await resolveRequest(request);
@@ -80,15 +99,26 @@ export async function resolveDefinition(
     };
   }
 
+  const discovered = resolved.module.discover();
+  if (!discovered) {
+    return {
+      status: "unsupported",
+      reason: unavailableReason(resolved.module),
+    };
+  }
+
   try {
-    const client = await getClient(resolved.workspaceRoot);
+    const client = await getClient(resolved.workspaceRoot, resolved.module);
     const source = await fsp.readFile(resolved.filePath, "utf8");
-    const rawLocations = await client.definition(resolved.filePath, resolved.language, source, {
+    const lspLanguageId = lspLanguageIdFor(resolved.module, resolved.filePath);
+    const rawLocations = await client.definition(resolved.filePath, lspLanguageId, source, {
       line: resolved.line,
       col: resolved.col,
     });
     const definitions = await Promise.all(
-      rawLocations.map((location) => normalizeLocation(location, resolved.workspaceRoot)),
+      rawLocations.map((location) =>
+        normalizeLocation(location, resolved.workspaceRoot, path.basename(discovered.command)),
+      ),
     );
     return { status: "ok", definitions };
   } catch (err) {
@@ -105,10 +135,6 @@ async function resolveRequest(
   if (typeof request.file !== "string" || request.file.trim() === "") {
     throw new Error("definition request missing file path");
   }
-  const language = normalizeLanguage(request.language);
-  if (!language) {
-    throw new Error(`definition lookup currently supports JS/TS only, got ${request.language}`);
-  }
   if (!Number.isInteger(request.line) || request.line < 0) {
     throw new Error(`definition request line must be a non-negative integer, got ${request.line}`);
   }
@@ -116,6 +142,7 @@ async function resolveRequest(
     throw new Error(`definition request col must be a non-negative integer, got ${request.col}`);
   }
 
+  const module = pickLanguageModule(request);
   const workspaceRoot = await resolveWorkspaceRoot(request.workspaceRoot);
   const filePath = path.resolve(workspaceRoot, request.file);
   assertInsideRoot(filePath, workspaceRoot);
@@ -126,12 +153,28 @@ async function resolveRequest(
 
   return {
     file: request.file,
-    language,
+    module,
     line: request.line,
     col: request.col,
     workspaceRoot,
     filePath,
   };
+}
+
+function pickLanguageModule(request: DefinitionRequest): LanguageModule {
+  if (typeof request.language === "string" && request.language.trim() !== "") {
+    const byId = languageForRequestId(request.language);
+    if (byId) return byId;
+  }
+  const byExt = languageForFile(request.file);
+  if (byExt) return byExt;
+
+  const supported = LANGUAGES
+    .map((m) => `${m.id} (${m.languageIds.join("/")})`)
+    .join(", ");
+  throw new Error(
+    `definition lookup doesn't support language=${request.language ?? "<unset>"} for ${request.file}. Supported: ${supported}.`,
+  );
 }
 
 async function resolveWorkspaceRoot(candidate: string | null | undefined): Promise<string> {
@@ -158,15 +201,6 @@ async function resolveWorkspaceRoot(candidate: string | null | undefined): Promi
   return raw;
 }
 
-function normalizeLanguage(language: string): typeof SUPPORTED_LANGUAGES[number] | null {
-  const normalized = language.trim().toLowerCase();
-  return SUPPORTED_LANGUAGES.includes(
-    normalized as (typeof SUPPORTED_LANGUAGES)[number],
-  )
-    ? (normalized as (typeof SUPPORTED_LANGUAGES)[number])
-    : null;
-}
-
 function assertInsideRoot(filePath: string, root: string): void {
   const relative = path.relative(root, filePath);
   if (
@@ -178,57 +212,33 @@ function assertInsideRoot(filePath: string, root: string): void {
   throw new Error(`requested file escapes workspace root: ${filePath}`);
 }
 
-async function getClient(workspaceRoot: string): Promise<LspClient> {
-  let cached = clientCache.get(workspaceRoot);
+async function getClient(
+  workspaceRoot: string,
+  module: LanguageModule,
+): Promise<LspClient> {
+  let perWorkspace = clientCache.get(workspaceRoot);
+  if (!perWorkspace) {
+    perWorkspace = new Map();
+    clientCache.set(workspaceRoot, perWorkspace);
+  }
+  let cached = perWorkspace.get(module.id);
   if (!cached) {
-    cached = LspClient.create(workspaceRoot);
-    clientCache.set(workspaceRoot, cached);
+    cached = LspClient.create(module, workspaceRoot);
+    perWorkspace.set(module.id, cached);
   }
   try {
     return await cached;
   } catch (err) {
-    clientCache.delete(workspaceRoot);
+    perWorkspace.delete(module.id);
+    if (perWorkspace.size === 0) clientCache.delete(workspaceRoot);
     throw err;
-  }
-}
-
-function resolveTypescriptLanguageServer(): string | null {
-  const explicit = process.env.SHIPPABLE_TYPESCRIPT_LSP?.trim();
-  if (explicit) {
-    const candidate = path.isAbsolute(explicit) ? explicit : path.resolve(explicit);
-    if (isExecutable(candidate)) return candidate;
-    return null;
-  }
-
-  const searchPath = process.env.PATH ?? "";
-  for (const dir of searchPath.split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, TYPESCRIPT_LANGUAGE_SERVER);
-    if (isExecutable(candidate)) return candidate;
-  }
-
-  const localCandidate = path.resolve(
-    process.cwd(),
-    "node_modules/.bin",
-    TYPESCRIPT_LANGUAGE_SERVER,
-  );
-  return isExecutable(localCandidate) ? localCandidate : null;
-}
-
-function isExecutable(candidate: string): boolean {
-  try {
-    const stat = fs.statSync(candidate);
-    if (!stat.isFile()) return false;
-    fs.accessSync(candidate, fs.constants.X_OK);
-    return true;
-  } catch {
-    return false;
   }
 }
 
 async function normalizeLocation(
   location: LspLocation | LspLocationLink,
   workspaceRoot: string,
+  resolverLabel: string,
 ): Promise<DefinitionLocation> {
   const uri = "targetUri" in location ? location.targetUri : location.uri;
   const range = "targetUri" in location ? location.targetSelectionRange : location.range;
@@ -245,7 +255,7 @@ async function normalizeLocation(
     endLine: range.end.line,
     endCol: range.end.character,
     preview,
-    resolver: TYPESCRIPT_LANGUAGE_SERVER,
+    resolver: resolverLabel,
   };
 }
 
@@ -285,21 +295,22 @@ class LspClient {
   private closed = false;
   private initialized: Promise<void>;
 
-  static create(workspaceRoot: string): Promise<LspClient> {
-    const command = resolveTypescriptLanguageServer();
-    if (!command) {
-      return Promise.reject(
-        new Error(
-          "typescript-language-server not found. Set SHIPPABLE_TYPESCRIPT_LSP or install it on PATH.",
-        ),
-      );
+  static create(module: LanguageModule, workspaceRoot: string): Promise<LspClient> {
+    const discovered = module.discover();
+    if (!discovered) {
+      return Promise.reject(new Error(unavailableReason(module)));
     }
-    const client = new LspClient(command, workspaceRoot);
+    const client = new LspClient(discovered.command, discovered.args, workspaceRoot, module.id);
     return client.initialized.then(() => client);
   }
 
-  private constructor(command: string, private readonly workspaceRoot: string) {
-    this.proc = spawn(command, ["--stdio"], {
+  private constructor(
+    command: string,
+    args: readonly string[],
+    private readonly workspaceRoot: string,
+    private readonly languageLabel: string,
+  ) {
+    this.proc = spawn(command, [...args], {
       cwd: workspaceRoot,
       stdio: "pipe",
     });
@@ -308,7 +319,7 @@ class LspClient {
     this.proc.on("error", (err) => this.failAll(err instanceof Error ? err : new Error(String(err))));
     this.proc.on("exit", (code, signal) => {
       this.failAll(
-        new Error(`typescript-language-server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`),
+        new Error(`${this.languageLabel} language server exited (code=${code ?? "null"}, signal=${signal ?? "null"})`),
       );
     });
     this.initialized = this.initialize();
@@ -316,12 +327,12 @@ class LspClient {
 
   async definition(
     filePath: string,
-    language: string,
+    lspLanguageId: string,
     source: string,
     position: { line: number; col: number },
   ): Promise<Array<LspLocation | LspLocationLink>> {
     await this.initialized;
-    await this.openDocument(filePath, language, source);
+    await this.openDocument(filePath, lspLanguageId, source);
     const result = await this.request("textDocument/definition", {
       textDocument: { uri: pathToFileURL(filePath).href },
       position: { line: position.line, character: position.col },
@@ -346,7 +357,7 @@ class LspClient {
 
   private async openDocument(
     filePath: string,
-    language: string,
+    lspLanguageId: string,
     source: string,
   ): Promise<void> {
     const uri = pathToFileURL(filePath).href;
@@ -354,7 +365,7 @@ class LspClient {
     this.notify("textDocument/didOpen", {
       textDocument: {
         uri,
-        languageId: toLanguageId(language),
+        languageId: lspLanguageId,
         version: 1,
         text: source,
       },
@@ -484,17 +495,4 @@ function isPosition(value: unknown): boolean {
     typeof position.line === "number" &&
     typeof position.character === "number"
   );
-}
-
-function toLanguageId(language: string): string {
-  switch (language) {
-    case "ts":
-      return "typescript";
-    case "tsx":
-      return "typescriptreact";
-    case "jsx":
-      return "javascriptreact";
-    default:
-      return "javascript";
-  }
 }

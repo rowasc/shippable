@@ -5,7 +5,8 @@ import type { Action } from "../state";
 import {
   fetchDefinition,
   fetchDefinitionCapabilities,
-  supportsDefinitionLanguage,
+  findCapabilityForLanguage,
+  isProgrammingLanguage,
   type DefinitionCapabilities,
   type DefinitionClickTarget,
   type DefinitionLocation,
@@ -106,6 +107,8 @@ export function ReviewWorkspace({
   const [sidebarWide, setSidebarWide] = useState(false);
   const [definitionCapabilities, setDefinitionCapabilities] =
     useState<DefinitionCapabilities | null>(null);
+  const [definitionCapabilitiesError, setDefinitionCapabilitiesError] =
+    useState<string | null>(null);
   const [definitionPeek, setDefinitionPeek] = useState<DefinitionPeekState>({
     kind: "idle",
   });
@@ -423,29 +426,28 @@ export function ReviewWorkspace({
       ? currentSource.path
       : (cs.worktreeSource?.worktreePath ?? null);
   const definitionScopeKey = `${cs.id}:${file.id}:${currentWorkspaceRoot ?? ""}`;
-  const definitionLanguageSupported = supportsDefinitionLanguage(file.language);
+  const definitionCapability = findCapabilityForLanguage(definitionCapabilities, file.language);
   const canUseServerDefinitions =
     currentWorkspaceRoot !== null &&
-    definitionCapabilities?.available === true &&
-    definitionLanguageSupported;
+    definitionCapability?.available === true;
   const allowAnyIdentifier = canUseServerDefinitions;
 
   useEffect(() => {
     let cancelled = false;
     void fetchDefinitionCapabilities()
       .then((capabilities) => {
-        if (!cancelled) setDefinitionCapabilities(capabilities);
+        if (cancelled) return;
+        setDefinitionCapabilities(capabilities);
+        setDefinitionCapabilitiesError(null);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setDefinitionCapabilities({
-            available: false,
-            supportedLanguages: ["js", "jsx", "ts", "tsx"],
-            requiresWorktree: true,
-            resolver: null,
-            reason: err instanceof Error ? err.message : String(err),
-          });
-        }
+        if (cancelled) return;
+        setDefinitionCapabilities({
+          languages: [],
+          requiresWorktree: true,
+          anyAvailable: false,
+        });
+        setDefinitionCapabilitiesError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       cancelled = true;
@@ -578,20 +580,23 @@ export function ReviewWorkspace({
       });
       return;
     }
-    if (!definitionLanguageSupported) {
+    if (!definitionCapability) {
+      const supported = definitionCapabilities?.languages
+        .map((l) => l.id.toUpperCase())
+        .join(", ") ?? "none";
       setDefinitionPeek({
         kind: "unsupported",
         symbol: target.symbol,
-        message: `Definition lookup currently supports JS/TS only. ${file.path} is ${file.language}.`,
+        message: `No language module handles ${file.language} yet. Supported: ${supported}.`,
         scopeKey: definitionScopeKey,
       });
       return;
     }
-    if (definitionCapabilities?.available === false) {
+    if (!definitionCapability.available) {
       setDefinitionPeek({
         kind: "unsupported",
         symbol: target.symbol,
-        message: definitionCapabilities.reason ?? "Definition lookup is unavailable.",
+        message: definitionCapability.reason ?? "Definition lookup is unavailable.",
         scopeKey: definitionScopeKey,
       });
       return;
@@ -681,6 +686,7 @@ export function ReviewWorkspace({
           currentSource={currentSource}
           fileLanguage={file.language}
           capabilities={definitionCapabilities}
+          fetchError={definitionCapabilitiesError}
         />
         <span className="topbar__spacer" />
         <span className="topbar__author">@{cs.author}</span>
@@ -1121,34 +1127,96 @@ function DefinitionStatusChip({
   currentSource,
   fileLanguage,
   capabilities,
+  fetchError,
 }: {
   currentSource: RecentSource | null;
   fileLanguage: string;
   capabilities: DefinitionCapabilities | null;
+  fetchError: string | null;
 }) {
-  let label = "def: checking";
-  let title = "Checking definition-navigation support.";
-  let tone = "muted";
+  // Hide entirely for non-programming files (markdown, json, yaml, …).
+  // Plan-symbols.md L11: a "JS/TS only" chip on a markdown file is worse
+  // than nothing.
+  if (!isProgrammingLanguage(fileLanguage)) return null;
+
+  if (capabilities === null && !fetchError) {
+    return (
+      <span
+        className="topbar__meta-chip topbar__meta-chip--muted"
+        title="Checking definition-navigation support."
+      >
+        def: checking
+      </span>
+    );
+  }
 
   if (currentSource?.kind !== "worktree") {
-    label = "def: worktree only";
-    title = "Load this diff from a local worktree before asking the server for definitions.";
-  } else if (!supportsDefinitionLanguage(fileLanguage)) {
-    label = "def: JS/TS only";
-    title = `Definition lookup currently supports JS/TS only. Current file language: ${fileLanguage}.`;
-  } else if (capabilities?.available) {
-    label = "def: TS LSP";
-    title = "Go-to-definition is using typescript-language-server against the loaded worktree root.";
-    tone = "ok";
-  } else if (capabilities?.available === false) {
-    label = "def: unavailable";
-    title = capabilities.reason ?? "Definition lookup is unavailable.";
-    tone = "bad";
+    return (
+      <span
+        className="topbar__meta-chip topbar__meta-chip--muted"
+        title="Load this diff from a local worktree before asking the server for definitions."
+      >
+        def: worktree only
+      </span>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <span
+        className="topbar__meta-chip topbar__meta-chip--bad"
+        title={`Couldn't reach the server for capabilities: ${fetchError}`}
+      >
+        def: unreachable
+      </span>
+    );
+  }
+
+  const cap = findCapabilityForLanguage(capabilities, fileLanguage);
+
+  // Programming language we *could* handle in principle, but no module
+  // claims it. Show the supported set so the user can see what's missing.
+  if (!cap) {
+    const supported = capabilities!.languages
+      .filter((l) => l.available)
+      .map((l) => l.id.toUpperCase());
+    if (supported.length === 0) {
+      return (
+        <span
+          className="topbar__meta-chip topbar__meta-chip--bad"
+          title="No language servers are currently configured. See the README for setup."
+        >
+          def: unavailable
+        </span>
+      );
+    }
+    return (
+      <span
+        className="topbar__meta-chip topbar__meta-chip--muted"
+        title={`Supported here: ${supported.join(", ")}. ${fileLanguage} isn't wired up yet.`}
+      >
+        {`def: ${supported.join(", ")} only`}
+      </span>
+    );
+  }
+
+  if (cap.available) {
+    return (
+      <span
+        className="topbar__meta-chip topbar__meta-chip--ok"
+        title={`Go-to-definition uses ${cap.resolver ?? cap.id} against the loaded worktree root.`}
+      >
+        {`def: ${cap.id.toUpperCase()} LSP`}
+      </span>
+    );
   }
 
   return (
-    <span className={`topbar__meta-chip topbar__meta-chip--${tone}`} title={title}>
-      {label}
+    <span
+      className="topbar__meta-chip topbar__meta-chip--bad"
+      title={cap.reason ?? `Definition lookup unavailable for ${cap.id}.`}
+    >
+      {`def: ${cap.id.toUpperCase()} unavailable`}
     </span>
   );
 }

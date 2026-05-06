@@ -1,9 +1,12 @@
 import { apiUrl } from "./apiUrl";
 export {
-  supportsDefinitionLanguage,
+  findCapabilityForLanguage,
+  isProgrammingLanguage,
   type DefinitionCapabilities,
   type DefinitionClickTarget,
+  type DefinitionLanguageCapability,
   type DefinitionLocation,
+  type DefinitionRecommendedSetup,
   type DefinitionRequest,
   type DefinitionResponse,
 } from "./definitionTypes";

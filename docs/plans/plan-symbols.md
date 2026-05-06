@@ -6,12 +6,14 @@ The broad architecture here is still a draft. The first end-to-end slice exists 
 
 - deployment shape: local dev server or desktop sidecar with a real checkout on disk
 - changeset source: worktree-loaded diffs first; `SHIPPABLE_WORKSPACE_ROOT` is only a fallback for non-worktree diffs
-- language coverage: JS/TS only for the real LSP path
-- resolver: `typescript-language-server` discovered on `PATH` or via `SHIPPABLE_TYPESCRIPT_LSP`
+- language coverage: per-language modules (`server/src/languages/`). JS/TS and PHP are wired up; adding the next language (Go, Rust, Python) is a single new module file
+- resolvers:
+  - JS/TS via `typescript-language-server` on `PATH` or `SHIPPABLE_TYPESCRIPT_LSP`
+  - PHP via `intelephense` (preferred) or `phpactor` on `PATH`, or `SHIPPABLE_PHP_LSP`
 - UI signals:
   - pasted/url/file-loaded diffs show `def: worktree only` (the diff didn't come from a checkout)
-  - missing LSP binary shows `def: unavailable` with the reason in the tooltip
-  - files in a *programming* language we don't yet handle show `def: JS/TS only`
+  - missing LSP binary shows `def: <LANG> unavailable` with the reason in the tooltip
+  - files in a *programming* language no module handles show `def: <available list> only` (e.g. `def: TS only` when only TS is set up)
   - files in a non-programming language (markdown, json, yaml, plain text — anything where definition nav doesn't apply at all) show no chip. A "JS/TS only" badge on a markdown file is worse than nothing — it implies a feature exists for that file when it doesn't
 
 ## Goal
@@ -335,6 +337,8 @@ What actually landed first, because it was the smallest non-fake slice:
 
 ### Step 3 — Server-side `LspResolver` + bundled LSPs (Tier 1b)
 Adds the generic LSP host. Pick two languages with mature LSPs to validate the abstraction — a proven path is intelephense (PHP) and gopls (Go). Each new language is one module file. The sidecar (in desktop) and dev server both run the LSP subprocess; same code path.
+
+**Status:** PHP landed via `server/src/languages/php.ts` (intelephense + phpactor). Generic per-language module shape is in `server/src/languages/types.ts`; capabilities response carries one entry per module with `available`, `resolver`, `source`, and `recommendedSetup` for missing tools. The bundled-LSP variant of Tier 1b (shipping a binary inside the sidecar) is not yet wired up — discovery on `PATH` covers the common case. Go (gopls), Rust (rust-analyzer), and the bundled sidecar variant are the open follow-ups.
 
 ### Step 4 — User's LSP discovery (Tier 1a)
 Add `LspDiscovery` and a settings field per language ("path to PHP language server"). Probe order: explicit config → project-local `vendor/bin/` or `node_modules/.bin/` → common global install locations → fall through to bundled. The probe is still the same `LspResolver`; only the binary path differs.
