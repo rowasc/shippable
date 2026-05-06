@@ -3,6 +3,7 @@ import type {
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
+  DeliveredComment,
   LineSelection,
   Reply,
 } from "../types";
@@ -34,6 +35,23 @@ export interface AgentContextProps {
   hookStatus: { installed: boolean } | null;
   /** Absolute worktree path; threaded through for inbox-status polling. */
   worktreePath: string;
+  /**
+   * Newest-first list of delivered comments for this worktree. Drives the
+   * Delivered (N) details block at the bottom of the panel and (via the
+   * pip seam threaded through to ReplyThread) the per-reply ✓ glyph.
+   */
+  delivered: DeliveredComment[];
+  /**
+   * ISO timestamp of the most recent successful `fetchDelivered` call. `null`
+   * before any successful poll — banner shows "—" in that case. Used by the
+   * panel-level failure banner to render "last checked X min ago."
+   */
+  lastSuccessfulPollAt: string | null;
+  /**
+   * True when the most recent `fetchDelivered` call errored. Drives the
+   * panel-level "Agent status unavailable" banner; pips freeze in place.
+   */
+  deliveredError: boolean;
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
   onSendToAgent: (message: string) => Promise<void>;
@@ -130,6 +148,15 @@ export function Inspector({
   // space back as the only "what am I looking at" cue.
   const cursorOnNote = currentNoteLineIdx !== null;
 
+  // Index delivered comments by id once so each ReplyThread's pip lookup
+  // is O(1). `undefined` when the agent-context bundle is absent (no
+  // worktree loaded) — ReplyThread treats it as "no delivered ids known"
+  // which is the right default for the fixture/URL-ingest case.
+  const deliveredById: Record<string, DeliveredComment> | undefined =
+    agentContext
+      ? Object.fromEntries(agentContext.delivered.map((d) => [d.id, d]))
+      : undefined;
+
   return (
     <aside className="inspector">
       <header className="inspector__h">
@@ -150,6 +177,9 @@ export function Inspector({
           symbols={symbols}
           hookStatus={agentContext.hookStatus}
           worktreePath={agentContext.worktreePath}
+          delivered={agentContext.delivered}
+          lastSuccessfulPollAt={agentContext.lastSuccessfulPollAt}
+          deliveredError={agentContext.deliveredError}
           onJump={onJump}
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
@@ -193,6 +223,7 @@ export function Inspector({
                 symbols={symbols}
                 draftBody={draftFor(row.replyKey)}
                 cardRef={row.isCurrent ? currentNoteRef : undefined}
+                deliveredById={deliveredById}
                 onJump={onJump}
                 onAck={() => {
                   // Extract hunkId from the replyKey ("note:hunkId:lineIdx")
@@ -225,6 +256,7 @@ export function Inspector({
           draftBody={draftFor(vm.aiSummaryReplyKey)}
           jumpTarget={vm.aiSummaryJumpTarget!}
           symbols={symbols}
+          deliveredById={deliveredById}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.aiSummaryReplyKey!)}
           onCloseDraft={onCloseDraft}
@@ -241,6 +273,7 @@ export function Inspector({
           teammate={vm.teammate}
           symbols={symbols}
           draftBody={draftFor(vm.teammate.replyKey)}
+          deliveredById={deliveredById}
           onJump={onJump}
           onStartDraft={() => onStartDraft(vm.teammate!.replyKey)}
           onCloseDraft={onCloseDraft}
@@ -256,6 +289,7 @@ export function Inspector({
         vm={vm}
         symbols={symbols}
         draftFor={draftFor}
+        deliveredById={deliveredById}
         onJump={onJump}
         onJumpToBlock={onJumpToBlock}
         onStartDraft={onStartDraft}
@@ -272,6 +306,7 @@ function UserCommentsSection({
   vm,
   symbols,
   draftFor,
+  deliveredById,
   onJump,
   onJumpToBlock,
   onStartDraft,
@@ -283,6 +318,7 @@ function UserCommentsSection({
   vm: InspectorViewModel;
   symbols: SymbolIndex;
   draftFor: (key: string) => string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onStartDraft: (key: string) => void;
@@ -321,6 +357,7 @@ function UserCommentsSection({
               row={vm.draftStubRow}
               symbols={symbols}
               draftBody={draftFor(vm.draftStubRow.threadKey)}
+              deliveredById={deliveredById}
               onJump={onJump}
               onClickLineNo={() => onJump(vm.draftStubRow!.jumpTarget)}
               onStartDraft={() => onStartDraft(vm.draftStubRow!.threadKey)}
@@ -342,6 +379,7 @@ function UserCommentsSection({
               row={row}
               symbols={symbols}
               draftBody={draftFor(row.threadKey)}
+              deliveredById={deliveredById}
               onJump={onJump}
               onClickLineNo={() => {
                 if (row.rangeHiLineIdx !== undefined && onJumpToBlock) {
@@ -373,6 +411,7 @@ function UserThreadCard({
   row,
   symbols,
   draftBody,
+  deliveredById,
   onJump,
   onClickLineNo,
   onStartDraft,
@@ -384,6 +423,7 @@ function UserThreadCard({
   row: UserCommentRowItem;
   symbols: SymbolIndex;
   draftBody: string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
@@ -431,6 +471,7 @@ function UserThreadCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredById={deliveredById}
       />
     </li>
   );
@@ -441,6 +482,7 @@ function NoteCard({
   symbols,
   draftBody,
   cardRef,
+  deliveredById,
   onJump,
   onAck,
   onClickLineNo,
@@ -456,6 +498,7 @@ function NoteCard({
   draftBody: string;
   /** Attached only when this is the cursor's note — drives auto-scroll. */
   cardRef?: RefObject<HTMLLIElement | null>;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onAck: () => void;
   onClickLineNo: () => void;
@@ -529,6 +572,7 @@ function NoteCard({
         onDeleteReply={onDeleteReply}
         symbols={symbols}
         onJump={onJump}
+        deliveredById={deliveredById}
       />
     </li>
   );
@@ -541,6 +585,7 @@ function HunkSummarySection({
   draftBody,
   jumpTarget,
   symbols,
+  deliveredById,
   onJump,
   onStartDraft,
   onCloseDraft,
@@ -555,6 +600,7 @@ function HunkSummarySection({
   draftBody: string;
   jumpTarget: Cursor;
   symbols: SymbolIndex;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -584,6 +630,7 @@ function HunkSummarySection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredById={deliveredById}
         />
       </div>
     </section>
@@ -594,6 +641,7 @@ function TeammateSection({
   teammate,
   symbols,
   draftBody,
+  deliveredById,
   onJump,
   onStartDraft,
   onCloseDraft,
@@ -604,6 +652,7 @@ function TeammateSection({
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
   draftBody: string;
+  deliveredById?: Record<string, DeliveredComment>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -640,6 +689,7 @@ function TeammateSection({
           onDeleteReply={onDeleteReply}
           symbols={symbols}
           onJump={onJump}
+          deliveredById={deliveredById}
         />
       </div>
     </section>

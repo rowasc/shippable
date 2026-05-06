@@ -39,6 +39,7 @@ import {
   unenqueueComment,
 } from "./agentContextClient";
 import { deriveCommentPayload } from "./agentCommentPayload";
+import { useDeliveredPolling } from "./useDeliveredPolling";
 import { KEYMAP } from "./keymap";
 import { clearSession, loadSession, saveSession } from "./persist";
 import { useApiKey } from "./useApiKey";
@@ -199,6 +200,25 @@ export default function App() {
   const activeWorktreeSource: WorktreeSource | null = cs.worktreeSource ?? null;
   const wtPath = activeWorktreeSource?.worktreePath ?? null;
   const wtSha = activeWorktreeSource?.commitSha ?? null;
+
+  // Collect every Reply's enqueue id across all threads — the hook below
+  // subtracts the delivered ids itself to compute the pending-pip set.
+  // Cheap O(n) over `replies`; the typical map carries a handful of
+  // threads and the result feeds a primitive-key dep array on the hook.
+  const allEnqueuedIds: string[] = [];
+  for (const list of Object.values(state.replies)) {
+    for (const r of list) {
+      if (r.enqueuedCommentId) allEnqueuedIds.push(r.enqueuedCommentId);
+    }
+  }
+  const {
+    delivered: deliveredComments,
+    lastSuccessfulPollAt: deliveredLastSuccessAt,
+    error: deliveredErrorState,
+  } = useDeliveredPolling({
+    worktreePath: wtPath,
+    enqueuedIds: allEnqueuedIds,
+  });
   const wantedFetchKey =
     wtPath && wtSha
       ? `${wtPath}|${wtSha}|${pinnedSession ?? ""}|${agentRefreshTick}`
@@ -722,6 +742,9 @@ export default function App() {
                     error: agentError,
                     hookStatus,
                     worktreePath: activeWorktreeSource.worktreePath,
+                    delivered: deliveredComments,
+                    lastSuccessfulPollAt: deliveredLastSuccessAt,
+                    deliveredError: deliveredErrorState,
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                     onSendToAgent: async (message) => {

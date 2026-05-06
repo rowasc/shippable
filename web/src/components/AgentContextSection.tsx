@@ -4,6 +4,7 @@ import type {
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
+  DeliveredComment,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { fetchInboxStatus } from "../agentContextClient";
@@ -40,6 +41,24 @@ interface Props {
    */
   worktreePath: string;
   /**
+   * Delivered comments for this worktree (newest first). Drives the
+   * Delivered (N) details block between the transcript tail and the
+   * composer. The list is bounded server-side at 200 — see
+   * `DELIVERED_HISTORY_CAP` in `server/src/agent-queue.ts`.
+   */
+  delivered: DeliveredComment[];
+  /**
+   * ISO timestamp of the most recent successful `fetchDelivered` call.
+   * `null` before any successful poll. Drives the failure-mode banner's
+   * "last checked X min ago" copy.
+   */
+  lastSuccessfulPollAt: string | null;
+  /**
+   * `true` when the most recent `fetchDelivered` errored. Pips freeze
+   * in last-known state; the panel-level banner surfaces the failure.
+   */
+  deliveredError: boolean;
+  /**
    * Send a message to the agent's inbox. Resolves when the message has
    * landed in `<worktree>/.shippable/inbox.md`; the agent picks it up on
    * its next prompt boundary via the UserPromptSubmit hook.
@@ -63,6 +82,9 @@ export function AgentContextSection({
   hookStatus,
   onJump,
   worktreePath,
+  delivered,
+  lastSuccessfulPollAt,
+  deliveredError,
   onPickSession,
   onRefresh,
   onSendToAgent,
@@ -91,6 +113,19 @@ export function AgentContextSection({
           {loading ? "…" : "↻"}
         </button>
       </div>
+      {/* Server-restart hint — single line, rendered once when a worktree
+        * is loaded. Inspector only mounts this section in that case, so
+        * the hint follows the panel's lifecycle automatically. */}
+      <div className="ac__restart-hint">
+        Queue is in-memory — server restart drops unpulled comments.
+      </div>
+
+      {deliveredError && (
+        <div className="ac__poll-banner" role="status">
+          Agent status unavailable — last checked{" "}
+          {lastSuccessfulPollAt ? humanAgo(lastSuccessfulPollAt) : "—"}.
+        </div>
+      )}
 
       {error && (
         <div className="ac__err">
@@ -131,6 +166,8 @@ export function AgentContextSection({
         </>
       )}
 
+      <DeliveredBlock delivered={delivered} />
+
       {hookStatus && !hookStatus.installed && (
         <HookHint onInstall={onInstallHook} />
       )}
@@ -141,6 +178,57 @@ export function AgentContextSection({
       />
     </section>
   );
+}
+
+/**
+ * Newest-first list of comments the agent has fetched. Hides at N=0 — there
+ * is no Delivered block on a fresh worktree until the first ✓ flips. Reads
+ * from the same polled list that drives per-reply pips, so the macro view
+ * (this block) and the micro view (per-thread pip) stay in sync.
+ *
+ * The server caps history at 200 entries; when the cap is hit we suffix
+ * "(showing last 200)" to the summary so the user knows older deliveries
+ * have aged out. We treat `length === 200` as the cap-hit signal — the
+ * server drops oldest beyond the cap, so the only way to land at exactly
+ * 200 in a long-running session is to be at the cap.
+ */
+function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
+  if (delivered.length === 0) return null;
+  const atCap = delivered.length === 200;
+  return (
+    <details className="ac__details ac__delivered">
+      <summary className="ac__details-summary">
+        Delivered ({delivered.length}){atCap && " (showing last 200)"}
+      </summary>
+      <ul className="ac__delivered-list">
+        {delivered.map((d) => (
+          <li key={d.id} className="ac__delivered-item">
+            <span className="ac__delivered-loc">
+              {d.kind === "freeform" ? "(freeform message)" : formatLoc(d)}
+            </span>
+            <span className="ac__delivered-sep"> · </span>
+            <span className="ac__delivered-kind">{d.kind}</span>
+            <span className="ac__delivered-sep"> · </span>
+            <span className="ac__delivered-time" title={d.deliveredAt}>
+              {humanAgo(d.deliveredAt)}
+            </span>
+            <div className="ac__delivered-body">{clipBody(d.body, 80)}</div>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function formatLoc(d: DeliveredComment): string {
+  if (!d.file) return "(no file)";
+  return d.lines ? `${d.file}:${d.lines}` : d.file;
+}
+
+function clipBody(body: string, max: number): string {
+  const flat = body.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  return flat.slice(0, max - 1) + "…";
 }
 
 type SendStatus =

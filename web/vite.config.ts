@@ -7,6 +7,11 @@ import { resolve } from 'path'
 export default defineConfig({
   plugins: [react()],
   test: {
+    // Default to `node` for the bulk of unit tests (reducer, persist,
+    // payload derivation). Component / hook tests that need a DOM opt
+    // in via the `// @vitest-environment jsdom` pragma at the top of
+    // each file. See web/src/useDeliveredPolling.test.ts and the
+    // *.test.tsx files under web/src/components/ for examples.
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     environment: 'node',
   },
