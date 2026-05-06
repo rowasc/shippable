@@ -23,12 +23,7 @@ const SMOKES = [
     file: "smoke-md-preview.mjs",
     default: true,
   },
-  {
-    id: "md-preview-theme",
-    file: "smoke-md-preview-theme.mjs",
-    default: false,
-    blockedReason: "kept as an opt-in theme-focused smoke to keep the default suite narrower",
-  },
+  { id: "md-preview-theme", file: "smoke-md-preview-theme.mjs", default: true },
 ];
 
 function parseArgs(argv) {
