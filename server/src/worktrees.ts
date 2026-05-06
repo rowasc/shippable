@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
+import { buildRepoCodeGraph, isGraphAnalyzablePath } from "../../web/src/codeGraph.ts";
+import type { CodeGraph } from "../../web/src/types.ts";
 
 // PROTOTYPE: thin wrapper around `git worktree list --porcelain` and
 // `git show`. Production hardening is needed before this ships outside dev:
@@ -63,6 +65,9 @@ export interface ChangesetResult {
    */
   fileContents: Record<string, string>;
 }
+
+const MAX_REPO_GRAPH_FILES = 400;
+const MAX_REPO_GRAPH_FILE_BYTES = 256 * 1024;
 
 export type PickDirectoryResult =
   | { path: string }
@@ -227,16 +232,7 @@ export async function changesetFor(
   ref: string = "HEAD",
 ): Promise<ChangesetResult> {
   await assertGitDir(worktreePath);
-  // Restrict ref to a conservative shape: HEAD, HEAD~N, branch names, sha.
-  // Refuses anything with shell metacharacters or whitespace. The leading-`-`
-  // check is a belt-and-suspenders guard against option-as-ref attacks; the
-  // `--end-of-options` separator below is the primary defense.
-  if (ref.startsWith("-")) {
-    throw new Error(`ref must not start with '-': ${ref}`);
-  }
-  if (!/^[A-Za-z0-9_./~^@-]{1,200}$/.test(ref)) {
-    throw new Error(`invalid ref: ${ref}`);
-  }
+  validateRef(ref);
 
   // Use a delimiter that's vanishingly unlikely to occur in commit metadata
   // so we can split metadata from the diff body cleanly.
@@ -294,6 +290,42 @@ export async function changesetFor(
   return { diff, sha, subject, author, date, branch, fileContents };
 }
 
+export async function repoGraphFor(
+  worktreePath: string,
+  ref: string = "HEAD",
+): Promise<CodeGraph> {
+  await assertGitDir(worktreePath);
+  validateRef(ref);
+
+  const { stdout } = await execFileAsync(
+    GIT,
+    ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "--end-of-options", ref],
+    { cwd: worktreePath, maxBuffer: 8 * 1024 * 1024 },
+  );
+
+  const paths = stdout
+    .split("\0")
+    .filter((value) => value.length > 0)
+    .filter(isGraphAnalyzablePath)
+    .slice(0, MAX_REPO_GRAPH_FILES);
+
+  const sources: Array<{ path: string; text: string }> = [];
+  for (const filePath of paths) {
+    try {
+      const { stdout: content } = await execFileAsync(
+        GIT,
+        ["show", "--end-of-options", `${ref}:${filePath}`],
+        { cwd: worktreePath, maxBuffer: MAX_REPO_GRAPH_FILE_BYTES },
+      );
+      sources.push({ path: filePath, text: content });
+    } catch {
+      // Skip files that are too large or unreadable at this ref.
+    }
+  }
+
+  return buildRepoCodeGraph(sources);
+}
+
 /**
  * Pull repo-relative paths of files we want to ship post-change content for
  * (currently any `.md` file added or modified in the diff). Skips deletions
@@ -310,4 +342,13 @@ function extractRenderablePaths(diff: string): string[] {
     if (path.endsWith(".md")) out.add(path);
   }
   return Array.from(out);
+}
+
+function validateRef(ref: string): void {
+  if (ref.startsWith("-")) {
+    throw new Error(`ref must not start with '-': ${ref}`);
+  }
+  if (!/^[A-Za-z0-9_./~^@-]{1,200}$/.test(ref)) {
+    throw new Error(`invalid ref: ${ref}`);
+  }
 }

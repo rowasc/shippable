@@ -108,4 +108,50 @@ describe("buildPlanDiagram", () => {
     expect(diagram.mermaid).toContain("%% no dependency edges detected");
     expect(diagram.mermaid).toContain('f0["docs/notes.md"]');
   });
+
+  it("uses an attached repo graph when available, including unchanged neighbors", () => {
+    const plan: ReviewPlan = {
+      headline: "repo graph",
+      intent: [],
+      map: {
+        files: [
+          {
+            fileId: "changed",
+            path: "src/changed.ts",
+            status: "modified",
+            added: 4,
+            removed: 1,
+            isTest: false,
+          },
+        ],
+        symbols: [],
+      },
+      entryPoints: [{ fileId: "changed", reason: BASE_REASON }],
+    };
+
+    const diagram = buildPlanDiagram(plan, {
+      scope: "repo",
+      nodes: [
+        { path: "src/core.ts", isTest: false },
+        { path: "src/changed.ts", isTest: false },
+      ],
+      edges: [
+        {
+          fromPath: "src/core.ts",
+          toPath: "src/changed.ts",
+          labels: ["buildThing"],
+          kind: "symbol",
+        },
+      ],
+    });
+
+    expect(diagram.scope).toBe("repo");
+    expect(diagram.nodes.map((node) => node.path)).toEqual([
+      "src/core.ts",
+      "src/changed.ts",
+    ]);
+    expect(diagram.nodes.find((node) => node.path === "src/core.ts")?.status).toBeUndefined();
+    expect(diagram.nodes.find((node) => node.path === "src/changed.ts")?.status).toBe("modified");
+    expect(diagram.mermaid).toContain('buildThing');
+  });
 });

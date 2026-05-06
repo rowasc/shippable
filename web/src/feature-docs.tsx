@@ -569,6 +569,7 @@ function App() {
         <div className="feature-docs__plan">
           <ReviewPlanView
             plan={plan}
+            changeset={CS}
             status={view === "plan-idle" ? "idle" : "fallback"}
             error={
               view === "plan-fallback"

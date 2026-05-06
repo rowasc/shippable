@@ -60,7 +60,9 @@ export function PlanDiagramView({ diagram }: Props) {
         <div>
           <div className="plan-diagram__title">Diagram</div>
           <div className="plan-diagram__hint">
-            Generated from the current plan map. Copy the Mermaid source if you want to refine it elsewhere.
+            {diagram.scope === "repo"
+              ? "Generated from the current worktree checkout. Changed files stay highlighted; unchanged repo neighbors give the wider map."
+              : "Generated from the current diff. Copy the Mermaid source if you want to refine it elsewhere."}
           </div>
         </div>
         <CopyButton text={diagram.mermaid} title="Copy Mermaid diagram source" />
@@ -203,8 +205,9 @@ function statusGlyph(status: PlanDiagramNode["status"]): string {
     case "renamed":
       return "~";
     case "modified":
-    default:
       return "~";
+    default:
+      return "·";
   }
 }
 

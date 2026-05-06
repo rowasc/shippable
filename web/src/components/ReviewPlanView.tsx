@@ -7,6 +7,7 @@ import type {
   ReviewPlan,
   StructureMap,
   StructureMapFile,
+  ChangeSet,
 } from "../types";
 import { buildPlanDiagram } from "../planDiagram";
 import { Reference } from "./Reference";
@@ -30,6 +31,7 @@ interface Props {
    *  is shown when status === "idle" — we don't auto-send because the diff
    *  leaves the user's machine. */
   onGenerateAi?: () => void;
+  changeset?: ChangeSet;
 }
 
 export function ReviewPlanView({
@@ -39,11 +41,12 @@ export function ReviewPlanView({
   status,
   error,
   onGenerateAi,
+  changeset,
 }: Props) {
   const [showDiagram, setShowDiagram] = useState(false);
   const diagram = useMemo(
-    () => (showDiagram ? buildPlanDiagram(plan) : null),
-    [plan, showDiagram],
+    () => (showDiagram ? buildPlanDiagram(plan, changeset?.graph) : null),
+    [changeset?.graph, plan, showDiagram],
   );
 
   return (

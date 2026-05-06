@@ -439,6 +439,69 @@ describe("parseDiff — language guessing", () => {
   });
 });
 
+describe("parseDiff — diff-scoped graph extraction", () => {
+  it("derives symbol metadata and file edges from local imports", () => {
+    const cs = parseDiff(
+      [
+        "diff --git a/src/utils.ts b/src/utils.ts",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/src/utils.ts",
+        "@@ -0,0 +1,3 @@",
+        "+export function buildPlanDiagram() {",
+        "+  return 'ok';",
+        "+}",
+        "diff --git a/src/view.ts b/src/view.ts",
+        "--- a/src/view.ts",
+        "+++ b/src/view.ts",
+        "@@ -1,1 +1,3 @@",
+        "+import { buildPlanDiagram } from './utils';",
+        " export function render() {",
+        "+  return buildPlanDiagram();",
+        " }",
+      ].join("\n"),
+      { id: "cs-graph" },
+    );
+
+    expect(cs.graph?.scope).toBe("diff");
+    expect(cs.graph?.edges).toContainEqual({
+      fromPath: "src/utils.ts",
+      toPath: "src/view.ts",
+      labels: ["buildPlanDiagram"],
+      kind: "symbol",
+    });
+    expect(cs.files[0].hunks[0].definesSymbols).toEqual(["buildPlanDiagram"]);
+    expect(cs.files[1].hunks[0].referencesSymbols).toEqual(["buildPlanDiagram"]);
+  });
+
+  it("creates file-level import edges when the target has no named symbol match", () => {
+    const cs = parseDiff(
+      [
+        "diff --git a/src/theme.css b/src/theme.css",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/src/theme.css",
+        "@@ -0,0 +1,1 @@",
+        "+:root { color-scheme: light; }",
+        "diff --git a/src/app.ts b/src/app.ts",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1,1 +1,2 @@",
+        "+import './theme.css';",
+        " export const app = true;",
+      ].join("\n"),
+      { id: "cs-css" },
+    );
+
+    expect(cs.graph?.edges).toContainEqual({
+      fromPath: "src/theme.css",
+      toPath: "src/app.ts",
+      labels: ["theme"],
+      kind: "import",
+    });
+  });
+});
+
 describe("parseDiff — ChangeSet shape and meta", () => {
   it("preserves meta.id, meta.title, meta.author, meta.head/base", () => {
     const cs = parseDiff(

@@ -113,6 +113,7 @@ The shape of these will probably move as we build (a) and (b).
 - `web/src/types.ts` — possibly extends `ChangeSet` or adds a sibling `WorktreeSource` for provenance.
 - `web/src/persist.ts` — per-worktree review cursor in localStorage.
 - `server/src/index.ts` — new endpoints `GET /api/worktrees`, `GET /api/worktrees/diff`. Origin allowlist + path validation belong here.
+- `server/src/index.ts` — worktree endpoints, including the optional repo-graph endpoint used by the plan diagram to show unchanged neighbors from the checkout.
 - `server/src/` (new) — a `git` wrapper module. `execFile`-based, narrowly scoped commands.
 - `src-tauri/` — eventually a native equivalent so desktop doesn't need the Node sidecar for this.
 - `docs/plans/auto-mode-sandbox.md` — touch up to mention the reviewer integration once slice (d) is real.

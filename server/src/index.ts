@@ -65,6 +65,9 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return handleWorktreesChangeset(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/graph") {
+      return handleWorktreesGraph(req, res, origin);
+    }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -321,6 +324,43 @@ async function handleWorktreesChangeset(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/changeset err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesGraph(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; ref?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const ref = typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : "HEAD";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { path: string, ref?: string }" }));
+    return;
+  }
+  try {
+    const graph = await worktrees.repoGraphFor(wtPath, ref);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ graph }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/graph err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));

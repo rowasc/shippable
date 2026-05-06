@@ -1,10 +1,10 @@
-import type { FileStatus, ReviewPlan } from "./types";
+import type { CodeGraph, FileStatus, ReviewPlan } from "./types";
 
 export interface PlanDiagramNode {
   id: string;
-  fileId: string;
+  fileId?: string;
   path: string;
-  status: FileStatus;
+  status?: FileStatus;
   isTest: boolean;
   isEntryPoint: boolean;
   column: number;
@@ -19,6 +19,7 @@ export interface PlanDiagramEdge {
 }
 
 export interface PlanDiagram {
+  scope: "diff" | "repo";
   mermaid: string;
   nodes: PlanDiagramNode[];
   edges: PlanDiagramEdge[];
@@ -30,28 +31,20 @@ interface DependencyBucket {
   labels: Set<string>;
 }
 
-export function buildPlanDiagram(plan: ReviewPlan): PlanDiagram {
-  const filesByPath = new Map(plan.map.files.map((file) => [file.path, file]));
+export function buildPlanDiagram(plan: ReviewPlan, graph?: CodeGraph): PlanDiagram {
+  const planFiles = plan.map.files;
+  const filesByPath = new Map(planFiles.map((file) => [file.path, file]));
   const entryPointFileIds = new Set(plan.entryPoints.map((entry) => entry.fileId));
-  const fileIdToNodeId = new Map<string, string>();
+  const graphSource = graph ?? buildFallbackGraph(plan);
+  const fileIdByPath = new Map(planFiles.map((file) => [file.path, file.fileId]));
 
-  const buckets = new Map<string, DependencyBucket>();
-  for (const symbol of plan.map.symbols) {
-    for (const referencedPath of symbol.referencedIn) {
-      if (referencedPath === symbol.definedIn) continue;
-      if (!filesByPath.has(symbol.definedIn) || !filesByPath.has(referencedPath)) continue;
-      const key = `${symbol.definedIn}\u0000${referencedPath}`;
-      const bucket = buckets.get(key) ?? {
-        fromPath: symbol.definedIn,
-        toPath: referencedPath,
-        labels: new Set<string>(),
-      };
-      bucket.labels.add(symbol.name);
-      buckets.set(key, bucket);
-    }
-  }
-
-  const edgeBuckets = [...buckets.values()].sort((a, b) =>
+  const edgeBuckets = graphSource.edges
+    .map((edge) => ({
+      fromPath: edge.fromPath,
+      toPath: edge.toPath,
+      labels: new Set(edge.labels),
+    }))
+    .sort((a, b) =>
     a.fromPath === b.fromPath
       ? a.toPath.localeCompare(b.toPath)
       : a.fromPath.localeCompare(b.fromPath),
@@ -59,9 +52,9 @@ export function buildPlanDiagram(plan: ReviewPlan): PlanDiagram {
 
   const outgoing = new Map<string, Set<string>>();
   const indegree = new Map<string, number>();
-  for (const file of plan.map.files) {
-    outgoing.set(file.path, new Set());
-    indegree.set(file.path, 0);
+  for (const node of graphSource.nodes) {
+    outgoing.set(node.path, new Set());
+    indegree.set(node.path, 0);
   }
   for (const bucket of edgeBuckets) {
     const neighbors = outgoing.get(bucket.fromPath);
@@ -70,28 +63,38 @@ export function buildPlanDiagram(plan: ReviewPlan): PlanDiagram {
     indegree.set(bucket.toPath, (indegree.get(bucket.toPath) ?? 0) + 1);
   }
 
-  const columnByPath = assignColumns(plan.map.files.map((file) => file.path), outgoing, indegree);
-  const filesByColumn = new Map<number, typeof plan.map.files>();
-  for (const file of plan.map.files) {
-    const column = columnByPath.get(file.path) ?? 0;
+  const columnByPath = assignColumns(graphSource.nodes.map((node) => node.path), outgoing, indegree);
+  const filesByColumn = new Map<number, typeof graphSource.nodes>();
+  for (const node of graphSource.nodes) {
+    const column = columnByPath.get(node.path) ?? 0;
     const bucket = filesByColumn.get(column) ?? [];
-    bucket.push(file);
+    bucket.push(node);
     filesByColumn.set(column, bucket);
   }
 
   const nodes: PlanDiagramNode[] = [];
+  let nodeCounter = 0;
   for (const [column, files] of [...filesByColumn.entries()].sort((a, b) => a[0] - b[0])) {
-    files.sort((a, b) => compareFiles(a.path, b.path, entryPointFileIds, a.fileId, b.fileId));
+    files.sort((a, b) =>
+      compareFiles(
+        a.path,
+        b.path,
+        entryPointFileIds,
+        fileIdByPath.get(a.path),
+        fileIdByPath.get(b.path),
+      ),
+    );
     files.forEach((file, row) => {
-      const nodeId = `f${nodes.length}`;
-      fileIdToNodeId.set(file.fileId, nodeId);
+      const nodeId = `f${nodeCounter++}`;
       nodes.push({
         id: nodeId,
-        fileId: file.fileId,
+        fileId: fileIdByPath.get(file.path),
         path: file.path,
-        status: file.status,
+        status: filesByPath.get(file.path)?.status,
         isTest: file.isTest,
-        isEntryPoint: entryPointFileIds.has(file.fileId),
+        isEntryPoint: fileIdByPath.has(file.path)
+          ? entryPointFileIds.has(fileIdByPath.get(file.path)!)
+          : false,
         column,
         row,
       });
@@ -114,9 +117,40 @@ export function buildPlanDiagram(plan: ReviewPlan): PlanDiagram {
   });
 
   return {
-    mermaid: buildMermaid(plan, nodes, edges),
+    scope: graphSource.scope,
+    mermaid: buildMermaid(nodes, edges),
     nodes,
     edges,
+  };
+}
+
+function buildFallbackGraph(plan: ReviewPlan): CodeGraph {
+  const buckets = new Map<string, DependencyBucket>();
+  for (const symbol of plan.map.symbols) {
+    for (const referencedPath of symbol.referencedIn) {
+      if (referencedPath === symbol.definedIn) continue;
+      const key = `${symbol.definedIn}\u0000${referencedPath}`;
+      const bucket = buckets.get(key) ?? {
+        fromPath: symbol.definedIn,
+        toPath: referencedPath,
+        labels: new Set<string>(),
+      };
+      bucket.labels.add(symbol.name);
+      buckets.set(key, bucket);
+    }
+  }
+  return {
+    scope: "diff",
+    nodes: plan.map.files.map((file) => ({
+      path: file.path,
+      isTest: file.isTest,
+    })),
+    edges: [...buckets.values()].map((bucket) => ({
+      fromPath: bucket.fromPath,
+      toPath: bucket.toPath,
+      labels: [...bucket.labels].sort(),
+      kind: "symbol" as const,
+    })),
   };
 }
 
@@ -156,17 +190,17 @@ function compareFiles(
   pathA: string,
   pathB: string,
   entryPointFileIds: Set<string>,
-  fileIdA: string,
-  fileIdB: string,
+  fileIdA?: string,
+  fileIdB?: string,
 ): number {
   const entryDelta =
-    Number(entryPointFileIds.has(fileIdB)) - Number(entryPointFileIds.has(fileIdA));
+    Number(fileIdB ? entryPointFileIds.has(fileIdB) : false) -
+    Number(fileIdA ? entryPointFileIds.has(fileIdA) : false);
   if (entryDelta !== 0) return entryDelta;
   return pathA.localeCompare(pathB);
 }
 
 function buildMermaid(
-  plan: ReviewPlan,
   nodes: PlanDiagramNode[],
   edges: PlanDiagramEdge[],
 ): string {
@@ -188,10 +222,7 @@ function buildMermaid(
   const entryNodes = nodes.filter((node) => node.isEntryPoint).map((node) => node.id);
   const testNodes = nodes.filter((node) => node.isTest).map((node) => node.id);
   const changedNodes = nodes
-    .filter((node) => {
-      const file = plan.map.files.find((item) => item.fileId === node.fileId);
-      return file?.status === "added";
-    })
+    .filter((node) => node.status === "added")
     .map((node) => node.id);
 
   lines.push("  classDef entry fill:#fff1cc,stroke:#9a6700,stroke-width:2px;");

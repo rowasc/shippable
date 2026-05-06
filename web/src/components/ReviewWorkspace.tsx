@@ -606,6 +606,7 @@ export function ReviewWorkspace({
           >
             <ReviewPlanView
               plan={plan}
+              changeset={cs}
               status={planStatus}
               error={planError}
               onGenerateAi={generatePlan}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseDiff } from "./parseDiff";
 import { apiUrl } from "./apiUrl";
-import type { ChangeSet } from "./types";
+import type { ChangeSet, CodeGraph } from "./types";
 import type { RecentSource } from "./recents";
 
 const WORKTREES_DIR_KEY = "shippable.worktreesDir";
@@ -21,6 +21,10 @@ interface WorktreeChangesetResponse {
   date: string;
   branch: string | null;
   fileContents?: Record<string, string>;
+}
+
+interface WorktreeGraphResponse {
+  graph: CodeGraph;
 }
 
 type ErrorResponse = { error: string };
@@ -127,6 +131,21 @@ export function useWorktreeLoader({ onLoad }: Props) {
       if (!res.ok || "error" in json) {
         throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
       }
+      let graph: CodeGraph | undefined;
+      try {
+        const graphRes = await fetch(await apiUrl("/api/worktrees/graph"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: wt.path }),
+        });
+        const graphJson = (await graphRes.json()) as WorktreeGraphResponse | ErrorResponse;
+        if (graphRes.ok && !("error" in graphJson)) {
+          graph = graphJson.graph;
+        }
+      } catch (graphErr) {
+        console.warn("[useWorktreeLoader] repo graph failed, staying diff-scoped:", graphErr);
+      }
+
       const cs = parseDiff(json.diff, {
         id: `wt-${json.sha.slice(0, 12)}`,
         title:
@@ -134,6 +153,7 @@ export function useWorktreeLoader({ onLoad }: Props) {
         author: json.author,
         head: json.branch ?? json.sha.slice(0, 7),
         fileContents: json.fileContents,
+        graph,
       });
       if (cs.files.length === 0) {
         setErr("Latest commit produced no parseable diff (empty or merge?).");

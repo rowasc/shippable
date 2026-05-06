@@ -37,6 +37,7 @@ import { usePlan } from "../usePlan";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
 import { runPrompt } from "../promptRun";
 import { KEYMAP } from "../keymap";
+import { buildRepoCodeGraph } from "../codeGraph";
 import type { RecentEntry } from "../recents";
 import {
   blockCommentKey,
@@ -309,6 +310,17 @@ function buildFileContents(cs: ChangeSet): Record<string, string> | undefined {
   return Object.fromEntries(entries);
 }
 
+function buildGraphSources(cs: ChangeSet): Array<{ path: string; text: string }> {
+  return cs.files.map((file) => ({
+    path: file.path,
+    text: file.fullContent?.map((line) => line.text).join("\n")
+      ?? file.hunks
+        .flatMap((hunk) => hunk.lines.filter((line) => line.kind !== "del"))
+        .map((line) => line.text)
+        .join("\n"),
+  }));
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -358,6 +370,13 @@ function installDemoMocks() {
         branch: wt.branch,
         fileContents: buildFileContents(cs),
       });
+    }
+    if (url.endsWith("/api/worktrees/graph")) {
+      const req = readRequestJson(init);
+      const path = typeof req.path === "string" ? req.path : DEMO_WORKTREES[0].path;
+      const wt = DEMO_WORKTREES.find((item) => item.path === path) ?? DEMO_WORKTREES[0];
+      const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
+      return jsonResponse({ graph: buildRepoCodeGraph(buildGraphSources(cs)) });
     }
     if (url.endsWith("/api/plan")) {
       const req = readRequestJson(init);
@@ -1431,6 +1450,7 @@ function WorkspaceStage({
           >
             <ReviewPlanView
               plan={plan}
+              changeset={cs}
               status={planStatus}
               error={planError}
               onGenerateAi={generatePlan}
