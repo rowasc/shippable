@@ -43,6 +43,9 @@ reach `https://example.com` (should be blocked) or can't reach
 With a working `docker` CLI pointing at a running engine:
 
 ```sh
+# one-time, in ~/.zshrc — used by the bind mount that makes git work in worktrees
+export SHIPPABLE_HOST_REPO=/Users/you/path/to/shippable
+
 npx -y @devcontainers/cli up --workspace-folder .
 npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions
 ```
@@ -71,6 +74,35 @@ npx -y @devcontainers/cli exec --workspace-folder . sudo iptables -L OUTPUT -n
 If `OUTPUT` shows `policy ACCEPT`, the firewall didn't run — check `up`'s
 output for a `postStartCommand` failure and re-run with
 `--remove-existing-container`.
+
+## Worktrees and `git status`
+
+A worktree's `.git` is a file containing an absolute host path back to the
+main repo's `.git/worktrees/<name>` directory. For `git status` to work
+inside the container, that absolute path needs to resolve in the
+container's filesystem. `devcontainer.json` does this by bind-mounting
+`$SHIPPABLE_HOST_REPO/.git` at the same path inside the container.
+
+Set `SHIPPABLE_HOST_REPO` in your shell rc to the absolute path of the
+main checkout (the one that owns `.git/worktrees/`):
+
+```sh
+export SHIPPABLE_HOST_REPO=/Users/you/path/to/shippable
+```
+
+If you forget, `up` fails with a mount error pointing at `/.git`.
+
+This works for both worktree patterns:
+
+| Worktree at                        | yolo from there | git inside container |
+| ---------------------------------- | --------------- | -------------------- |
+| `<main>/.claude/worktrees/<name>`  | ✅              | ✅                   |
+| `../shippable-<name>` (sibling)    | ✅              | ✅                   |
+| Main repo itself                   | ✅              | ✅                   |
+
+The mount is read-write — commits inside the container reach the host's
+real `.git`. A compromised session could rewrite history; if that matters,
+make the mount `readonly` and run `git commit` from the host.
 
 ## Sharing host skills/agents/commands
 
