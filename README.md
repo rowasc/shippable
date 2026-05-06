@@ -63,6 +63,10 @@ Three entry points:
 - `/gallery.html` is a screen catalog that renders every UI state against canned fixtures. This is the intended surface for design work — way faster than driving the live app with the keyboard to reach an edge case.
 - `?cs=<id>` on the main app jumps straight to a specific sample ChangeSet, which is handy if you need to reproduce a fixture state manually.
 
+## MCP server
+
+The repo also ships a small TypeScript MCP server at [`mcp-server/`](./mcp-server/README.md) that exposes a `shippable_check_review_comments` tool over stdio. Wire it into Claude Code, Codex CLI, Cursor, or any other MCP-speaking harness, and you can ask your agent `check shippable` to pull pending reviewer feedback from the local server's queue. See `mcp-server/README.md` for per-harness install lines.
+
 ## Building the desktop app
 
 Shippable can also ship as a native macOS app. The React frontend gets wrapped in a [Tauri 2](https://tauri.app/) shell, and `server/` gets compiled to a standalone binary via [`bun build --compile`](https://bun.sh/docs/bundler/executables) and bundled inside the .app — so the .dmg is self-contained, no Node or browser dev server required at runtime.

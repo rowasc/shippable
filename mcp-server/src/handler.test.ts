@@ -1,0 +1,178 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_PORT, handleCheckReviewComments } from "./handler.js";
+
+interface CapturedRequest {
+  url: string;
+  init: RequestInit | undefined;
+}
+
+function makeFetch(response: Response | Promise<Response> | Error): {
+  fetchFn: typeof fetch;
+  calls: CapturedRequest[];
+} {
+  const calls: CapturedRequest[] = [];
+  const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), init });
+    if (response instanceof Error) throw response;
+    return response;
+  }) as typeof fetch;
+  return { fetchFn, calls };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe("handleCheckReviewComments", () => {
+  it("returns the payload when the server has pending comments", async () => {
+    const payload =
+      "<reviewer-feedback from=\"shippable\" commit=\"abc\"><comment kind=\"freeform\">hi</comment></reviewer-feedback>";
+    const { fetchFn } = makeFetch(jsonResponse({ payload, ids: ["a", "b"] }));
+
+    const result = await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn },
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toEqual([{ type: "text", text: payload }]);
+  });
+
+  it("returns 'No pending comments.' when payload is empty", async () => {
+    const { fetchFn } = makeFetch(jsonResponse({ payload: "", ids: [] }));
+
+    const result = await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn },
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toEqual([
+      { type: "text", text: "No pending comments." },
+    ]);
+  });
+
+  it("falls back to deps.cwd() when worktreePath is absent", async () => {
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      {},
+      { fetchFn, cwd: () => "/tmp/x" },
+    );
+
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body.worktreePath).toBe("/tmp/x");
+  });
+
+  it("explicit worktreePath wins over deps.cwd()", async () => {
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/tmp/y" },
+      { fetchFn, cwd: () => "/tmp/x" },
+    );
+
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body.worktreePath).toBe("/tmp/y");
+  });
+
+  it("returns an error result on HTTP 500 with port and status in the message", async () => {
+    const { fetchFn } = makeFetch(
+      new Response("oops", { status: 500 }),
+    );
+
+    const result = await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, port: 4242 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("4242");
+    expect(result.content[0]!.text).toContain("500");
+  });
+
+  it("returns an error result when the response body is not valid JSON", async () => {
+    const { fetchFn } = makeFetch(
+      new Response("not json", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+
+    const result = await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, port: 5151 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toMatch(/JSON|parse/i);
+  });
+
+  it("returns an error result without throwing on fetch rejection", async () => {
+    const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
+
+    const result = await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, port: 7777 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("ECONNREFUSED");
+    expect(result.content[0]!.text).toContain("7777");
+  });
+
+  it("honors deps.port when provided", async () => {
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, port: 4000 },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:4000/api/agent/pull");
+  });
+
+  it("honors SHIPPABLE_PORT env when deps.port is absent", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "5000");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:5000/api/agent/pull");
+  });
+
+  it("falls back to DEFAULT_PORT when both deps.port and SHIPPABLE_PORT are absent", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn },
+    );
+
+    expect(DEFAULT_PORT).toBe(3001);
+    expect(calls[0]!.url).toBe(`http://127.0.0.1:${DEFAULT_PORT}/api/agent/pull`);
+  });
+});
