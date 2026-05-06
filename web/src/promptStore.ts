@@ -160,6 +160,14 @@ export interface AutoFillContext {
   changeset: { title: string; diff: string };
   file: { path: string };
   selection: string;
+  /**
+   * Describes what `selection` contains so the picker can tell the user
+   * whether the auto-fill came from their line selection or fell back to
+   * the whole hunk.
+   */
+  selectionInfo:
+    | { kind: "lines"; lo: number; hi: number; hunkLines: number }
+    | { kind: "hunk"; hunkLines: number };
 }
 
 export function buildAutoFillContext(
@@ -168,10 +176,21 @@ export function buildAutoFillContext(
   hunk: Hunk,
   selection: LineSelection | null,
 ): AutoFillContext {
+  const total = hunk.lines.length;
+  const info: AutoFillContext["selectionInfo"] =
+    selection && selection.hunkId === hunk.id
+      ? {
+          kind: "lines",
+          lo: Math.min(selection.anchor, selection.head) + 1,
+          hi: Math.max(selection.anchor, selection.head) + 1,
+          hunkLines: total,
+        }
+      : { kind: "hunk", hunkLines: total };
   return {
     changeset: { title: cs.title, diff: changesetToDiff(cs) },
     file: { path: file.path },
     selection: hunkToDiff(file, hunk, selection),
+    selectionInfo: info,
   };
 }
 
