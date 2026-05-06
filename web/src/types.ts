@@ -143,6 +143,14 @@ export interface Reply {
    * those rehydrate to `null` via the persist-layer migration.
    */
   enqueuedCommentId?: string | null;
+  /**
+   * `true` when the most recent enqueue attempt for this Reply errored. Drives
+   * the ⚠ errored pip + click-to-retry affordance in `ReplyThread`. Cleared
+   * on a successful retry. Absent / `false` means "no error, no retry needed".
+   * Always coexists with `enqueuedCommentId === null` — once an id lands the
+   * delivered pip wins regardless of any stale error flag.
+   */
+  enqueueError?: boolean;
 }
 
 /**

@@ -370,6 +370,7 @@ function WorkspaceFrame({
               onChangeDraft={() => {}}
               onSubmitReply={() => {}}
               onDeleteReply={() => {}}
+              onRetryReply={() => {}}
               onVerifyAiNote={() => {}}
             />
           )}

@@ -1405,6 +1405,12 @@ function WorkspaceStage({
             onDeleteReply={(key, replyId) =>
               dispatch({ type: "DELETE_REPLY", targetKey: key, replyId })
             }
+            onRetryReply={() => {
+              // Demo mode has no agent backend; retry is a no-op. Failed
+              // enqueues never happen here in the first place — the prop
+              // is required by the Inspector type signature but is dead
+              // code in this surface.
+            }}
             onVerifyAiNote={(recipe) => {
               setRunRequest((prev) => ({
                 tick: (prev?.tick ?? 0) + 1,

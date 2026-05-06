@@ -474,6 +474,96 @@ describe("PATCH_REPLY_ENQUEUED_ID", () => {
   });
 });
 
+// ── SET_REPLY_ENQUEUE_ERROR ────────────────────────────────────────────────
+
+describe("SET_REPLY_ENQUEUE_ERROR", () => {
+  it("sets enqueueError = true on the matching reply", () => {
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "SET_REPLY_ENQUEUE_ERROR",
+      targetKey: "k",
+      replyId: "r1",
+      error: true,
+    });
+    expect(s2.replies["k"][0].enqueueError).toBe(true);
+  });
+
+  it("clears enqueueError back to false on success", () => {
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+      enqueueError: true,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "SET_REPLY_ENQUEUE_ERROR",
+      targetKey: "k",
+      replyId: "r1",
+      error: false,
+    });
+    expect(s2.replies["k"][0].enqueueError).toBe(false);
+  });
+
+  it("is a no-op when the targetKey is unknown", () => {
+    const s = reducer(s0, {
+      type: "SET_REPLY_ENQUEUE_ERROR",
+      targetKey: "missing",
+      replyId: "r1",
+      error: true,
+    });
+    expect(s).toBe(s0);
+  });
+
+  it("is a no-op when the replyId does not match", () => {
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "SET_REPLY_ENQUEUE_ERROR",
+      targetKey: "k",
+      replyId: "nope",
+      error: true,
+    });
+    expect(s2).toBe(s1);
+  });
+
+  it("returns the same state when the flag is already at the requested value", () => {
+    // Idempotency keeps unrelated subscribers from re-rendering when nothing
+    // observably changed. The reducer treats "absent" and `false` as the
+    // same starting state for this comparison.
+    const reply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "now",
+      enqueuedCommentId: null,
+    };
+    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s2 = reducer(s1, {
+      type: "SET_REPLY_ENQUEUE_ERROR",
+      targetKey: "k",
+      replyId: "r1",
+      error: false,
+    });
+    expect(s2).toBe(s1);
+  });
+});
+
 describe("DELETE_REPLY", () => {
   it("removes a reply by id from the thread", () => {
     const r1 = { id: "r1", author: "a", body: "hi", createdAt: "t1" };

@@ -95,6 +95,17 @@ export type Action =
       replyId: string;
       enqueuedCommentId: string | null;
     }
+  | {
+      // Mark a Reply's enqueue attempt as errored / cleared. Drives the ⚠
+      // errored pip in ReplyThread; the parent toggles it on the catch path
+      // of `enqueueComment` and clears it before retrying. Coexists with
+      // `enqueuedCommentId === null` — once an id lands the delivered pip
+      // wins regardless of any stale error flag.
+      type: "SET_REPLY_ENQUEUE_ERROR";
+      targetKey: string;
+      replyId: string;
+      error: boolean;
+    }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
   | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
@@ -216,6 +227,21 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       if (idx < 0) return state;
       const patched = existing.map((r, i) =>
         i === idx ? { ...r, enqueuedCommentId: action.enqueuedCommentId } : r,
+      );
+      return {
+        ...state,
+        replies: { ...state.replies, [action.targetKey]: patched },
+      };
+    }
+    case "SET_REPLY_ENQUEUE_ERROR": {
+      const existing = state.replies[action.targetKey];
+      if (!existing) return state;
+      const idx = existing.findIndex((r) => r.id === action.replyId);
+      if (idx < 0) return state;
+      const current = !!existing[idx].enqueueError;
+      if (current === action.error) return state;
+      const patched = existing.map((r, i) =>
+        i === idx ? { ...r, enqueueError: action.error } : r,
       );
       return {
         ...state,

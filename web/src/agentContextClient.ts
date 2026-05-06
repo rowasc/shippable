@@ -26,10 +26,19 @@ export async function listSessionsForWorktree(
   return json.sessions;
 }
 
-export async function fetchMcpStatus(): Promise<{ installed: boolean }> {
+export async function fetchMcpStatus(): Promise<{
+  installed: boolean;
+  /**
+   * The `claude mcp add …` command the panel chip should display + copy.
+   * Authoritative — comes from the server's path resolver so the chip
+   * surfaces a working command even before `@shippable/mcp-server` lands
+   * on npm. See `resolveInstallCommand` in `server/src/mcp-status.ts`.
+   */
+  installCommand: string;
+}> {
   const res = await fetch(await apiUrl("/api/worktrees/mcp-status"));
   const json = (await res.json()) as
-    | { installed: boolean }
+    | { installed: boolean; installCommand: string }
     | { error: string };
   if (!res.ok || "error" in json) {
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);

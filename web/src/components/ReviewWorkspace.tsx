@@ -121,9 +121,10 @@ export function ReviewWorkspace({
   // ECONNREFUSED and leave the banner stuck "unknown". After ~31s of
   // attempts we give up silently — the install affordance stays visible
   // until the user dismisses it.
-  const [mcpStatus, setMcpStatus] = useState<{ installed: boolean } | null>(
-    null,
-  );
+  const [mcpStatus, setMcpStatus] = useState<{
+    installed: boolean;
+    installCommand: string;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
@@ -727,9 +728,61 @@ export function ReviewWorkspace({
                     )
                     .catch((err: unknown) => {
                       console.error("[shippable] enqueueComment failed:", err);
+                      // Surface the failure as an errored pip; the user can
+                      // click it to retry. The reply itself stays in place
+                      // so nothing is lost.
+                      dispatch({
+                        type: "SET_REPLY_ENQUEUE_ERROR",
+                        targetKey: key,
+                        replyId,
+                        error: true,
+                      });
                     });
                 }
               }
+            }}
+            onRetryReply={(key, replyId) => {
+              // Errored-pip retry path. Looks up the Reply by id, derives
+              // the same {kind,file,lines} the original submit produced,
+              // and re-POSTs /api/agent/enqueue. NO supersedes here — the
+              // original POST never landed an id, so there's no predecessor
+              // to replace. Mirrors the spec from the v0 task list.
+              if (!activeWorktreeSource) return;
+              const target = state.replies[key]?.find((r) => r.id === replyId);
+              if (!target) return;
+              const derived = deriveCommentPayload(key, cs);
+              if (!derived) return;
+              // Optimistically clear the error so the pip flips back to ◌
+              // queued the moment the user clicks; if the retry fails we set
+              // it again on the catch.
+              dispatch({
+                type: "SET_REPLY_ENQUEUE_ERROR",
+                targetKey: key,
+                replyId,
+                error: false,
+              });
+              enqueueComment({
+                worktreePath: activeWorktreeSource.worktreePath,
+                commitSha: activeWorktreeSource.commitSha,
+                comment: { ...derived, body: target.body },
+              })
+                .then((r) =>
+                  dispatch({
+                    type: "PATCH_REPLY_ENQUEUED_ID",
+                    targetKey: key,
+                    replyId,
+                    enqueuedCommentId: r.id,
+                  }),
+                )
+                .catch((err: unknown) => {
+                  console.error("[shippable] retry enqueueComment failed:", err);
+                  dispatch({
+                    type: "SET_REPLY_ENQUEUE_ERROR",
+                    targetKey: key,
+                    replyId,
+                    error: true,
+                  });
+                });
             }}
             onDeleteReply={(key, replyId) => {
               const target = state.replies[key]?.find((r) => r.id === replyId);

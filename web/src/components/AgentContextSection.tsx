@@ -25,8 +25,14 @@ interface Props {
    * guard.
    */
   symbols: SymbolIndex;
-  /** MCP-install detection; null while loading or unsupported. */
-  mcpStatus: { installed: boolean } | null;
+  /**
+   * MCP-install detection + authoritative install line. Null while loading
+   * or after the fetch failed. `installCommand` is rendered verbatim in the
+   * click-to-copy chip — the server resolver picks the local-build form
+   * when `mcp-server/dist/index.js` exists and falls back to the npx form
+   * otherwise.
+   */
+  mcpStatus: { installed: boolean; installCommand: string } | null;
   /** Click on a symbol link → jump to its definition in the diff. */
   onJump: (c: Cursor) => void;
   /** Switch the active session — the parent re-fetches with the new pin. */
@@ -543,17 +549,19 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 // button — for harnesses we can't programmatically detect, that's the only
 // way to clear the prompt.
 //
-// Detection is an `installed: boolean` from the server. The component's own
-// "I'm installed" derivation is `mcpStatus.installed === true OR the user
-// dismissed it locally". Either path collapses to a one-line ✓ marker.
+// Detection is an `installed: boolean` from the server, alongside an
+// authoritative `installCommand` string. Slice-3 follow-up: the chip used
+// to hardcode the npx install line, but until `@shippable/mcp-server`
+// lands on npm that 404s. The server now resolves `mcp-server/dist/index.js`
+// relative to its own source location and hands back the local-build line
+// when present (and the npx form when not).
 
-const INSTALL_LINE_CC = "claude mcp add shippable -- npx -y @shippable/mcp-server";
 const MAGIC_PHRASE = "check shippable";
 
 function McpInstallAffordance({
   mcpStatus,
 }: {
-  mcpStatus: { installed: boolean } | null;
+  mcpStatus: { installed: boolean; installCommand: string } | null;
 }) {
   // Read the dismiss flag synchronously on mount so the install section
   // doesn't briefly flash for users who already dismissed.
@@ -570,7 +578,7 @@ function McpInstallAffordance({
   // when the fetch lands.
   if (mcpStatus === null && !dismissed) return null;
 
-  if ((mcpStatus && mcpStatus.installed) || dismissed) {
+  if (dismissed || (mcpStatus && mcpStatus.installed)) {
     return (
       <div className="ac__mcp ac__mcp--ok">
         <span className="ac__mcp-ok">✓</span>
@@ -578,6 +586,11 @@ function McpInstallAffordance({
       </div>
     );
   }
+  // After the two checks above, the dismiss flag is false AND either
+  // `mcpStatus` is non-null or we've early-returned. Belt-and-suspenders
+  // null-guard so the chip render below can read `installCommand` without
+  // a non-null assertion.
+  if (mcpStatus === null) return null;
 
   function dismiss() {
     try {
@@ -602,7 +615,7 @@ function McpInstallAffordance({
       </div>
       <div className="ac__mcp-row">
         <div className="ac__mcp-label">Install:</div>
-        <CopyChip text={INSTALL_LINE_CC} />
+        <CopyChip text={mcpStatus.installCommand} />
       </div>
       <div className="ac__mcp-row">
         <div className="ac__mcp-label">Then say:</div>

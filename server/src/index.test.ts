@@ -266,14 +266,16 @@ describe("legacy endpoints are gone (slice 5 cleanup)", () => {
 
 describe("GET /api/worktrees/mcp-status (slice 5)", () => {
   // Regardless of whether the local user has `shippable` declared in their
-  // ~/.claude config, the endpoint should return a `{ installed: boolean }`
+  // ~/.claude config, the endpoint should return the `{ installed, installCommand }`
   // shape with no error. The mcp-status helper has its own unit tests for
-  // detection logic; this just confirms the route is wired and returns the
-  // right shape.
-  it("returns { installed: boolean }", async () => {
+  // detection logic and the install-command resolver; this just confirms the
+  // route is wired and returns the right shape.
+  it("returns { installed: boolean; installCommand: string }", async () => {
     const r = await getJson(`${baseUrl}/api/worktrees/mcp-status`);
     expect(r.status).toBe(200);
     expect(typeof r.body.installed).toBe("boolean");
+    expect(typeof r.body.installCommand).toBe("string");
+    expect(r.body.installCommand).toMatch(/^claude mcp add shippable -- /);
   });
 });
 

@@ -92,6 +92,23 @@
   transform: scale(1);
   animation: reply-pip-flip 320ms ease-out;
 }
+.reply__pip--errored {
+  /* Errored pip is button-like: the click triggers a retry, so it gets
+   * cursor: pointer and a hover transition. The flip animation reuses the
+   * delivered keyframes for visual continuity — both are "something
+   * changed" signals. */
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 10.5px;
+  color: var(--red, #d66);
+  cursor: pointer;
+  animation: reply-pip-flip 320ms ease-out;
+}
+.reply__pip--errored:hover {
+  text-decoration: underline;
+}
 @keyframes reply-pip-flip {
   0% {
     transform: scale(0.8);

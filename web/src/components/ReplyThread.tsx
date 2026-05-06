@@ -20,6 +20,13 @@ interface Props {
   onSubmitReply: (body: string) => void;
   /** Delete a reply by id. Only invoked for user-authored replies. */
   onDeleteReply: (replyId: string) => void;
+  /**
+   * Retry the enqueue for a Reply whose previous attempt errored. Wired
+   * to the click on the ⚠ errored pip. Optional — surfaces only on
+   * agent-context-aware threads. Threads without it fall back to the
+   * three-state pip (no pip · ◌ queued · ✓ delivered).
+   */
+  onRetryReply?: (replyId: string) => void;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
   /**
@@ -39,6 +46,7 @@ export function ReplyThread({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
   symbols,
   onJump,
   deliveredById,
@@ -64,13 +72,27 @@ export function ReplyThread({
         </div>
       )}
       <ul className="thread__list">
-        {replies.map((r) => (
+        {replies.map((r) => {
+          // Deleting a reply that's already in the delivered set is local-only
+          // — the agent has already seen it and can't unsee it. The tooltip
+          // makes that distinction visible. (Pre-delivery deletes still hit
+          // /api/agent/unenqueue at the parent.)
+          const enqueuedId = r.enqueuedCommentId ?? null;
+          const isDelivered = !!(enqueuedId && deliveredById?.[enqueuedId]);
+          const deleteTitle = isDelivered
+            ? "the agent already saw this; deleting only removes it from your view."
+            : "delete reply";
+          return (
           <li key={r.id} className="reply">
             <div className="reply__head">
               <span className="reply__author">@{r.author}</span>
               <span className="reply__sep">·</span>
               <span className="reply__time">{timeAgo(r.createdAt)}</span>
-              <ReplyPip reply={r} deliveredById={deliveredById} />
+              <ReplyPip
+                reply={r}
+                deliveredById={deliveredById}
+                onRetry={onRetryReply ? () => onRetryReply(r.id) : undefined}
+              />
               {r.author === "you" && (
                 <button
                   className="reply__delete"
@@ -79,7 +101,7 @@ export function ReplyThread({
                       onDeleteReply(r.id);
                     }
                   }}
-                  title="delete reply"
+                  title={deleteTitle}
                 >
                   × delete
                 </button>
@@ -89,7 +111,8 @@ export function ReplyThread({
               <RichText text={r.body} symbols={symbols} onJump={onJump} />
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
       {isDrafting ? (
         <Composer
@@ -166,47 +189,80 @@ function Composer({
 }
 
 /**
- * Per-reply queued/delivered pip. Three states:
- *   - no pip when `enqueuedCommentId` is null (reply hasn't been enqueued
- *     yet, or the enqueue POST failed — see § Pip semantics);
- *   - `◌ queued` when the id is set but no DeliveredComment with that id
- *     has been observed;
- *   - `✓ delivered` when the delivered map carries the id.
+ * Per-reply pip. Four possible states; the precedence order is fixed:
  *
- * Tooltips are exact strings from the share-review-comments plan. The queued
- * tooltip uses `Reply.createdAt` as the enqueue-time proxy: for fresh replies
- * the two are stamped within milliseconds of each other (the App dispatches
- * ADD_REPLY then fires `enqueueComment` in parallel) and we don't store the
- * enqueue moment locally yet.
+ *   1. `✓ delivered` — when `deliveredById` carries the reply's
+ *      `enqueuedCommentId`. Wins over everything else; if a comment was
+ *      delivered any prior local error is stale and shouldn't render.
+ *   2. `⚠ retry` — when `enqueueError === true` and there's no
+ *      `enqueuedCommentId` yet. Click to re-POST `/api/agent/enqueue`
+ *      *without* `supersedes` (the original POST never landed an id).
+ *   3. `◌ queued` — id is set but not delivered.
+ *   4. (no pip) — null id and no error (replies authored on a non-worktree
+ *      changeset, fresh fixture replies, etc.).
+ *
+ * Tooltips are exact strings from the share-review-comments plan + the
+ * slice-2 errored-pip follow-up. The queued tooltip uses `Reply.createdAt`
+ * as the enqueue-time proxy.
  */
 function ReplyPip({
   reply,
   deliveredById,
+  onRetry,
 }: {
   reply: Reply;
   deliveredById?: Record<string, DeliveredComment>;
+  /** When the parent threads a retry handler in, the errored pip becomes
+   *  a click-to-retry button. Without it the errored state still renders
+   *  (so the user knows something went wrong), but as inert text. */
+  onRetry?: () => void;
 }) {
   const enqueuedId = reply.enqueuedCommentId ?? null;
-  if (!enqueuedId) return null;
-  const delivered = deliveredById?.[enqueuedId] ?? null;
-  if (delivered) {
+  const errored = !!reply.enqueueError;
+  // Delivered wins over everything: the agent has already seen this comment,
+  // so any local error flag is stale.
+  if (enqueuedId) {
+    const delivered = deliveredById?.[enqueuedId] ?? null;
+    if (delivered) {
+      return (
+        <span
+          className="reply__pip reply__pip--delivered"
+          title={`Fetched by your agent at ${formatClock(delivered.deliveredAt)}.`}
+        >
+          ✓ delivered
+        </span>
+      );
+    }
     return (
       <span
-        className="reply__pip reply__pip--delivered"
-        title={`Fetched by your agent at ${formatClock(delivered.deliveredAt)}.`}
+        className="reply__pip reply__pip--queued"
+        title={`Sent to your agent's queue at ${formatClock(reply.createdAt)}.`}
       >
-        ✓ delivered
+        ◌ queued
       </span>
     );
   }
-  return (
-    <span
-      className="reply__pip reply__pip--queued"
-      title={`Sent to your agent's queue at ${formatClock(reply.createdAt)}.`}
-    >
-      ◌ queued
-    </span>
-  );
+  if (errored) {
+    const title = "Couldn't reach your agent — click to retry.";
+    if (onRetry) {
+      return (
+        <button
+          type="button"
+          className="reply__pip reply__pip--errored"
+          title={title}
+          onClick={onRetry}
+        >
+          ⚠ retry
+        </button>
+      );
+    }
+    return (
+      <span className="reply__pip reply__pip--errored" title={title}>
+        ⚠ retry
+      </span>
+    );
+  }
+  return null;
 }
 
 function formatClock(iso: string): string {

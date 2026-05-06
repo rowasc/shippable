@@ -35,10 +35,17 @@ interface RenderOpts {
   delivered?: DeliveredComment[];
   deliveredError?: boolean;
   lastSuccessfulPollAt?: string | null;
-  mcpStatus?: { installed: boolean } | null;
+  mcpStatus?: { installed: boolean; installCommand: string } | null;
 }
 
+const DEFAULT_INSTALL_LINE =
+  "claude mcp add shippable -- node /tmp/test/mcp-server/dist/index.js";
+
 function renderPanel(opts: RenderOpts = {}) {
+  // Default mcpStatus → installed (the panel collapses to the ✓ line).
+  // Tests that exercise the install affordance pass an explicit
+  // `installed: false` shape with a representative installCommand.
+  const defaultMcp = { installed: true, installCommand: DEFAULT_INSTALL_LINE };
   return render(
     <AgentContextSection
       slice={null}
@@ -47,7 +54,7 @@ function renderPanel(opts: RenderOpts = {}) {
       loading={false}
       error={null}
       symbols={empty as unknown as Parameters<typeof AgentContextSection>[0]["symbols"]}
-      mcpStatus={opts.mcpStatus === undefined ? { installed: true } : opts.mcpStatus}
+      mcpStatus={opts.mcpStatus === undefined ? defaultMcp : opts.mcpStatus}
       onJump={noop}
       delivered={opts.delivered ?? []}
       lastSuccessfulPollAt={opts.lastSuccessfulPollAt ?? null}
@@ -185,26 +192,46 @@ describe("AgentContextSection — failure-mode banner", () => {
 });
 
 describe("AgentContextSection — MCP install affordance (slice 5)", () => {
-  it("renders the install section when not detected and not dismissed", () => {
-    const { container } = renderPanel({ mcpStatus: { installed: false } });
+  // Slice-3 follow-up: the install line is no longer hardcoded — the chip
+  // renders whatever `mcpStatus.installCommand` says. Tests pass a
+  // local-build form to assert the value round-trips intact.
+  const LOCAL_BUILD_LINE =
+    "claude mcp add shippable -- node /Users/x/Development/shippable/mcp-server/dist/index.js";
+
+  it("renders the install section with the server-provided install line when not detected and not dismissed", () => {
+    const { container } = renderPanel({
+      mcpStatus: { installed: false, installCommand: LOCAL_BUILD_LINE },
+    });
     const block = container.querySelector(".ac__mcp");
     expect(block).not.toBeNull();
     expect(block?.classList.contains("ac__mcp--ok")).toBe(false);
     // Both copy chips render.
     const chips = container.querySelectorAll(".ac__mcp-chip");
     expect(chips.length).toBe(2);
-    // The install line and magic phrase are both present.
+    // The install line is exactly what the server returned (local-build
+    // form here) and the magic phrase is still rendered verbatim.
     const text = block?.textContent ?? "";
-    expect(text).toContain(
-      "claude mcp add shippable -- npx -y @shippable/mcp-server",
-    );
+    expect(text).toContain(LOCAL_BUILD_LINE);
     expect(text).toContain("check shippable");
     // The dismiss button renders.
     expect(container.querySelector(".ac__mcp-dismiss")).not.toBeNull();
   });
 
+  it("renders the npx form verbatim when the server falls back to it", () => {
+    // When `mcp-server/dist/index.js` is missing, the server falls back to
+    // the npx line. The chip should surface that string unchanged.
+    const NPX = "claude mcp add shippable -- npx -y @shippable/mcp-server";
+    const { container } = renderPanel({
+      mcpStatus: { installed: false, installCommand: NPX },
+    });
+    const text = container.querySelector(".ac__mcp")?.textContent ?? "";
+    expect(text).toContain(NPX);
+  });
+
   it("collapses to '✓ MCP installed' when the server reports installed", () => {
-    const { container } = renderPanel({ mcpStatus: { installed: true } });
+    const { container } = renderPanel({
+      mcpStatus: { installed: true, installCommand: LOCAL_BUILD_LINE },
+    });
     const block = container.querySelector(".ac__mcp--ok");
     expect(block).not.toBeNull();
     expect(block?.textContent).toContain("MCP installed");
@@ -219,7 +246,7 @@ describe("AgentContextSection — MCP install affordance (slice 5)", () => {
 
   it("hides the install section after the user clicks 'I installed it' and persists across remount", () => {
     const { container, unmount } = renderPanel({
-      mcpStatus: { installed: false },
+      mcpStatus: { installed: false, installCommand: LOCAL_BUILD_LINE },
     });
     const dismiss = container.querySelector(
       ".ac__mcp-dismiss",
@@ -238,7 +265,7 @@ describe("AgentContextSection — MCP install affordance (slice 5)", () => {
     // Remount: even with mcpStatus reporting `installed: false` the
     // localStorage flag keeps the affordance collapsed.
     const { container: c2 } = renderPanel({
-      mcpStatus: { installed: false },
+      mcpStatus: { installed: false, installCommand: LOCAL_BUILD_LINE },
     });
     expect(c2.querySelector(".ac__mcp--ok")).not.toBeNull();
     expect(c2.querySelector(".ac__mcp-dismiss")).toBeNull();

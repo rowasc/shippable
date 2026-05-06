@@ -31,9 +31,15 @@ export interface AgentContextProps {
   selectedSessionFilePath: string | null;
   loading: boolean;
   error: string | null;
-  /** Whether a `shippable` MCP entry is detected in the user's Claude
-   *  Code config. `null` while the fetch is in flight or has failed. */
-  mcpStatus: { installed: boolean } | null;
+  /**
+   * Whether a `shippable` MCP entry is detected in the user's Claude
+   * Code config, plus the `claude mcp add …` command the install chip
+   * should display + copy. `null` while the fetch is in flight or has
+   * failed. The `installCommand` field is authoritative — slice-3 follow-up
+   * routes the panel through the server-side resolver so the chip uses
+   * the working local-build line until the npm publish in §7 lands.
+   */
+  mcpStatus: { installed: boolean; installCommand: string } | null;
   /**
    * Newest-first list of delivered comments for this worktree. Drives the
    * Delivered (N) details block at the bottom of the panel and (via the
@@ -97,6 +103,14 @@ interface Props {
    *  user-authored entries; the reducer enforces no other contracts. */
   onDeleteReply: (key: string, replyId: string) => void;
   /**
+   * Retry the enqueue for a Reply whose previous attempt errored. Wired
+   * from the errored pip in ReplyThread. The handler in the parent looks
+   * up the Reply by id, re-derives the payload, and POSTs without
+   * `supersedes` — the original POST never landed an id, so there's no
+   * predecessor to replace.
+   */
+  onRetryReply: (key: string, replyId: string) => void;
+  /**
    * Open the runner for a given AI note's `runRecipe`. Wired to the
    * `▷ verify` button rendered on notes that have a recipe attached;
    * notes without one don't render the button.
@@ -121,6 +135,7 @@ export function Inspector({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
   onVerifyAiNote,
   agentContext,
 }: Props) {
@@ -234,6 +249,9 @@ export function Inspector({
                 onDeleteReply={(replyId) =>
                   onDeleteReply(row.replyKey, replyId)
                 }
+                onRetryReply={(replyId) =>
+                  onRetryReply(row.replyKey, replyId)
+                }
                 onVerify={() => {
                   if (row.runRecipe) onVerifyAiNote(row.runRecipe);
                 }}
@@ -261,6 +279,9 @@ export function Inspector({
           onDeleteReply={(replyId) =>
             onDeleteReply(vm.aiSummaryReplyKey!, replyId)
           }
+          onRetryReply={(replyId) =>
+            onRetryReply(vm.aiSummaryReplyKey!, replyId)
+          }
         />
       )}
 
@@ -278,6 +299,9 @@ export function Inspector({
           onDeleteReply={(replyId) =>
             onDeleteReply(vm.teammate!.replyKey, replyId)
           }
+          onRetryReply={(replyId) =>
+            onRetryReply(vm.teammate!.replyKey, replyId)
+          }
         />
       )}
 
@@ -293,6 +317,7 @@ export function Inspector({
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         onDeleteReply={onDeleteReply}
+        onRetryReply={onRetryReply}
       />
     </aside>
   );
@@ -310,6 +335,7 @@ function UserCommentsSection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
 }: {
   vm: InspectorViewModel;
   symbols: SymbolIndex;
@@ -322,6 +348,7 @@ function UserCommentsSection({
   onChangeDraft: (key: string, body: string) => void;
   onSubmitReply: (key: string, body: string) => void;
   onDeleteReply: (key: string, replyId: string) => void;
+  onRetryReply: (key: string, replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -367,6 +394,9 @@ function UserCommentsSection({
               onDeleteReply={(replyId) =>
                 onDeleteReply(vm.draftStubRow!.threadKey, replyId)
               }
+              onRetryReply={(replyId) =>
+                onRetryReply(vm.draftStubRow!.threadKey, replyId)
+              }
             />
           )}
           {vm.userCommentRows.map((row) => (
@@ -392,6 +422,9 @@ function UserCommentsSection({
               onCloseDraft={onCloseDraft}
               onChangeDraft={(body) => onChangeDraft(row.threadKey, body)}
               onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
+              onRetryReply={(replyId) =>
+                onRetryReply(row.threadKey, replyId)
+              }
               onDeleteReply={(replyId) =>
                 onDeleteReply(row.threadKey, replyId)
               }
@@ -415,6 +448,7 @@ function UserThreadCard({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
 }: {
   row: UserCommentRowItem;
   symbols: SymbolIndex;
@@ -427,6 +461,7 @@ function UserThreadCard({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  onRetryReply: (replyId: string) => void;
 }) {
   return (
     <li
@@ -465,6 +500,7 @@ function UserThreadCard({
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         onDeleteReply={onDeleteReply}
+        onRetryReply={onRetryReply}
         symbols={symbols}
         onJump={onJump}
         deliveredById={deliveredById}
@@ -487,6 +523,7 @@ function NoteCard({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
   onVerify,
 }: {
   row: AiNoteRowItem;
@@ -503,6 +540,7 @@ function NoteCard({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  onRetryReply: (replyId: string) => void;
   /**
    * Open the runner pre-loaded with this note's recipe. Only invoked
    * when row.runRecipe is defined; the button is hidden otherwise.
@@ -566,6 +604,7 @@ function NoteCard({
         onChangeDraft={onChangeDraft}
         onSubmitReply={onSubmitReply}
         onDeleteReply={onDeleteReply}
+        onRetryReply={onRetryReply}
         symbols={symbols}
         onJump={onJump}
         deliveredById={deliveredById}
@@ -588,6 +627,7 @@ function HunkSummarySection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
 }: {
   summary: string;
   replies: Reply[];
@@ -603,6 +643,7 @@ function HunkSummarySection({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  onRetryReply: (replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -624,6 +665,7 @@ function HunkSummarySection({
           onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
           onDeleteReply={onDeleteReply}
+          onRetryReply={onRetryReply}
           symbols={symbols}
           onJump={onJump}
           deliveredById={deliveredById}
@@ -644,6 +686,7 @@ function TeammateSection({
   onChangeDraft,
   onSubmitReply,
   onDeleteReply,
+  onRetryReply,
 }: {
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
@@ -655,6 +698,7 @@ function TeammateSection({
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
   onDeleteReply: (replyId: string) => void;
+  onRetryReply: (replyId: string) => void;
 }) {
   return (
     <section className="inspector__sec">
@@ -683,6 +727,7 @@ function TeammateSection({
           onChangeDraft={onChangeDraft}
           onSubmitReply={onSubmitReply}
           onDeleteReply={onDeleteReply}
+          onRetryReply={onRetryReply}
           symbols={symbols}
           onJump={onJump}
           deliveredById={deliveredById}

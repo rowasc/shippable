@@ -92,12 +92,12 @@ Authoring a thread comment or composer message posts immediately. No Send button
   - `fetchDelivered(worktreePath): Promise<DeliveredComment[]>` — used by slice 4.
   - Type definitions live in `web/src/types.ts` next to `Reply`.
 
-- [~] **Author flow: thread comments.**
+- [x] **Author flow: thread comments.**
   - On submit (Cmd/Ctrl+Enter or click): add the new `Reply` to `ReviewState.replies` with `enqueuedCommentId: null`, then POST `/api/agent/enqueue` in parallel. On success, dispatch a small reducer action that patches the id onto that Reply. On failure, leave the id null and surface a "Save again" affordance on the thread.
   - Skip the enqueue POST entirely when the active `ChangeSet.worktreeSource` is null (URL-ingest, paste, file upload). Reply still saves locally; pip never appears.
   - Touch points: wherever each thread renders its composer today — `ReplyThread.tsx` and the AI-note inline UI. Plain Enter still inserts a newline; the existing send button stays.
   - **Follow-up:**
-    - [ ] **Save-again affordance.** When a Reply has `enqueuedCommentId === null` *and* its parent ChangeSet has a `worktreeSource` (i.e. enqueue should have happened but didn't), render a "save again" button on the reply that re-POSTs `/api/agent/enqueue` without `supersedes`. Discriminator: replies authored on a non-worktree changeset never had a chance to enqueue and don't show the affordance; failed enqueues do. Today only a `console.error` runs on failure (`web/src/App.tsx:703`). Touch points: `ReplyThread.tsx` (render the button next to the pip slot), `App.tsx` (the retry handler — same shape as `onSubmitReply`'s enqueue path, minus the local-add).
+    - [x] **Errored pip + retry (replaces "Save again" affordance).** Failed enqueues now flip the Reply's `enqueueError` flag; the pip renders as `⚠ retry` and clicking it re-POSTs `/api/agent/enqueue` without `supersedes` (the original POST never landed an id). Pip precedence is fixed: `✓ delivered` wins over everything (delivered = source of truth — once the agent has the comment any local error is stale), then `◌ queued` if an id is set, then `⚠ retry` if the error flag is on, else no pip. Touch points landed in `web/src/components/ReplyThread.tsx` (errored pip render + click handler), `web/src/components/ReviewWorkspace.tsx` (the `onRetryReply` handler threaded through Inspector → ReplyThread), `web/src/state.ts` (`SET_REPLY_ENQUEUE_ERROR` reducer action), `web/src/types.ts` (`Reply.enqueueError`).
 
 - [x] **Author flow: free-form composer.**
   - The `SendToAgent` component's `submit()` builds a single `kind: "freeform"` comment (no `file`/`lines`, body = the textarea text) and posts to `/api/agent/enqueue`.
@@ -113,12 +113,12 @@ Authoring a thread comment or composer message posts immediately. No Send button
     - [ ] **Wire `enqueueComment` with `supersedes`.** In an `App.tsx` `onEditReply` handler, POST `enqueueComment` with `supersedes: <previous enqueuedCommentId>` and patch the new id onto the Reply via the existing `PATCH_REPLY_ENQUEUED_ID`. If the previous `enqueuedCommentId` was null (no predecessor — failed enqueue or pre-MCP record), retry without `supersedes`.
     - [ ] **Component test.** Edit on an enqueued Reply → `enqueueComment` called with `supersedes` set to the prior id; pip resets to ◌ then flips to ✓ when delivery lands. Lives in `ReplyThread.test.tsx` next to the existing pip-state tests.
 
-- [~] **Delete flow.**
+- [x] **Delete flow.**
   - Reply has `enqueuedCommentId` and *not* in `deliveredIds`: POST `/api/agent/unenqueue`, then remove the local Reply.
   - Reply is in `deliveredIds`: local-only. Confirm dialog or tooltip: "the agent already saw this; deleting only removes it from your view."
   - Reply has `enqueuedCommentId === null`: local-only, no server call.
   - **Follow-up:**
-    - [ ] **Delivered-delete tooltip.** When a Reply's `enqueuedCommentId` is in the delivered set, the delete button's `title` should read exactly `the agent already saw this; deleting only removes it from your view.`. Today the title is the generic `delete reply` (`web/src/components/ReplyThread.tsx:75`). The button already lives in a render path that has access to `deliveredById` (threaded in for pip rendering), so this is a small conditional title swap, no new prop plumbing.
+    - [x] **Delivered-delete tooltip.** Implemented at `web/src/components/ReplyThread.tsx`: the delete button's `title` reads `the agent already saw this; deleting only removes it from your view.` when the reply's `enqueuedCommentId` is in the delivered set, and the original `delete reply` otherwise. `deliveredById` was already in scope from the pip render, so no new prop plumbing was needed.
 
 - [x] **Tests — reducer (vitest, no DOM).** Whichever reducer file owns `ReviewState.replies` mutations gets:
   - new-reply action stores `enqueuedCommentId: null`; the patch-id action sets it.
@@ -128,9 +128,9 @@ Authoring a thread comment or composer message posts immediately. No Send button
 
 - [~] **Tests — component (vitest + Testing Library).** `ReplyThread.test.tsx`, `SendToAgent.test.tsx`, and `AgentContextSection.test.tsx`:
   - **Pending sub-bullets that block on the UI work above:**
-    - [ ] submit failure → "Save again" affordance renders; second click retries the enqueue *without* `supersedes`. Blocked on Author-flow Save-again follow-up.
+    - [x] submit failure → errored-pip retry renders; clicking it triggers the parent's `onRetryReply` (which re-POSTs *without* `supersedes`). Lives in `web/src/components/ReplyThread.test.tsx` § "errored pip + retry".
     - [ ] edit on an enqueued Reply → enqueue called again with `supersedes` set to the prior id. Blocked on Edit-flow subtasks.
-    - [ ] delete on a delivered Reply → no network call; tooltip reads exactly `the agent already saw this; deleting only removes it from your view.`. Blocked on Delete-flow follow-up.
+    - [x] delete on a delivered Reply: tooltip reads exactly `the agent already saw this; deleting only removes it from your view.`. Lives in `ReplyThread.test.tsx` § "delete-button tooltip". (No-network-call test still blocked on the higher-level workspace test wiring; the spec string is pinned where the user sees it.)
   - submit on thread composer with worktree loaded → `enqueueComment` called once with the right shape (incl. `commitSha` from the active `WorktreeSource`); reply renders without a pip until the resolved id lands.
   - submit on thread composer with no worktree loaded → no network call; Reply still appears in the thread.
   - **agent-feedback panel is hidden entirely when `ChangeSet.worktreeSource` is null** (composer, install affordance, delivered block all absent — § Authoring "Panel renders only when a worktree is loaded").
@@ -157,15 +157,15 @@ A tiny TypeScript MCP server. Lives in its own package so users install it via t
   - Body: POST `/api/agent/pull` with the resolved `worktreePath` to `http://127.0.0.1:<port>`. Port resolution: `SHIPPABLE_PORT` env var if set, else the dev-server default. The `mcp add` install line surfaced in slice 5 always passes `SHIPPABLE_PORT` explicitly so the user has one source of truth; the env-var fallback is the authoritative path. Confirm the dev-server default matches `server/src/index.ts` at implementation time and pin it as a constant in both the server and `mcp-server`.
   - Output: the `payload` string from `/api/agent/pull` as the tool result text. If empty, return a short "No pending comments." string so the model doesn't hallucinate.
 
-- [~] **Install line.** Documented in the README and surfaced by slice 5's onboarding affordance:
-  - Claude Code: `claude mcp add shippable -- npx -y @shippable/mcp-server` (final shape lands during slice 3 implementation; verify against the version of CC we target).
+- [x] **Install line.** Documented in the README and surfaced by slice 5's onboarding affordance:
+  - Claude Code: until `@shippable/mcp-server` ships on npm, the panel chip + README primary line use the local-build form `claude mcp add shippable -- node <abs>/mcp-server/dist/index.js`. The server-side resolver in `server/src/mcp-status.ts` walks up from `import.meta.url` to find `mcp-server/dist/index.js`; if present → local-build form, else → npx fallback (with a one-time `console.warn` to nudge `npm run build`). The endpoint now returns `{ installed, installCommand }`; the affordance copies whatever the server hands back.
   - Codex CLI: equivalent `codex mcp add` form.
   - Cursor / Cline / others: their respective config-snippet form.
 
   **Caveat:** the install line must encode the port if it's not the default. § Transport security in the plan calls this out — if the user changes `PORT` later they re-run `mcp add` with the new port.
 
   **Follow-up:**
-  - [ ] **Switch the affordance + README to the local-build install line.** Until `@shippable/mcp-server` ships on npm, the `npx -y @shippable/mcp-server` form 404s. The panel's install chip and the README's primary install line should be `claude mcp add shippable -- node <absolute-path>/mcp-server/dist/index.js`. The affordance can't hard-code an absolute path, so `server/src/mcp-status.ts` resolves it from `mcp-server/dist/index.js` relative to its own source location (`import.meta.url`) and the endpoint returns it alongside `{ installed }` (e.g. `{ installed, installCommand }`); the affordance copies whatever the server returns. README keeps both forms but leads with the local-build one and labels the npx line as "once published". Switching back happens automatically when the npm publish (§7) lands and the resolver short-circuits to the npx form.
+  - [x] **Switched the affordance + README to the local-build install line.** Server resolver landed in `server/src/mcp-status.ts` (`resolveInstallCommand`); endpoint contract widened to `{ installed, installCommand }`. Web client (`agentContextClient.ts`, `AgentContextSection.tsx`) now reads the install line from `mcpStatus.installCommand` instead of hardcoding it. README leads with the local-build form and demotes the npx form to "once published". Switching back to npx happens automatically when the npm publish in §7 lands and the resolver short-circuits.
 
 - [x] **Tests — `mcp-server/src/tool.test.ts` (vitest).** *(landed as `mcp-server/src/handler.test.ts` — same scope, renamed during implementation)*
   - Tool handler with a mocked `fetch` against `/api/agent/pull` returns the upstream payload as the tool result.
@@ -228,11 +228,11 @@ Replaces the hook-install affordance and deletes the file-based mechanism.
   - Both the install line and the magic phrase are click-to-copy with a small "copied ✓" feedback.
   - Hides entirely when `ChangeSet.worktreeSource` is null (panel-level rule from § Authoring).
 
-- [~] **Detection.**
+- [x] **Detection.**
   - Claude Code: parse the relevant CC config (whatever lives next to `~/.claude/settings.local.json` for MCP entries — verify against the current CC version when implementing). If a `shippable` MCP entry is found, collapse the install section to a small "MCP installed ✓" line.
   - Other harnesses: no programmatic detection — render an **"I installed it"** dismiss button that hides the section. The dismiss state is persisted in localStorage per-machine (one flag), not per-worktree, not per-account.
   - **Follow-up (caught during smoke-test):**
-    - [ ] **Read `~/.claude.json` too.** `claude mcp add shippable …` writes to `~/.claude.json` (top-level `mcpServers` for `--scope user`, or `projects.<absolute-path>.mcpServers` for project-scoped installs), *not* `~/.claude/settings.json` / `~/.claude/settings.local.json`. The current detection in `server/src/mcp-status.ts` reads only the latter two and so misses installed entries. Extend the helper to also load `~/.claude.json` and look for a `shippable` key in both the top-level `mcpServers` and (defensively) under `projects.*.mcpServers`. Malformed/missing → still `{ installed: false }`. Surfaced when smoke-testing slice 5: the panel kept showing the install affordance after a successful `claude mcp add`.
+    - [x] **Read `~/.claude.json` too.** `server/src/mcp-status.ts` now also walks `~/.claude.json`: top-level `mcpServers.shippable` (catches `--scope user` installs) and every value of `projects.*.mcpServers` (project-scoped installs land under `projects["<abs-cwd>"]`). Defensive variants `mcp_servers` / `mcp` are also accepted. Missing file / malformed JSON / non-object root all collapse to the same `{ installed: false }` no-throw path. Tests in `server/src/mcp-status.test.ts` § "~/.claude.json (user + project scope)" cover top-level hit, project-scope hit, missing file, malformed file, project-with-no-shippable, and short-circuit semantics.
 
 - [x] **Delete file-based push mechanism.**
   - Remove `server/src/inbox.ts` (incl. `ensureExclude`, `inboxStatus`, `writeInbox`).
