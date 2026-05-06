@@ -14,8 +14,11 @@ This setup follows the
 path: a small `Dockerfile` plus the
 [Claude Code Dev Container Feature](https://github.com/anthropics/devcontainer-features/tree/main/src/claude-code).
 The Feature installs the CLI; the Dockerfile only adds the dependencies the
-firewall script needs and wires up sudo. `init-firewall.sh` is copied verbatim
-from the [reference container](https://github.com/anthropics/claude-code/tree/main/.devcontainer).
+firewall script needs and wires up sudo. `init-firewall.sh` started as a
+copy of the [reference container](https://github.com/anthropics/claude-code/tree/main/.devcontainer)
+script with the allowlist tightened (no GitHub, no telemetry, no SSH). It's
+installed in the image as `/usr/local/bin/sandbox-firewall.sh` to avoid
+collision with the Feature's own bundled `init-firewall.sh`.
 
 | File                  | Why it's here                                                              |
 | --------------------- | -------------------------------------------------------------------------- |
@@ -68,6 +71,28 @@ npx -y @devcontainers/cli exec --workspace-folder . sudo iptables -L OUTPUT -n
 If `OUTPUT` shows `policy ACCEPT`, the firewall didn't run — check `up`'s
 output for a `postStartCommand` failure and re-run with
 `--remove-existing-container`.
+
+## Sharing host skills/agents/commands
+
+Your global `~/.claude/skills/` is bind-mounted read-only at
+`/home/node/.claude/skills` so the same skills you use on the host are
+available inside the container. Auth, settings, and history stay in the
+per-container volume.
+
+To share other parts of your host config (also read-only), add to `mounts`
+in `devcontainer.json`:
+
+```json
+"source=${localEnv:HOME}/.claude/agents,target=/home/node/.claude/agents,type=bind,readonly",
+"source=${localEnv:HOME}/.claude/commands,target=/home/node/.claude/commands,type=bind,readonly",
+"source=${localEnv:HOME}/.claude/CLAUDE.md,target=/home/node/.claude/CLAUDE.md,type=bind,readonly",
+```
+
+Don't bind-mount the *whole* `~/.claude` — that pulls in your auth token
+and session history, which defeats most of the per-container isolation.
+
+A `.claude/skills/` directory inside the repo is already visible via the
+workspace bind mount, no extra config needed.
 
 ## VS Code
 
