@@ -37,45 +37,21 @@ reach `https://example.com` (should be blocked) or can't reach
 
 ## Run it
 
-You need a working `docker` CLI talking to a working Docker engine. On
-macOS the easiest free option is [Colima](https://github.com/abiosoft/colima);
-Docker Desktop also works. Podman's `applehv` VM doesn't ship `ipset`
-kernel modules, so it can't run this firewall — use Colima instead.
-
-One-time setup:
-
-```sh
-brew install docker colima
-colima start --cpu 2 --memory 4 --disk 30
-docker ps                            # sanity check: empty list, no error
-```
-
-After reboot, `colima start` again (the `--cpu`/`--memory` flags only
-apply on first start — subsequent starts reuse the existing VM).
-
-Build and start the container (slow first time — apt install + Feature
-install):
+With a working `docker` CLI pointing at a running engine:
 
 ```sh
 npx -y @devcontainers/cli up --workspace-folder .
-```
-
-Run Claude inside it:
-
-```sh
 npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions
 ```
 
-A handy alias for daily use:
+Handy alias:
 
 ```sh
-echo "alias yolo='npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions'" >> ~/.zshrc
-source ~/.zshrc
-yolo
+alias yolo='npx -y @devcontainers/cli exec --workspace-folder . claude --dangerously-skip-permissions'
 ```
 
-Re-run `up` only when you've edited `.devcontainer/` (use
-`--remove-existing-container` to force a fresh build) or after a reboot.
+Re-run `up` after editing `.devcontainer/` (add `--remove-existing-container`
+to force a fresh build).
 
 ## Verify the firewall is active
 
