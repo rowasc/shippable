@@ -7,7 +7,6 @@ import type {
   DeliveredComment,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
-import { fetchInboxStatus } from "../agentContextClient";
 
 interface Props {
   slice: AgentContextSlice | null;
@@ -26,20 +25,14 @@ interface Props {
    * guard.
    */
   symbols: SymbolIndex;
-  /** Hook-installation status; null while loading or unsupported. */
-  hookStatus: { installed: boolean } | null;
+  /** MCP-install detection; null while loading or unsupported. */
+  mcpStatus: { installed: boolean } | null;
   /** Click on a symbol link → jump to its definition in the diff. */
   onJump: (c: Cursor) => void;
   /** Switch the active session — the parent re-fetches with the new pin. */
   onPickSession: (sessionFilePath: string) => void;
   /** Manually re-run the fetch (after an error, or to refresh on demand). */
   onRefresh: () => void;
-  /**
-   * Worktree path for inbox-status polling after a send. Same value that
-   * the parent uses to route `onSendToAgent` — passing it explicitly so the
-   * composer can poll without reaching into the slice.
-   */
-  worktreePath: string;
   /**
    * Delivered comments for this worktree (newest first). Drives the
    * Delivered (N) details block between the transcript tail and the
@@ -59,18 +52,17 @@ interface Props {
    */
   deliveredError: boolean;
   /**
-   * Send a message to the agent's inbox. Resolves when the message has
-   * landed in `<worktree>/.shippable/inbox.md`; the agent picks it up on
-   * its next prompt boundary via the UserPromptSubmit hook.
+   * Send a freeform message to the agent. Resolves once the comment has
+   * been enqueued; the agent picks it up the next time it calls the MCP
+   * pull tool (typically via the `check shippable` magic phrase). Failures
+   * propagate — the composer surfaces them inline.
    */
   onSendToAgent: (message: string) => Promise<void>;
-  /**
-   * Merge the UserPromptSubmit hook entry into ~/.claude/settings.json.
-   * Returns whether the file was actually modified (it's idempotent if our
-   * hook was already there) and the path of any backup written.
-   */
-  onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
 }
+
+/** localStorage key for the "I installed it" dismiss flag. One flag per
+ *  machine — not per-worktree, not per-account. */
+const MCP_DISMISS_KEY = "shippable.mcpInstallDismissed";
 
 export function AgentContextSection({
   slice,
@@ -79,16 +71,14 @@ export function AgentContextSection({
   loading,
   error,
   symbols,
-  hookStatus,
+  mcpStatus,
   onJump,
-  worktreePath,
   delivered,
   lastSuccessfulPollAt,
   deliveredError,
   onPickSession,
   onRefresh,
   onSendToAgent,
-  onInstallHook,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -113,6 +103,9 @@ export function AgentContextSection({
           {loading ? "…" : "↻"}
         </button>
       </div>
+
+      <McpInstallAffordance mcpStatus={mcpStatus} />
+
       {/* Server-restart hint — single line, rendered once when a worktree
         * is loaded. Inspector only mounts this section in that case, so
         * the hint follows the panel's lifecycle automatically. */}
@@ -168,14 +161,7 @@ export function AgentContextSection({
 
       <DeliveredBlock delivered={delivered} />
 
-      {hookStatus && !hookStatus.installed && (
-        <HookHint onInstall={onInstallHook} />
-      )}
-      <SendToAgent
-        worktreePath={worktreePath}
-        onSend={onSendToAgent}
-        onDelivered={onRefresh}
-      />
+      <SendToAgent onSend={onSendToAgent} />
     </section>
   );
 }
@@ -234,77 +220,18 @@ function clipBody(body: string, max: number): string {
 type SendStatus =
   | { kind: "idle" }
   | { kind: "sending" }
-  | { kind: "queued"; sentAt: number }
-  | { kind: "delivered"; deliveredAt: number; latencyMs: number }
   | { kind: "error"; message: string };
 
-const POLL_INTERVAL_MS = 2000;
-// Stop polling after this many ms in case the agent never runs again.
-// 5 minutes is generous; the user can re-send to restart the wait.
-const POLL_TIMEOUT_MS = 5 * 60 * 1000;
-
 function SendToAgent({
-  worktreePath,
   onSend,
-  onDelivered,
 }: {
-  worktreePath: string;
   onSend: (m: string) => Promise<void>;
-  onDelivered: () => void;
 }) {
+  // Slice 5 collapsed the legacy inbox-file polling. The composer now
+  // simply enqueues — once the agent calls the MCP tool, the message
+  // appears in the Delivered (N) block via the slice-4 polling hook.
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<SendStatus>({ kind: "idle" });
-  // Surfaces transient poll failures (e.g. server restarting, ECONNREFUSED)
-  // inline. Cleared on the next successful poll. Without this the UI looks
-  // identical to "still queued" while polling is silently failing.
-  const [pollError, setPollError] = useState<string | null>(null);
-
-  // Pull sentAt out before the effect so it's part of the dep array without
-  // tripping the discriminated-union narrowing. null disables the effect.
-  const queuedSentAt = status.kind === "queued" ? status.sentAt : null;
-
-  // While in "queued", poll the inbox file. The hook deletes it when it
-  // fires, so disappearance = "delivered to a fresh prompt." Effect body
-  // stays sync-setState-free; the setIntervals are async callbacks.
-  useEffect(() => {
-    if (queuedSentAt === null) return;
-    const sentAt = queuedSentAt;
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      if (Date.now() - sentAt > POLL_TIMEOUT_MS) {
-        // Stop polling; leave status at queued. User can re-send to retry.
-        window.clearInterval(id);
-        return;
-      }
-      try {
-        const s = await fetchInboxStatus(worktreePath);
-        if (cancelled) return;
-        setPollError(null);
-        if (!s.exists) {
-          const now = Date.now();
-          setStatus({
-            kind: "delivered",
-            deliveredAt: now,
-            latencyMs: now - sentAt,
-          });
-          window.clearInterval(id);
-          onDelivered();
-        }
-      } catch (e) {
-        if (cancelled) return;
-        // Surface the failure but keep polling — server probably restarting.
-        const msg = e instanceof Error ? e.message : String(e);
-        setPollError(/ECONNREFUSED|HTTP/.test(msg) ? "server unreachable" : msg);
-      }
-    };
-    const id = window.setInterval(tick, POLL_INTERVAL_MS);
-    void tick(); // immediate first check
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [queuedSentAt, worktreePath, onDelivered]);
 
   async function submit() {
     const body = draft.trim();
@@ -313,7 +240,7 @@ function SendToAgent({
     try {
       await onSend(body);
       setDraft("");
-      setStatus({ kind: "queued", sentAt: Date.now() });
+      setStatus({ kind: "idle" });
     } catch (e) {
       setStatus({
         kind: "error",
@@ -330,11 +257,9 @@ function SendToAgent({
         value={draft}
         onChange={(e) => {
           setDraft(e.target.value);
-          if (status.kind !== "sending" && status.kind !== "queued") {
-            setStatus({ kind: "idle" });
-          }
+          if (status.kind === "error") setStatus({ kind: "idle" });
         }}
-        placeholder="Reply to the agent. Delivered on its next prompt boundary."
+        placeholder="Reply to the agent. Delivered when the agent runs `check shippable`."
         rows={3}
         disabled={status.kind === "sending"}
         onKeyDown={(e) => {
@@ -353,19 +278,6 @@ function SendToAgent({
           {status.kind === "sending" ? "Sending…" : "Send"}
         </button>
         <span className="ac__send-status">
-          {status.kind === "queued" && (
-            <span className="ac__send-queued">
-              ◌ queued — waiting for the agent's next prompt
-              {pollError && (
-                <span className="ac__send-pollerr"> · {pollError}</span>
-              )}
-            </span>
-          )}
-          {status.kind === "delivered" && (
-            <span className="ac__send-delivered">
-              ✓ delivered ({humanLatency(status.latencyMs)})
-            </span>
-          )}
           {status.kind === "error" && (
             <span className="ac__send-err">error: {status.message}</span>
           )}
@@ -376,12 +288,6 @@ function SendToAgent({
       </div>
     </div>
   );
-}
-
-function humanLatency(ms: number): string {
-  if (ms < 1000) return `<1s`;
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.round(ms / 60_000)}m`;
 }
 
 /**
@@ -628,119 +534,128 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
   return out;
 }
 
-function HookHint({
-  onInstall,
-}: {
-  onInstall: () => Promise<{ didModify: boolean; backupPath: string | null }>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [installState, setInstallState] = useState<
-    | { kind: "idle" }
-    | { kind: "installing" }
-    | { kind: "done"; didModify: boolean; backupPath: string | null }
-    | { kind: "error"; message: string }
-  >({ kind: "idle" });
-  const [copied, setCopied] = useState(false);
+// ── MCP install affordance ────────────────────────────────────────────────
+//
+// Renders prominently at the top of the panel when the server hasn't seen a
+// `shippable` MCP entry in the user's Claude Code config and the user
+// hasn't manually dismissed the prompt. Two click-to-copy boxes: the
+// install command and the magic phrase. Plus an "I installed it" dismiss
+// button — for harnesses we can't programmatically detect, that's the only
+// way to clear the prompt.
+//
+// Detection is an `installed: boolean` from the server. The component's own
+// "I'm installed" derivation is `mcpStatus.installed === true OR the user
+// dismissed it locally". Either path collapses to a one-line ✓ marker.
 
-  async function copy() {
+const INSTALL_LINE_CC = "claude mcp add shippable -- npx -y @shippable/mcp-server";
+const MAGIC_PHRASE = "check shippable";
+
+function McpInstallAffordance({
+  mcpStatus,
+}: {
+  mcpStatus: { installed: boolean } | null;
+}) {
+  // Read the dismiss flag synchronously on mount so the install section
+  // doesn't briefly flash for users who already dismissed.
+  const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
-      await navigator.clipboard.writeText(HOOK_SNIPPET);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      return window.localStorage.getItem(MCP_DISMISS_KEY) === "1";
     } catch {
-      setCopied(false);
+      return false;
     }
+  });
+
+  // While mcpStatus is still loading and the user hasn't dismissed yet,
+  // render nothing — better than a flash of "set up" copy that disappears
+  // when the fetch lands.
+  if (mcpStatus === null && !dismissed) return null;
+
+  if ((mcpStatus && mcpStatus.installed) || dismissed) {
+    return (
+      <div className="ac__mcp ac__mcp--ok">
+        <span className="ac__mcp-ok">✓</span>
+        <span className="ac__mcp-ok-text">MCP installed</span>
+      </div>
+    );
   }
 
-  async function install() {
-    setInstallState({ kind: "installing" });
+  function dismiss() {
     try {
-      const res = await onInstall();
-      setInstallState({
-        kind: "done",
-        didModify: res.didModify,
-        backupPath: res.backupPath,
-      });
-    } catch (e) {
-      setInstallState({
-        kind: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
+      window.localStorage.setItem(MCP_DISMISS_KEY, "1");
+    } catch {
+      // Best-effort: if storage is wedged the panel keeps re-rendering the
+      // affordance, which is annoying but not broken.
     }
+    setDismissed(true);
   }
 
   return (
-    <div className="ac__hook">
-      <div className="ac__hook-line">
-        <span className="ac__hook-icon" aria-hidden>
-          ⚠
+    <div className="ac__mcp">
+      <div className="ac__mcp-line">
+        <span className="ac__mcp-icon" aria-hidden>
+          ⚙
         </span>
-        <span className="ac__hook-text">
-          Inbox hook not detected — feedback will sit in the inbox until your
-          next Claude Code session reads it.
+        <span className="ac__mcp-text">
+          Install the Shippable MCP server so your agent can fetch review
+          comments.
         </span>
+      </div>
+      <div className="ac__mcp-row">
+        <div className="ac__mcp-label">Install:</div>
+        <CopyChip text={INSTALL_LINE_CC} />
+      </div>
+      <div className="ac__mcp-row">
+        <div className="ac__mcp-label">Then say:</div>
+        <CopyChip text={MAGIC_PHRASE} />
+      </div>
+      <div className="ac__mcp-actions">
         <button
-          className="ac__hook-toggle"
-          onClick={() => setOpen((v) => !v)}
+          className="ac__mcp-dismiss"
+          onClick={dismiss}
+          title="hide this prompt — persisted per-machine"
         >
-          {open ? "hide setup" : "set up"}
+          I installed it
         </button>
       </div>
-      {open && (
-        <div className="ac__hook-body">
-          <div className="ac__hook-actions">
-            <button
-              className="ac__hook-install"
-              onClick={() => void install()}
-              disabled={installState.kind === "installing"}
-              title="merge the hook entry into ~/.claude/settings.json"
-            >
-              {installState.kind === "installing" ? "Installing…" : "Install for me"}
-            </button>
-            <button className="ac__hook-copy" onClick={() => void copy()}>
-              {copied ? "Copied" : "Copy snippet"}
-            </button>
-            <span className="ac__hook-or">or paste manually:</span>
-          </div>
-          <pre className="ac__hook-snippet">{HOOK_SNIPPET}</pre>
-          {installState.kind === "done" && (
-            <div className="ac__hook-result">
-              {installState.didModify
-                ? `Done. ~/.claude/settings.json updated${
-                    installState.backupPath
-                      ? ` (backup at ${installState.backupPath}).`
-                      : "."
-                  }`
-                : "Already installed — nothing to change."}
-            </div>
-          )}
-          {installState.kind === "error" && (
-            <div className="ac__hook-result ac__hook-result--err">
-              Install failed: {installState.message}. Use the snippet above.
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
-const HOOK_SNIPPET = `// add to ~/.claude/settings.json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<absolute path>/tools/shippable-inbox-hook"
-          }
-        ]
-      }
-    ]
+/** Click-to-copy chip with a brief "copied ✓" feedback. */
+function CopyChip({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  // Cancel the timer on unmount so we don't setState after the panel
+  // re-renders without us.
+  useEffect(() => {
+    if (!copied) return;
+    const id = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(id);
+  }, [copied]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // Clipboard denied (insecure context, permission, etc.). Leave the
+      // state alone so the user can copy by hand.
+    }
   }
-}`;
+
+  return (
+    <button
+      type="button"
+      className={`ac__mcp-chip${copied ? " ac__mcp-chip--copied" : ""}`}
+      onClick={() => void copy()}
+      title="click to copy"
+    >
+      <code className="ac__mcp-chip-code">{text}</code>
+      <span className="ac__mcp-chip-feedback">
+        {copied ? "copied ✓" : "copy"}
+      </span>
+    </button>
+  );
+}
 
 function Footer({ slice }: { slice: AgentContextSlice }) {
   const parts: string[] = [];

@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
-// Component tests for the AgentContextSection panel-level features added
-// in slice 4: server-restart hint, Delivered (N) block, and the
-// failure-mode banner.
+// Component tests for the AgentContextSection panel-level features:
+// - server-restart hint (slice 4)
+// - Delivered (N) block (slice 4)
+// - failure-mode banner (slice 4)
+// - MCP install affordance + dismiss flag (slice 5)
 
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { fireEvent, render } from "@testing-library/react";
 import { AgentContextSection } from "./AgentContextSection";
 import type { DeliveredComment } from "../types";
 
 const empty = new Map<string, never>();
 const noop = () => {};
 const noopAsync = async () => {};
-const noopInstall = async () => ({ didModify: false, backupPath: null });
+
+const MCP_DISMISS_KEY = "shippable.mcpInstallDismissed";
 
 function delivered(over: Partial<DeliveredComment> = {}): DeliveredComment {
   return {
@@ -32,6 +35,7 @@ interface RenderOpts {
   delivered?: DeliveredComment[];
   deliveredError?: boolean;
   lastSuccessfulPollAt?: string | null;
+  mcpStatus?: { installed: boolean } | null;
 }
 
 function renderPanel(opts: RenderOpts = {}) {
@@ -43,19 +47,48 @@ function renderPanel(opts: RenderOpts = {}) {
       loading={false}
       error={null}
       symbols={empty as unknown as Parameters<typeof AgentContextSection>[0]["symbols"]}
-      hookStatus={{ installed: true }}
+      mcpStatus={opts.mcpStatus === undefined ? { installed: true } : opts.mcpStatus}
       onJump={noop}
-      worktreePath="/wt"
       delivered={opts.delivered ?? []}
       lastSuccessfulPollAt={opts.lastSuccessfulPollAt ?? null}
       deliveredError={opts.deliveredError ?? false}
       onPickSession={noop}
       onRefresh={noop}
       onSendToAgent={noopAsync}
-      onInstallHook={noopInstall}
     />,
   );
 }
+
+// In Node 22+ (used by vitest 4), there's a built-in `localStorage` global
+// that has a stub API and pre-empts jsdom's. Install a minimal in-memory
+// shim on `window` so the panel's reads/writes line up with what the test
+// inspects via `getItem`. Keeps the test independent of the host's
+// localStorage backend.
+function installLocalStorageShim() {
+  const store = new Map<string, string>();
+  const shim: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (k) => (store.has(k) ? store.get(k)! : null),
+    key: (i) => Array.from(store.keys())[i] ?? null,
+    removeItem: (k) => void store.delete(k),
+    setItem: (k, v) => void store.set(k, String(v)),
+  };
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: shim,
+  });
+}
+
+beforeEach(() => {
+  installLocalStorageShim();
+});
+
+afterEach(() => {
+  window.localStorage.clear();
+});
 
 describe("AgentContextSection — server-restart hint", () => {
   it("renders the hint exactly once when the panel is mounted", () => {
@@ -148,5 +181,66 @@ describe("AgentContextSection — failure-mode banner", () => {
     expect(banner?.textContent).toBe(
       "Agent status unavailable — last checked —.",
     );
+  });
+});
+
+describe("AgentContextSection — MCP install affordance (slice 5)", () => {
+  it("renders the install section when not detected and not dismissed", () => {
+    const { container } = renderPanel({ mcpStatus: { installed: false } });
+    const block = container.querySelector(".ac__mcp");
+    expect(block).not.toBeNull();
+    expect(block?.classList.contains("ac__mcp--ok")).toBe(false);
+    // Both copy chips render.
+    const chips = container.querySelectorAll(".ac__mcp-chip");
+    expect(chips.length).toBe(2);
+    // The install line and magic phrase are both present.
+    const text = block?.textContent ?? "";
+    expect(text).toContain(
+      "claude mcp add shippable -- npx -y @shippable/mcp-server",
+    );
+    expect(text).toContain("check shippable");
+    // The dismiss button renders.
+    expect(container.querySelector(".ac__mcp-dismiss")).not.toBeNull();
+  });
+
+  it("collapses to '✓ MCP installed' when the server reports installed", () => {
+    const { container } = renderPanel({ mcpStatus: { installed: true } });
+    const block = container.querySelector(".ac__mcp--ok");
+    expect(block).not.toBeNull();
+    expect(block?.textContent).toContain("MCP installed");
+    // No copy chips in the OK state.
+    expect(container.querySelectorAll(".ac__mcp-chip").length).toBe(0);
+  });
+
+  it("renders nothing while mcpStatus is loading and the dismiss flag is absent", () => {
+    const { container } = renderPanel({ mcpStatus: null });
+    expect(container.querySelector(".ac__mcp")).toBeNull();
+  });
+
+  it("hides the install section after the user clicks 'I installed it' and persists across remount", () => {
+    const { container, unmount } = renderPanel({
+      mcpStatus: { installed: false },
+    });
+    const dismiss = container.querySelector(
+      ".ac__mcp-dismiss",
+    ) as HTMLButtonElement | null;
+    expect(dismiss).not.toBeNull();
+    fireEvent.click(dismiss!);
+    // After the click the affordance collapses to the OK line in the same
+    // mount — the localStorage flag drives both the render gate and
+    // future mounts.
+    expect(window.localStorage.getItem(MCP_DISMISS_KEY)).toBe("1");
+    expect(container.querySelector(".ac__mcp--ok")).not.toBeNull();
+    expect(container.querySelector(".ac__mcp-dismiss")).toBeNull();
+
+    unmount();
+
+    // Remount: even with mcpStatus reporting `installed: false` the
+    // localStorage flag keeps the affordance collapsed.
+    const { container: c2 } = renderPanel({
+      mcpStatus: { installed: false },
+    });
+    expect(c2.querySelector(".ac__mcp--ok")).not.toBeNull();
+    expect(c2.querySelector(".ac__mcp-dismiss")).toBeNull();
   });
 });

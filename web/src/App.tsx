@@ -33,9 +33,7 @@ import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "./types";
 import {
   enqueueComment,
   fetchAgentContextForWorktree,
-  fetchHookStatus,
-  installHook,
-  sendInboxMessage,
+  fetchMcpStatus,
   unenqueueComment,
 } from "./agentContextClient";
 import { deriveCommentPayload } from "./agentCommentPayload";
@@ -118,11 +116,12 @@ export default function App() {
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentRefreshTick, setAgentRefreshTick] = useState(0);
-  // Hook status is fetched at App mount with retry+backoff. The server's
-  // port briefly disappears during `tsx watch` reload windows, so a single
-  // attempt can hit ECONNREFUSED and leave the banner stuck in "unknown".
-  // After a few retries we give up silently — composer still works.
-  const [hookStatus, setHookStatus] = useState<{ installed: boolean } | null>(
+  // MCP-install status is fetched at App mount with retry+backoff. The
+  // server's port briefly disappears during `tsx watch` reload windows, so a
+  // single attempt can hit ECONNREFUSED and leave the banner stuck in
+  // "unknown". After a few retries we give up silently — the install
+  // affordance just stays visible until the user dismisses it.
+  const [mcpStatus, setMcpStatus] = useState<{ installed: boolean } | null>(
     null,
   );
   useEffect(() => {
@@ -130,9 +129,9 @@ export default function App() {
     let timer: number | undefined;
     let attempt = 0;
     const tryFetch = () => {
-      fetchHookStatus()
+      fetchMcpStatus()
         .then((s) => {
-          if (!cancelled) setHookStatus(s);
+          if (!cancelled) setMcpStatus(s);
         })
         .catch(() => {
           if (cancelled) return;
@@ -740,43 +739,22 @@ export default function App() {
                       pinnedSession ?? agentSlice?.session.filePath ?? null,
                     loading: agentLoading,
                     error: agentError,
-                    hookStatus,
-                    worktreePath: activeWorktreeSource.worktreePath,
+                    mcpStatus,
                     delivered: deliveredComments,
                     lastSuccessfulPollAt: deliveredLastSuccessAt,
                     deliveredError: deliveredErrorState,
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                     onSendToAgent: async (message) => {
-                      // Slice 2: enqueue a `freeform` comment alongside the
-                      // legacy inbox file write. Slice 5 deletes the inbox
-                      // machinery; until then both fire so existing CC users
-                      // keep working through the file-based hook channel.
-                      const enqueueP = enqueueComment({
+                      // Slice 5: the legacy inbox file-write channel is
+                      // gone. Composer messages enqueue as `freeform`
+                      // comments and surface in the Delivered (N) block via
+                      // the slice-4 polling once the agent pulls.
+                      await enqueueComment({
                         worktreePath: activeWorktreeSource.worktreePath,
                         commitSha: activeWorktreeSource.commitSha,
                         comment: { kind: "freeform", body: message },
-                      }).catch((err: unknown) => {
-                        console.error(
-                          "[shippable] enqueueComment(freeform) failed:",
-                          err,
-                        );
                       });
-                      const inboxP = sendInboxMessage({
-                        worktreePath: activeWorktreeSource.worktreePath,
-                        message,
-                      });
-                      // Asymmetric error handling: the legacy inbox write drives the composer's "queued" pip and must surface failures, while the new enqueue is fire-and-forget so a backend hiccup there can't block the visible delivery (this whole comment goes when slice 5 deletes the inbox half).
-                      await Promise.all([enqueueP, inboxP]);
-                    },
-                    onInstallHook: async () => {
-                      const r = await installHook();
-                      // Refresh banner state without waiting on a reload.
-                      setHookStatus({ installed: true });
-                      return {
-                        didModify: r.didModify,
-                        backupPath: r.backupPath,
-                      };
                     },
                   }
                 : undefined

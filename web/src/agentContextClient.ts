@@ -26,67 +26,10 @@ export async function listSessionsForWorktree(
   return json.sessions;
 }
 
-export async function fetchHookStatus(): Promise<{ installed: boolean }> {
-  const res = await fetch(await apiUrl("/api/worktrees/hook-status"));
+export async function fetchMcpStatus(): Promise<{ installed: boolean }> {
+  const res = await fetch(await apiUrl("/api/worktrees/mcp-status"));
   const json = (await res.json()) as
     | { installed: boolean }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
-}
-
-export interface InstallHookResult {
-  installed: true;
-  hookPath: string;
-  settingsPath: string;
-  didModify: boolean;
-  backupPath: string | null;
-}
-
-export async function installHook(): Promise<InstallHookResult> {
-  const res = await fetch(await apiUrl("/api/worktrees/install-hook"), {
-    method: "POST",
-  });
-  const json = (await res.json()) as InstallHookResult | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
-}
-
-export async function fetchInboxStatus(
-  worktreePath: string,
-): Promise<{ exists: boolean; mtime: string | null }> {
-  const res = await fetch(await apiUrl("/api/worktrees/inbox-status"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: worktreePath }),
-  });
-  const json = (await res.json()) as
-    | { exists: boolean; mtime: string | null }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
-}
-
-export async function sendInboxMessage(args: {
-  worktreePath: string;
-  message: string;
-}): Promise<{ inboxPath: string; excludeWritten: boolean }> {
-  const res = await fetch(await apiUrl("/api/worktrees/inbox"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      path: args.worktreePath,
-      message: args.message,
-    }),
-  });
-  const json = (await res.json()) as
-    | { inboxPath: string; excludeWritten: boolean }
     | { error: string };
   if (!res.ok || "error" in json) {
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);

@@ -234,6 +234,49 @@ describe("GET /api/agent/delivered", () => {
   });
 });
 
+describe("legacy endpoints are gone (slice 5 cleanup)", () => {
+  // The slice-1 hook + inbox channel was removed in slice 5. Hitting any of
+  // the four old endpoints should fall through the router and return 404
+  // rather than the prior shapes — confirms the handlers are unreachable.
+  it("GET /api/worktrees/hook-status returns 404", async () => {
+    const r = await getJson(`${baseUrl}/api/worktrees/hook-status`);
+    expect(r.status).toBe(404);
+  });
+
+  it("POST /api/worktrees/install-hook returns 404", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/install-hook`, {});
+    expect(r.status).toBe(404);
+  });
+
+  it("POST /api/worktrees/inbox returns 404", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/inbox`, {
+      path: worktreePath,
+      message: "x",
+    });
+    expect(r.status).toBe(404);
+  });
+
+  it("POST /api/worktrees/inbox-status returns 404", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/inbox-status`, {
+      path: worktreePath,
+    });
+    expect(r.status).toBe(404);
+  });
+});
+
+describe("GET /api/worktrees/mcp-status (slice 5)", () => {
+  // Regardless of whether the local user has `shippable` declared in their
+  // ~/.claude config, the endpoint should return a `{ installed: boolean }`
+  // shape with no error. The mcp-status helper has its own unit tests for
+  // detection logic; this just confirms the route is wired and returns the
+  // right shape.
+  it("returns { installed: boolean }", async () => {
+    const r = await getJson(`${baseUrl}/api/worktrees/mcp-status`);
+    expect(r.status).toBe(200);
+    expect(typeof r.body.installed).toBe("boolean");
+  });
+});
+
 describe("POST /api/agent/unenqueue", () => {
   it("drops a pending comment", async () => {
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {

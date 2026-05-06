@@ -45,27 +45,20 @@ The dropdown is the recovery path. Users who want to view the panel against a di
 
 A composer at the bottom of the section. One textarea, one "Send to agent" button. Optionally, a "+ attach: this hunk / this file / this comment" picker that prepends a quoted snippet to the message. Behavior:
 
-1. Submit writes to `<worktree>/.shippable/inbox.md` via `/api/worktrees/inbox`. Last writer wins for v1. On first write the server also appends `.shippable/` to `$(git rev-parse --git-common-dir)/info/exclude` (the *shared* exclude across all worktrees of the repo) so the file is git-ignored *without* touching the tracked `.gitignore` (see `docs/concepts/agent-context.md` § Why shared `info/exclude`).
-2. The UI shows a dismissable "queued — will deliver on the agent's next prompt" line. We do **not** claim mid-turn delivery.
-3. When the next assistant turn arrives in the transcript and the inbox file has been consumed (file deleted by the hook), the queued message becomes a "delivered" entry in the transcript tail and is removed from the inbox.
+1. Submit POSTs to `/api/agent/enqueue` with a `freeform` comment kind. The comment lands on the local server's per-worktree queue alongside any line/block/reply comments authored on the diff. See `docs/plans/share-review-comments.md` for the queue substrate.
+2. The composer status indicator returns to idle on success — there is no separate "queued" sub-state on the composer itself. The freeform comment surfaces in the panel's `Delivered (N)` block once the agent fetches via the MCP pull tool.
+3. **Latency model:** the comment is **delivered when the agent calls the MCP tool, typically when prompted with `check shippable`**. We say this in the placeholder copy. We do *not* claim mid-turn delivery — pull means the agent fetches when prompted, not on a timer.
 
-### Required hook recipe
+## MCP install affordance
 
-For the inbox to be picked up, users add this to their Claude Code `settings.json`:
+The panel renders a prominent install section at the top when no `shippable` MCP entry is detected in the user's Claude Code config (and the user hasn't dismissed it). Two click-to-copy chips:
 
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [{
-      "command": "<path-to>/shippable-inbox-hook"
-    }]
-  }
-}
-```
+- **Install:** `claude mcp add shippable -- npx -y @shippable/mcp-server` (Claude Code; per-harness adaptation lands as more harnesses surface real demand). See `mcp-server/README.md` for the full per-harness install matrix (Codex CLI, Cursor / Cline / Claude Desktop / OpenCode).
+- **Then say:** `check shippable` — the magic phrase that triggers the agent to call the tool. The MCP tool description is tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback") but the literal phrase is the reliable fallback.
 
-The hook script reads `<cwd>/.shippable/inbox.md`, prepends its contents to the user prompt as `<reviewer-feedback>...</reviewer-feedback>`, and deletes the file. We ship the hook script with Shippable and surface a one-click "copy hook recipe" in the panel's onboarding state.
+Detection is server-side — `GET /api/worktrees/mcp-status` reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, looks for an entry named `shippable` under `mcpServers` (canonical) or a permissive variant. When present, the affordance collapses to a one-line `✓ MCP installed`. For other harnesses (no programmatic detection) the affordance offers an **"I installed it"** dismiss button persisted per-machine in `localStorage` under `shippable.mcpInstallDismissed`.
 
-Until the hook is installed, the composer still works but flags `hook not detected — feedback will sit in inbox until next session reads it`. We detect the hook by looking for the recipe in the user's Claude Code settings (best-effort; can be wrong).
+**Caveat for upgraders:** users who installed the previous file-based hook (`shippable-inbox-hook` referenced from `~/.claude/settings.local.json`) keep working without action — the hook still fires, finds no `<worktree>/.shippable/inbox.md`, and no-ops. Removing the stale entry is a manual cleanup; it doesn't break anything if left.
 
 ## Empty / error states
 
@@ -81,8 +74,8 @@ Until the hook is installed, the composer still works but flags `hook not detect
 - `web/src/state.ts` — adds `agentContext?: AgentContextSlice` to `ReviewState` + actions `SET_AGENT_CONTEXT`, `SET_AGENT_SESSION`.
 - `web/src/view.ts` — extends `InspectorViewModel` with the rendered slice.
 - `server/src/agent-context.ts` (new) — JSONL parser, `cwd` matcher, commit-boundary slicer.
-- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/inbox` (write), `POST /api/worktrees/sessions` (list candidates for manual pick).
-- `tools/shippable-inbox-hook` (new) — the `UserPromptSubmit` hook script.
+- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|delivered|unenqueue` (the queue substrate, see `docs/plans/share-review-comments.md`).
+- `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` over stdio. Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
 
 ## Out of scope for this feature
 

@@ -31,10 +31,9 @@ export interface AgentContextProps {
   selectedSessionFilePath: string | null;
   loading: boolean;
   error: string | null;
-  /** Whether the UserPromptSubmit hook is detected in user settings. */
-  hookStatus: { installed: boolean } | null;
-  /** Absolute worktree path; threaded through for inbox-status polling. */
-  worktreePath: string;
+  /** Whether a `shippable` MCP entry is detected in the user's Claude
+   *  Code config. `null` while the fetch is in flight or has failed. */
+  mcpStatus: { installed: boolean } | null;
   /**
    * Newest-first list of delivered comments for this worktree. Drives the
    * Delivered (N) details block at the bottom of the panel and (via the
@@ -55,7 +54,6 @@ export interface AgentContextProps {
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
   onSendToAgent: (message: string) => Promise<void>;
-  onInstallHook: () => Promise<{ didModify: boolean; backupPath: string | null }>;
 }
 
 /**
@@ -175,8 +173,7 @@ export function Inspector({
           loading={agentContext.loading}
           error={agentContext.error}
           symbols={symbols}
-          hookStatus={agentContext.hookStatus}
-          worktreePath={agentContext.worktreePath}
+          mcpStatus={agentContext.mcpStatus}
           delivered={agentContext.delivered}
           lastSuccessfulPollAt={agentContext.lastSuccessfulPollAt}
           deliveredError={agentContext.deliveredError}
@@ -184,7 +181,6 @@ export function Inspector({
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
           onSendToAgent={agentContext.onSendToAgent}
-          onInstallHook={agentContext.onInstallHook}
         />
       )}
 

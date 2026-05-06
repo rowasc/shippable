@@ -205,18 +205,18 @@ Reuses `/api/agent/delivered`. The slice that closes the loop visually. **Depend
 
 Replaces the hook-install affordance and deletes the file-based mechanism.
 
-- [ ] **Install affordance in `AgentContextSection.tsx`.**
+- [x] **Install affordance in `AgentContextSection.tsx`.**
   - Renders prominently at the panel top when not detected (or not dismissed).
   - Per-harness install line: copy-to-clipboard. Default to whichever we detect (Claude Code if `~/.claude/...` exists, else generic).
   - Magic-phrase copy box: `check shippable`.
   - Both the install line and the magic phrase are click-to-copy with a small "copied ✓" feedback.
   - Hides entirely when `ChangeSet.worktreeSource` is null (panel-level rule from § Authoring).
 
-- [ ] **Detection.**
+- [x] **Detection.**
   - Claude Code: parse the relevant CC config (whatever lives next to `~/.claude/settings.local.json` for MCP entries — verify against the current CC version when implementing). If a `shippable` MCP entry is found, collapse the install section to a small "MCP installed ✓" line.
   - Other harnesses: no programmatic detection — render an **"I installed it"** dismiss button that hides the section. The dismiss state is persisted in localStorage per-machine (one flag), not per-worktree, not per-account.
 
-- [ ] **Delete file-based push mechanism.**
+- [x] **Delete file-based push mechanism.**
   - Remove `server/src/inbox.ts` (incl. `ensureExclude`, `inboxStatus`, `writeInbox`).
   - Remove `/api/worktrees/inbox`, `/api/worktrees/inbox-status` from `server/src/index.ts`.
   - Remove `tools/shippable-inbox-hook`.
@@ -224,19 +224,19 @@ Replaces the hook-install affordance and deletes the file-based mechanism.
   - Remove the inbox-status polling loop in `AgentContextSection.tsx` `SendToAgent` (already gone after slice 2's composer migration; double-check).
   - **Caveat:** users with a stale `shippable-inbox-hook` reference in their `settings.local.json` will keep working until they remove it manually — but the file it tries to read (`<worktree>/.shippable/inbox.md`) no longer exists, so it's a benign no-op. Note in the changelog.
 
-- [ ] **Delete hook-install machinery.**
+- [x] **Delete hook-install machinery.**
   - Remove `server/src/hook-status.ts` (`installHook`, `checkHookStatus`).
   - Remove `GET /api/worktrees/hook-status`, `POST /api/worktrees/install-hook` from `server/src/index.ts`.
   - Remove `fetchHookStatus`, `installHook`, `InstallHookResult` from `web/src/agentContextClient.ts`.
   - Remove the `HookHint` component and any callers in `AgentContextSection.tsx`.
 
-- [ ] **Tests — detection + dismiss.**
+- [x] **Tests — detection + dismiss.**
   - Detection helper: synthetic CC config with a `shippable` entry → returns `{ installed: true }`; absent → `{ installed: false }`; malformed JSON → `{ installed: false }` (no throw).
   - Component: install section renders unless detected or dismissed; "I installed it" click sets the localStorage flag and hides; flag persists across remount.
   - Integration: `GET /api/worktrees/hook-status`, `POST /api/worktrees/install-hook`, `POST /api/worktrees/inbox`, and `POST /api/worktrees/inbox-status` all return 404 (or are absent from the express router) after deletion.
   - Delete the now-stale tests for `inbox.ts` / `hook-status.ts` / `HookHint` as part of the cleanup. `git grep -i 'shippable-inbox-hook\\|hook-status\\|inbox.md'` returns only changelog references after this slice.
 
-- [ ] **Doc updates.**
+- [x] **Doc updates.**
   - `docs/plans/share-review-comments.md` § Architecture: add `POST /api/agent/unenqueue` to the endpoint list in the diagram (motivated by § Edit & delete; the v0 task list adds it as a fourth endpoint).
   - `docs/concepts/agent-context.md`: rewrite § "Two-way: feedback back to the agent" to describe the MCP pull channel; delete § "Why shared `info/exclude`".
   - `docs/features/agent-context-panel.md`: replace the Send-to-agent / hook-install section with the install affordance + magic phrase. Update the latency-model copy.

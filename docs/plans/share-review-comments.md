@@ -84,9 +84,10 @@ Each one stands on its own and unblocks the next.
 │   In-memory queue keyed by worktreePath (agent-agnostic)  │
 │   Delivered cursor advances on each pull                  │
 │   Endpoints (the main contract):                          │
-│     POST /api/agent/enqueue   ← reviewer UI               │
-│     POST /api/agent/pull      ← MCP server                │
-│     GET  /api/agent/delivered ← reviewer UI (history)     │
+│     POST /api/agent/enqueue    ← reviewer UI              │
+│     POST /api/agent/pull       ← MCP server               │
+│     GET  /api/agent/delivered  ← reviewer UI (history)    │
+│     POST /api/agent/unenqueue  ← reviewer UI (edit/delete)│
 └──────────────────────────────────┬────────────────────────┘
                                    │
                                    ▼

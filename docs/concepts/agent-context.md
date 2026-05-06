@@ -2,7 +2,7 @@
 
 When the reviewer loads a worktree, it shouldn't just show the diff — it should show *who made the diff and why*. If a Claude Code session produced these commits, that session's transcript, todo list, original task, and tool-call trail are already on disk and have most of the answers a reviewer asks: "what was the agent trying to do here?", "did it actually finish what was asked?", "why did it touch this file?".
 
-"Agent context" in Shippable is: the curated, commit-aligned slice of a Claude Code session presented next to the diff that came out of it. The reviewer reads it; the reviewer can also write back into it (slice d of `docs/plans/worktrees.md`). It is a two-way pipe by design, not a one-way log viewer.
+"Agent context" in Shippable is: the curated, commit-aligned slice of a Claude Code session presented next to the diff that came out of it. The reviewer reads it; the reviewer can also write back into it via the MCP pull channel (`docs/plans/share-review-comments.md` supersedes the file-based half of `docs/plans/worktrees.md` slice (d)). It is a two-way pipe by design, not a one-way log viewer.
 
 ## Where it comes from
 
@@ -50,35 +50,21 @@ The panel is collapsed-by-default for everything except Task and Files-touched, 
 
 ## Two-way: feedback back to the agent
 
-The same panel hosts the reverse direction. A reviewer can type a message ("the symbol resolution in `resolveImports` looks wrong, please redo it without the regex fallback") and the panel writes it to a worktree-local inbox file. A documented `UserPromptSubmit` Claude Code hook reads the inbox at the agent's next prompt boundary and prepends its contents as user input.
+The same panel hosts the reverse direction, but the channel is a **pull**: the reviewer authors structured comments (line, block, replies, freeform) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling the `shippable_check_review_comments` MCP tool — typically when prompted with the magic phrase `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment. See `docs/plans/share-review-comments.md` for the full design and § Why pull, not push for the comparison with the earlier hook-based push channel.
 
 Concretely:
 
-- **Inbox path:** `<worktree>/.shippable/inbox.md` — single file, last writer wins for now. Excluded from git via the *shared* `$(git rev-parse --git-common-dir)/info/exclude` (auto-appended on first write), *not* via the tracked `.gitignore`. See "Why shared `info/exclude`" below.
-- **Latency model:** "delivers on the agent's next prompt boundary." We say this in the UI. We do *not* claim mid-turn interrupt. That's slice (e/β) — a separate experiment.
-- **Hook recipe:** lives in `docs/features/agent-context-panel.md` so users can copy it into their own `~/.claude/settings.json`.
+- **Transport:** `POST /api/agent/pull` (server) ← `mcp-server/` shim ← agent's MCP client. The local server binds 127.0.0.1; no LAN exposure, no token in v0.
+- **Latency model:** comments arrive when the agent calls the tool — typically when the user says `check shippable`. We surface that exact phrase in the install affordance. Mid-turn delivery is deliberately not in scope.
+- **Install affordance:** the panel renders the per-harness install line (Claude Code default: `claude mcp add shippable -- npx -y @shippable/mcp-server`) and the magic phrase as click-to-copy chips. The server detects a configured `shippable` MCP entry in `~/.claude/settings.json` / `~/.claude/settings.local.json` and collapses the install affordance to a one-line ✓ when present.
 
-Why a hook instead of writing to `CLAUDE.md` or the session inbox directly: a hook fires deterministically on every prompt, doesn't pollute the long-lived project memory, and works whether or not the original session is the one that picks the message up — a fresh session in the same worktree will also see and consume the inbox.
+Why pull instead of writing to `CLAUDE.md` or a hook: pull collapses the explicit "Send" gesture into the user's natural next prompt, covers every MCP-speaking harness with one transport, and aligns with Shippable as a passive workspace rather than a tool that wedges itself into the build loop. The earlier hook-based file inbox at `<worktree>/.shippable/inbox.md` was built once on `worktree-agent-context-panel`, kept as a record, and replaced.
 
 ## Refresh model
 
 When a new commit lands on the worktree's branch, the slice advances. The reviewer detects this by polling `/api/worktrees/changeset` for the worktree's HEAD on a low cadence (every few seconds while the panel is open). When HEAD changes, we re-fetch the changeset and the agent context together so they stay in lockstep.
 
 We deliberately do not file-watch the JSONL transcripts themselves. The reviewer is interested in *commits*, not *agent keystrokes*. Streaming every tool call into the UI would be noisy, and once we have it the temptation to build "live agent feed" creeps the surface area. Commit-boundary refresh keeps the interface aligned with what reviewers actually do.
-
-### Why shared `info/exclude`
-
-Modifying the tracked `.gitignore` would be wrong in a worktree-heavy workflow:
-
-- It shows up as a modified file in the worktree's `git status`.
-- Other worktrees don't get the rule until someone commits and merges it.
-- The reviewer would be silently authoring commits — a side effect users won't expect.
-
-Instead, on first write to `<worktree>/.shippable/inbox.md`, the server appends `.shippable/` to `$(git rev-parse --git-common-dir)/info/exclude`. The `info/` directory is one of the shared dirs across all worktrees of a repo (`config`, `hooks`, `info`, `objects`, `refs` etc. live in `$GIT_COMMON_DIR`; only `HEAD`, `index`, `logs/HEAD` etc. are per-worktree). So the rule applies to every worktree of the repo automatically — which is what we want, since `.shippable/` is a Shippable-owned convention everywhere we use it.
-
-The exclude file lives inside `.git/`, which is never tracked, never committed, never pushed. The inbox itself therefore can't land in a commit on the happy path. The narrow escape hatches are deliberate user actions: `git add -f`, manually deleting the exclude rule, or committing the file before Shippable ever writes to it.
-
-**Earlier we tried `--git-dir` (the per-worktree gitdir) and it silently no-op'd**: git only reads `info/exclude` from the *common* dir, not the per-worktree one. `git check-ignore -v` is the diagnostic that catches this — if you write to the wrong place, it reports the file as not ignored despite the rule being present. `--git-common-dir` is the correct flag.
 
 ## What this is not
 
@@ -97,8 +83,8 @@ The exclude file lives inside `.git/`, which is never tracked, never committed, 
 - **The fetch effect is keyed on `worktreePath + commitSha + pinnedSession + refreshTick`.** Same shape as the existing `usePlan` flow in this codebase — keeps cancellation simple via a `cancelled` flag in the closure.
 - **Sync `setState` stays out of effect bodies.** The repo's lint config (`react-hooks/set-state-in-effect`) forbids it, and `usePlan.ts` shows the right pattern: derive a fetch key, use the adjusting-state-during-render trick (`if (lastKey !== wantedKey) { setLastKey(...); setLoading(true); ... }`) for the sync transitions, and keep the effect body itself pure-async — only `.then()` / `.catch()` / `.finally()` callbacks setState. The `cancelled` flag in the closure closes over the in-flight fetch so a stale result can't overwrite a fresher one.
 - **Symbol linking is backtick-only, not bare-identifier.** The existing `RichText` component links bare identifiers too — right call for AI plan output, wrong call for chat content (the agent says "loop" or "cursor" all the time and those would all link). We inline a small backtick-only tokenizer in `AgentContextSection` instead. The false-positive guard ("only link if the symbol is in a file the diff touches") falls out for free because `buildSymbolIndex` only emits symbols defined in the loaded ChangeSet.
-- **Hook detection is best-effort and informational.** The server reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, looks for a `UserPromptSubmit` hook whose command's basename is `shippable-inbox-hook`. Two settings shapes are handled: the flat `[{ command }]` form and the matcher form `[{ matcher, hooks: [{ command }] }]`. Project-level settings are NOT checked — would need to walk the worktree tree, brittle. False negatives surface as a "set up" hint above the composer; the composer itself always works regardless.
-- **One-click install with safety rails.** The "set up" panel offers both Copy-snippet (clipboard) and Install-for-me (`POST /api/worktrees/install-hook`). The server merges our matcher-form entry into `~/.claude/settings.json`, dropping a `settings.json.shippable.bak` *before the first modification only* (so a subsequent run won't overwrite the user's earliest known-good snapshot). Atomic write (temp file + rename). Idempotent — if our hook is already declared, returns immediately with `didModify=false`. Refuses to write if the existing file isn't valid JSON or isn't an object at root, surfacing the error with the path so the user can hand-fix. The bundled hook script is found via `import.meta.url` walking up from `server/src/hook-status.ts` to `<repo>/tools/shippable-inbox-hook`; if not found (non-standard layout, Tauri bundle without bundled tools dir), the install errors out and the user falls back to manual paste.
+- **MCP-install detection is best-effort and informational.** The server reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, looks for a `shippable` entry under `mcpServers` (the canonical Claude Code shape) — and accepts a few permissive variants (`mcp.shippable`, `mcp_servers.shippable`) so we don't false-negative users who configured via a sibling tool. Malformed or missing files return `{ installed: false }` without throwing. Project-level configs are NOT checked — would need to walk the worktree tree, brittle. False negatives surface as a "set up" install affordance at the top of the panel; the composer itself always works regardless. For non-Claude-Code harnesses we have no programmatic detection — the affordance offers an "I installed it" dismiss button persisted per-machine in `localStorage` under `shippable.mcpInstallDismissed`.
+- **No automated config writer.** The earlier slice's one-click hook installer (`POST /api/worktrees/install-hook`) was removed alongside the inbox channel. MCP servers don't have a clean unattended-install path on most harnesses; the user copies the install line and runs it. The Findings on the previous mechanism are preserved in the `worktree-agent-context-panel` branch as a record.
 
 ## Findings from implementation (server-side reader)
 
