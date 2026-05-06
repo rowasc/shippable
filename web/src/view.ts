@@ -6,7 +6,7 @@
  * and render it without computing anything.
  */
 
-import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
+import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, DetachedReply, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
 import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey, blockCommentKey } from "./types";
 import { hunkCoverage, fileCoverage } from "./state";
 import type { GuideSuggestion } from "./guide";
@@ -349,8 +349,32 @@ export interface SidebarFileItem {
   isCurrent: boolean;
 }
 
+export interface SidebarDetachedEntry {
+  /** Stable id for React keys — combines threadKey + reply id. */
+  id: string;
+  body: string;
+  /** Timestamp formatted as hh:mm for the dirty-origin caption. */
+  authoredHHMM: string;
+  /** "committed" | "dirty" — drives the caption text. */
+  originType: "committed" | "dirty";
+  /** First 7 chars of originSha; empty for replies that didn't store one. */
+  originSha7: string;
+  /** Lines from the comment's anchorContext, ready to render in a snippet. */
+  snippetLines: { kind: LineKind; text: string; sign: string }[];
+}
+
+export interface SidebarDetachedFile {
+  path: string;
+  entries: SidebarDetachedEntry[];
+}
+
 export interface SidebarViewModel {
   files: SidebarFileItem[];
+  /**
+   * Per-file groups of detached replies. Empty when no replies are
+   * detached; the Sidebar hides the entire section in that case.
+   */
+  detached: SidebarDetachedFile[];
 }
 
 function fileStatusChar(s: string): string {
@@ -368,6 +392,45 @@ export interface BuildSidebarViewModelArgs {
   currentFileId: string;
   readLines: Record<string, Set<number>>;
   reviewedFiles: Set<string>;
+  /**
+   * Replies whose anchor didn't survive the latest reload. Grouped by
+   * file path in the output. Pass `[]` when nothing is detached.
+   */
+  detachedReplies?: DetachedReply[];
+}
+
+function buildDetachedGroups(
+  detached: DetachedReply[],
+): SidebarDetachedFile[] {
+  if (detached.length === 0) return [];
+  const groups = new Map<string, SidebarDetachedEntry[]>();
+  for (const d of detached) {
+    const path = d.reply.anchorPath ?? "(unknown file)";
+    let arr = groups.get(path);
+    if (!arr) {
+      arr = [];
+      groups.set(path, arr);
+    }
+    const t = new Date(d.reply.createdAt);
+    const hh = String(t.getHours()).padStart(2, "0");
+    const mm = String(t.getMinutes()).padStart(2, "0");
+    const snippetLines = (d.reply.anchorContext ?? []).map((l) => ({
+      kind: l.kind,
+      text: l.text,
+      sign: l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ",
+    }));
+    arr.push({
+      id: `${d.threadKey}::${d.reply.id}`,
+      body: d.reply.body,
+      authoredHHMM: `${hh}:${mm}`,
+      originType: d.reply.originType ?? "committed",
+      originSha7: d.reply.originSha ? d.reply.originSha.slice(0, 7) : "",
+      snippetLines,
+    });
+  }
+  return Array.from(groups, ([path, entries]) => ({ path, entries })).sort(
+    (a, b) => a.path.localeCompare(b.path),
+  );
 }
 
 export function buildSidebarViewModel({
@@ -375,6 +438,7 @@ export function buildSidebarViewModel({
   currentFileId,
   readLines,
   reviewedFiles,
+  detachedReplies = [],
 }: BuildSidebarViewModelArgs): SidebarViewModel {
   const fileItems: SidebarFileItem[] = files.map((f) => {
     const readCoverage = fileCoverage(f, readLines);
@@ -396,7 +460,10 @@ export function buildSidebarViewModel({
     };
   });
 
-  return { files: fileItems };
+  return {
+    files: fileItems,
+    detached: buildDetachedGroups(detachedReplies),
+  };
 }
 
 // ─── StatusBar view model ─────────────────────────────────────────────────────

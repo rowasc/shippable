@@ -9,6 +9,7 @@ import {
 } from "../state";
 import { planReview } from "../plan";
 import { applyThemeToRoot, type ThemeId } from "../tokens";
+import { buildReplyAnchor } from "../anchor";
 import { Sidebar } from "./Sidebar";
 import { DiffView } from "./DiffView";
 import { Inspector } from "./Inspector";
@@ -1306,6 +1307,7 @@ function WorkspaceStage({
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
+            detachedReplies: state.detachedReplies,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId);
@@ -1387,6 +1389,7 @@ function WorkspaceStage({
                   body,
                   createdAt: new Date().toISOString(),
                   enqueuedCommentId: null,
+                  ...buildReplyAnchor(key, cs),
                 },
               });
               setDrafts((prev) => {

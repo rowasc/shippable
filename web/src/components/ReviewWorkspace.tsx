@@ -48,6 +48,8 @@ import {
   unenqueueComment,
 } from "../agentContextClient";
 import { deriveCommentPayload } from "../agentCommentPayload";
+import { buildReplyAnchor } from "../anchor";
+import { fetchWorktreeChangeset } from "../worktreeChangeset";
 import { useDeliveredPolling } from "../useDeliveredPolling";
 import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
@@ -78,6 +80,18 @@ interface Props {
     source: RecentSource,
   ) => void;
   currentSource: RecentSource | null;
+  /**
+   * Called by the debug "reload now" affordance to swap the current
+   * worktree-loaded changeset for its latest snapshot, running the
+   * content-anchor pass on existing comments. Slice (a) of the live-reload
+   * plan will replace the manual button with a polling banner; the App
+   * handler stays the same.
+   */
+  onReloadChangeset: (
+    prevChangesetId: string,
+    cs: ChangeSet,
+    source: RecentSource,
+  ) => void;
 }
 
 export function ReviewWorkspace({
@@ -89,6 +103,7 @@ export function ReviewWorkspace({
   setThemeId,
   onLoadChangeset,
   currentSource,
+  onReloadChangeset,
 }: Props) {
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
@@ -112,6 +127,12 @@ export function ReviewWorkspace({
   const [definitionPeek, setDefinitionPeek] = useState<DefinitionPeekState>({
     kind: "idle",
   });
+  // Debug-only: when on, new replies are tagged `originType: "dirty"` so
+  // the detached-pile UX can be exercised before slice (a) lands real
+  // dirty-state polling. Reset on changeset switch.
+  const [debugDirty, setDebugDirty] = useState(false);
+  const [debugReloading, setDebugReloading] = useState(false);
+  const [debugReloadError, setDebugReloadError] = useState<string | null>(null);
 
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
   const mouseTipTimeoutRef = useRef<number | null>(null);
@@ -728,6 +749,62 @@ export function ReviewWorkspace({
           <span className="topbar__btn-label">+ load</span>
           <kbd>⇧L</kbd>
         </button>
+        {activeWorktreeSource && (
+          <>
+            <button
+              type="button"
+              className="topbar__btn"
+              disabled={debugReloading}
+              onClick={async () => {
+                if (!activeWorktreeSource) return;
+                setDebugReloading(true);
+                setDebugReloadError(null);
+                try {
+                  const reloaded = await fetchWorktreeChangeset({
+                    path: activeWorktreeSource.worktreePath,
+                    branch: activeWorktreeSource.branch,
+                  });
+                  // Slice (a) will set `dirty` from the polling probe; the
+                  // debug toggle stamps it manually for now so the dirty
+                  // origin caption is reachable from this slice alone.
+                  if (reloaded.worktreeSource && debugDirty) {
+                    reloaded.worktreeSource.dirty = true;
+                  }
+                  onReloadChangeset(cs.id, reloaded, {
+                    kind: "worktree",
+                    path: activeWorktreeSource.worktreePath,
+                    branch: activeWorktreeSource.branch,
+                  });
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  setDebugReloadError(msg);
+                } finally {
+                  setDebugReloading(false);
+                }
+              }}
+              title="debug: re-fetch the worktree changeset and run the anchor pass"
+            >
+              <span className="topbar__btn-label">
+                {debugReloading ? "reloading…" : "↻ reload"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className={`topbar__btn ${debugDirty ? "topbar__btn--on" : ""}`}
+              onClick={() => setDebugDirty((v) => !v)}
+              title="debug: tag new comments as dirty-origin (forces the dirty caption on detach)"
+            >
+              <span className="topbar__btn-label">
+                {debugDirty ? "● dirty-on" : "○ dirty-off"}
+              </span>
+            </button>
+          </>
+        )}
+        {debugReloadError && (
+          <span className="topbar__error" title={debugReloadError}>
+            reload failed
+          </span>
+        )}
         <button
           type="button"
           className="topbar__btn"
@@ -769,6 +846,7 @@ export function ReviewWorkspace({
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
+            detachedReplies: state.detachedReplies,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId)!;
@@ -862,6 +940,7 @@ export function ReviewWorkspace({
                   body,
                   createdAt: createdAt.toISOString(),
                   enqueuedCommentId: null,
+                  ...buildReplyAnchor(key, cs, { dirty: debugDirty }),
                 },
               });
               setDrafts((prev) => {

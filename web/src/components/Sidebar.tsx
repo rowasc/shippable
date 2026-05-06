@@ -1,5 +1,5 @@
 import "./Sidebar.css";
-import type { SidebarViewModel } from "../view";
+import type { SidebarDetachedEntry, SidebarViewModel } from "../view";
 import { PromptRunsPanel, type PromptRunView } from "./PromptRunsPanel";
 
 interface Props {
@@ -59,7 +59,60 @@ export function Sidebar({
           ))}
         </ul>
       </section>
+      {viewModel.detached.length > 0 && (
+        <section className="panel">
+          <header className="panel__h">Detached</header>
+          <ul className="panel__list panel__list--detached">
+            {viewModel.detached.map((group) => (
+              <li key={group.path} className="detached-group">
+                <div className="detached-group__path">{group.path}</div>
+                <ul className="detached-group__entries">
+                  {group.entries.map((entry) => (
+                    <DetachedEntryRow key={entry.id} entry={entry} />
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </aside>
+  );
+}
+
+function DetachedEntryRow({ entry }: { entry: SidebarDetachedEntry }) {
+  const caption =
+    entry.originType === "dirty"
+      ? `from uncommitted edits at ${entry.authoredHHMM}`
+      : `committed${entry.originSha7 ? ` at ${entry.originSha7}` : ""}`;
+  return (
+    <li className="detached-entry">
+      <div className="detached-entry__body">{entry.body}</div>
+      {entry.snippetLines.length > 0 && (
+        <pre className="detached-entry__snippet">
+          {entry.snippetLines
+            .map((l) => `${l.sign} ${l.text}`)
+            .join("\n")}
+        </pre>
+      )}
+      <div className="detached-entry__caption">
+        <span>{caption}</span>
+        {entry.originType === "committed" && entry.originSha7 && (
+          <button
+            type="button"
+            className="detached-entry__view-at"
+            // Slice (e) of docs/plans/worktree-live-reload.md wires this
+            // up. Keeping the affordance visible now makes the detached UX
+            // feel real even though clicking it is a no-op for now.
+            onClick={() => undefined}
+            disabled
+            title="view at this sha (coming soon)"
+          >
+            view at {entry.originSha7}
+          </button>
+        )}
+      </div>
+    </li>
   );
 }
 

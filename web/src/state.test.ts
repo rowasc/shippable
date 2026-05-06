@@ -7,6 +7,7 @@ import {
   reducer,
   reviewedFilesCount,
 } from "./state";
+import { captureAnchorContext } from "./anchor";
 import type { ChangeSet, DiffFile, DiffLine, Hunk, ReviewState } from "./types";
 import { noteKey } from "./types";
 
@@ -330,6 +331,196 @@ describe("LOAD_CHANGESET", () => {
   it("returns the same state if the loaded changeset's first file has no hunks", () => {
     const noHunks = makeChangeset("nh", [makeFile("nh/f", [])]);
     const s = reducer(s0, { type: "LOAD_CHANGESET", changeset: noHunks });
+    expect(s).toBe(s0);
+  });
+});
+
+// ── RELOAD_CHANGESET ────────────────────────────────────────────────────────
+
+describe("RELOAD_CHANGESET", () => {
+  // The reload pass uses the anchorHash to find a 5-line window. Build hunks
+  // with line text we can vary to exercise re-anchor / detach paths.
+  function makeReloadFile(
+    id: string,
+    path: string,
+    hunkId: string,
+    texts: string[],
+  ): DiffFile {
+    return {
+      id,
+      path,
+      language: "ts",
+      status: "modified",
+      hunks: [
+        {
+          id: hunkId,
+          header: "@@",
+          oldStart: 1,
+          oldCount: texts.length,
+          newStart: 1,
+          newCount: texts.length,
+          lines: texts.map((t, i) => ({
+            kind: "context" as const,
+            text: t,
+            oldNo: i + 1,
+            newNo: i + 1,
+          })),
+        },
+      ],
+    };
+  }
+
+  function startWithReply(
+    csId: string,
+    fileId: string,
+    filePath: string,
+    hunkId: string,
+    texts: string[],
+    lineIdx: number,
+  ): { state: ReviewState; key: string } {
+    const file = makeReloadFile(fileId, filePath, hunkId, texts);
+    const cs = makeChangeset(csId, [file]);
+    let s = initialState([cs]);
+    const key = `user:${hunkId}:${lineIdx}`;
+    const cap = captureAnchorContext(file.hunks[0].lines, lineIdx);
+    s = reducer(s, {
+      type: "ADD_REPLY",
+      targetKey: key,
+      reply: {
+        id: "r1",
+        author: "you",
+        body: "yo",
+        createdAt: "t",
+        anchorPath: filePath,
+        anchorContext: cap.context,
+        anchorHash: cap.hash,
+        originSha: csId,
+        originType: "committed",
+      },
+    });
+    return { state: s, key };
+  }
+
+  it("keeps the reply inline at the same logical position when the line is unchanged", () => {
+    const { state } = startWithReply(
+      "cs-old",
+      "f1",
+      "f1.ts",
+      "f1#h1",
+      ["a", "b", "anchor", "c", "d"],
+      2,
+    );
+    // Reload: same content, but new ChangeSet id (sha bumped) and a new hunk id.
+    const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", [
+      "a", "b", "anchor", "c", "d",
+    ]);
+    const reloaded = makeChangeset("cs-new", [reloadFile]);
+    const s = reducer(state, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(Object.keys(s.replies)).toEqual([`user:f1-new#h1:2`]);
+    expect(s.replies[`user:f1-new#h1:2`]).toHaveLength(1);
+    expect(s.detachedReplies).toEqual([]);
+    // Cursor moved to the new changeset (file 0 since the file path matched).
+    expect(s.cursor.changesetId).toBe("cs-new");
+    expect(s.cursor.fileId).toBe("f1-new");
+  });
+
+  it("re-anchors the reply when the matching window has shifted within the file", () => {
+    const { state } = startWithReply(
+      "cs-old",
+      "f1",
+      "f1.ts",
+      "f1#h1",
+      ["a", "b", "anchor", "c", "d"],
+      2,
+    );
+    const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", [
+      "noise1", "noise2", "a", "b", "anchor", "c", "d",
+    ]);
+    const reloaded = makeChangeset("cs-new", [reloadFile]);
+    const s = reducer(state, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(Object.keys(s.replies)).toEqual([`user:f1-new#h1:4`]);
+    expect(s.detachedReplies).toEqual([]);
+  });
+
+  it("detaches the reply when its anchor is rewritten beyond recognition", () => {
+    const { state } = startWithReply(
+      "cs-old",
+      "f1",
+      "f1.ts",
+      "f1#h1",
+      ["a", "b", "anchor", "c", "d"],
+      2,
+    );
+    const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", [
+      "totally", "different", "lines", "here", "now",
+    ]);
+    const reloaded = makeChangeset("cs-new", [reloadFile]);
+    const s = reducer(state, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(s.replies).toEqual({});
+    expect(s.detachedReplies).toHaveLength(1);
+    expect(s.detachedReplies[0].reply.id).toBe("r1");
+    expect(s.detachedReplies[0].threadKey).toBe(`user:f1#h1:2`);
+  });
+
+  it("detaches when the file the reply was anchored to no longer exists", () => {
+    const { state } = startWithReply(
+      "cs-old",
+      "f1",
+      "f1.ts",
+      "f1#h1",
+      ["a", "b", "anchor", "c", "d"],
+      2,
+    );
+    const otherFile = makeReloadFile("f2", "f2.ts", "f2#h1", ["x", "y", "z"]);
+    const reloaded = makeChangeset("cs-new", [otherFile]);
+    const s = reducer(state, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(s.replies).toEqual({});
+    expect(s.detachedReplies).toHaveLength(1);
+  });
+
+  it("falls back to file 0 when the cursor's previous file is gone", () => {
+    const { state } = startWithReply(
+      "cs-old",
+      "f1",
+      "f1.ts",
+      "f1#h1",
+      ["a", "b", "anchor", "c", "d"],
+      2,
+    );
+    const otherFile = makeReloadFile("f2", "f2.ts", "f2#h1", ["x", "y", "z"]);
+    const reloaded = makeChangeset("cs-new", [otherFile]);
+    const s = reducer(state, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(s.cursor.fileId).toBe("f2");
+  });
+
+  it("is a no-op when prevChangesetId is unknown", () => {
+    const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", ["a"]);
+    const reloaded = makeChangeset("cs-new", [reloadFile]);
+    const s = reducer(s0, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "no-such-cs",
+      changeset: reloaded,
+    });
     expect(s).toBe(s0);
   });
 });

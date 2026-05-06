@@ -12,7 +12,13 @@
  * a sync queue and the shape stays roughly the same.
  */
 
-import type { ChangeSet, Cursor, Reply, ReviewState } from "./types";
+import type {
+  ChangeSet,
+  Cursor,
+  DetachedReply,
+  Reply,
+  ReviewState,
+} from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
@@ -21,11 +27,11 @@ const STORAGE_KEY = "shippable:review:v1";
  * the same change. Old blobs in users' localStorage are migrated forward
  * on load; we never write old shapes back.
  */
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = 2;
 
 /** What we actually serialize — Sets become arrays, ephemeral fields drop. */
 interface PersistedSnapshot {
-  v: 1;
+  v: 2;
   cursor: Cursor;
   /** Set<number> → number[] per hunk id. */
   readLines: Record<string, number[]>;
@@ -34,6 +40,11 @@ interface PersistedSnapshot {
   ackedNotes: string[];
   replies: Record<string, Reply[]>;
   drafts: Record<string, string>;
+  /**
+   * Replies that detached during a reload pass. Carry their original
+   * threadKey so the persisted shape stays interpretable. New in v2.
+   */
+  detachedReplies: DetachedReply[];
 }
 
 /**
@@ -48,7 +59,14 @@ interface PersistedSnapshot {
  * No backwards migrations — once written, `v: N` blobs only travel forward.
  */
 const migrations: Record<number, (prev: unknown) => unknown> = {
-  // empty: v: 1 is the head.
+  // v: 2 added the detachedReplies array and per-reply anchor fields. Old
+  // replies have no anchor info; the reload pass falls back to in-place
+  // hashing for them, so they degrade rather than break.
+  2: (v1) => ({
+    ...(v1 as PersistedSnapshot),
+    v: 2,
+    detachedReplies: [],
+  }),
 };
 
 /**
@@ -88,6 +106,7 @@ export interface HydratedSession {
     | "dismissedGuides"
     | "ackedNotes"
     | "replies"
+    | "detachedReplies"
   > | null;
   drafts: Record<string, string>;
 }
@@ -106,7 +125,7 @@ export function buildSnapshot(
     readLines[hunkId] = Array.from(set).sort((a, b) => a - b);
   }
   return {
-    v: 1,
+    v: 2,
     cursor: state.cursor,
     readLines,
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
@@ -114,6 +133,7 @@ export function buildSnapshot(
     ackedNotes: Array.from(state.ackedNotes).sort(),
     replies: state.replies,
     drafts,
+    detachedReplies: state.detachedReplies,
   };
 }
 
@@ -240,6 +260,9 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
       dismissedGuides: new Set(snapshot.dismissedGuides),
       ackedNotes: new Set(snapshot.ackedNotes),
       replies: filterRepliesByHunk(snapshot.replies, validHunkIds),
+      // Detached entries don't reference live hunk ids — they survive even
+      // when the originating hunk is gone, by definition. Keep them all.
+      detachedReplies: snapshot.detachedReplies,
     },
     drafts: filterDraftsByHunk(snapshot.drafts, validHunkIds),
   };
@@ -251,14 +274,15 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
   return (
-    o.v === 1 &&
+    o.v === 2 &&
     typeof o.cursor === "object" &&
     typeof o.readLines === "object" &&
     Array.isArray(o.reviewedFiles) &&
     Array.isArray(o.dismissedGuides) &&
     Array.isArray(o.ackedNotes) &&
     typeof o.replies === "object" &&
-    typeof o.drafts === "object"
+    typeof o.drafts === "object" &&
+    Array.isArray(o.detachedReplies)
   );
 }
 

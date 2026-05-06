@@ -160,6 +160,32 @@ export interface Reply {
    * the field — those rehydrate to `[]` via the persist-layer migration.
    */
   agentReplies?: AgentReply[];
+  /**
+   * Worktree HEAD at write time (or the loaded ChangeSet id for non-worktree
+   * loads). The Sidebar's "Detached" section displays the short prefix on a
+   * "view at <sha7>" affordance for committed entries.
+   */
+  originSha?: string;
+  /**
+   * Whether this reply was authored against a committed view of the file or
+   * the working-tree state. Drives the caption shown on detached entries.
+   * Absent on legacy replies that pre-date anchored comments — they render
+   * as `committed` by default.
+   */
+  originType?: "committed" | "dirty";
+  /** Repo-relative file path the reply was anchored to at write time. */
+  anchorPath?: string;
+  /**
+   * Up to 10 lines centered on the anchor (5 above, anchor, 4 below). Wide
+   * enough to make the detached snippet self-explanatory; trimmed at the
+   * edges of the hunk. Display only — never used for matching.
+   */
+  anchorContext?: DiffLine[];
+  /**
+   * Hash of the inner 5 lines (anchor ± 2). Used by the reload pass to find
+   * the same code in the new diff. See `anchor.ts`.
+   */
+  anchorHash?: string;
 }
 
 /**
@@ -174,6 +200,18 @@ export interface AgentReply {
   postedAt: string;
   /** Optional generic identity surface; reserved for future per-harness label. */
   agentLabel?: string;
+}
+
+/**
+ * A reply whose anchor no longer matches anywhere in the new diff. Carries
+ * its original key so the persisted shape round-trips cleanly; `reply` is
+ * unchanged from when it was authored — the `anchorContext` snippet on it
+ * is what the Sidebar renders.
+ */
+export interface DetachedReply {
+  reply: Reply;
+  /** The reply key (note:/user:/block:/etc.) the reply was attached to. */
+  threadKey: string;
 }
 
 /**
@@ -219,6 +257,13 @@ export interface ReviewState {
   previewedFiles: Set<string>;
   /** Active shift-extended selection; null when the cursor is a single line. */
   selection: LineSelection | null;
+  /**
+   * Replies whose anchor didn't match anywhere in the latest reload of their
+   * changeset. Per `docs/plans/worktree-live-reload.md`, the Sidebar surfaces
+   * these in a "Detached" group so the thread is still visible even though
+   * the line it was attached to is gone.
+   */
+  detachedReplies: DetachedReply[];
 }
 
 // ── Review plan (the "where to begin" primitive) ──────────────────────────
@@ -334,6 +379,13 @@ export interface WorktreeSource {
   worktreePath: string;
   commitSha: string;
   branch: string | null;
+  /**
+   * True when the loaded view is `HEAD..working-tree` (uncommitted edits)
+   * instead of `HEAD~1..HEAD`. Set by slice (a) of the live-reload plan;
+   * comments authored against this view are tagged `originType: "dirty"`.
+   * Absent / false means a normal committed view.
+   */
+  dirty?: boolean;
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {

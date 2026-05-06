@@ -243,3 +243,93 @@ describe("persist — unknown future version fails closed", () => {
     expect(loadSession([])).toEqual({ state: null, drafts: {} });
   });
 });
+
+// Bug class: anchored-comment fields and detachedReplies must round-trip
+// cleanly. Without this, a comment that detached during one session would
+// silently disappear on the next reload of the page.
+describe("persist — v2 round-trip with anchor + detached state", () => {
+  it("preserves anchorContext, anchorHash, originSha, originType across save/load", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const anchorContext: DiffLine[] = [
+      { kind: "context", text: "line a", oldNo: 1, newNo: 1 },
+      { kind: "context", text: "line b", oldNo: 2, newNo: 2 },
+    ];
+    const reply: Reply = {
+      id: "r1",
+      author: "you",
+      body: "anchored",
+      createdAt: "2026-04-30T00:00:00Z",
+      enqueuedCommentId: null,
+      anchorPath: "cs1/f1.ts",
+      anchorContext,
+      anchorHash: "deadbeef",
+      originSha: "abc1234",
+      originType: "committed",
+    };
+    const state = {
+      ...initialState([cs]),
+      replies: { [key]: [reply] },
+    };
+    saveSession(state, {});
+
+    const hydrated = loadSession([cs]);
+    const r = hydrated.state!.replies[key][0];
+    expect(r.anchorPath).toBe("cs1/f1.ts");
+    expect(r.anchorContext).toEqual(anchorContext);
+    expect(r.anchorHash).toBe("deadbeef");
+    expect(r.originSha).toBe("abc1234");
+    expect(r.originType).toBe("committed");
+  });
+
+  it("round-trips detachedReplies", () => {
+    const cs = makeChangeset();
+    const detached = {
+      reply: {
+        id: "r-d",
+        author: "you",
+        body: "stranded",
+        createdAt: "2026-04-30T00:00:00Z",
+        anchorPath: "cs1/gone.ts",
+        anchorContext: [
+          { kind: "context" as const, text: "vanishing", oldNo: 1, newNo: 1 },
+        ],
+        anchorHash: "feedface",
+        originSha: "1234567890",
+        originType: "dirty" as const,
+      },
+      threadKey: "user:cs1/f1#h1:0",
+    };
+    const state = {
+      ...initialState([cs]),
+      detachedReplies: [detached],
+    };
+    saveSession(state, {});
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state!.detachedReplies).toEqual([detached]);
+  });
+
+  it("migrates a v1 snapshot by adding an empty detachedReplies array", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const v1 = {
+      v: 1,
+      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
+      readLines: {},
+      reviewedFiles: [],
+      dismissedGuides: [],
+      ackedNotes: [],
+      replies: {
+        [key]: [
+          { id: "r1", author: "a", body: "hi", createdAt: "2026-04-30T00:00:00Z" },
+        ],
+      },
+      drafts: {},
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(v1));
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state).not.toBeNull();
+    expect(hydrated.state!.detachedReplies).toEqual([]);
+    expect(hydrated.state!.replies[key]).toHaveLength(1);
+  });
+});

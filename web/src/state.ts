@@ -2,11 +2,22 @@ import type {
   AgentReply,
   Cursor,
   ChangeSet,
+  DetachedReply,
+  DiffFile,
+  Hunk,
   LineSelection,
   Reply,
   ReviewState,
 } from "./types";
-import { noteKey } from "./types";
+import {
+  blockCommentKey,
+  hunkSummaryReplyKey,
+  lineNoteReplyKey,
+  noteKey,
+  teammateReplyKey,
+  userCommentKey,
+} from "./types";
+import { findAnchorInFile, hashAnchorWindow } from "./anchor";
 
 /**
  * Wire shape of a polled agent reply: same as `AgentReply` plus the
@@ -45,6 +56,7 @@ export function initialState(
       fullExpandedFiles: new Set(),
       previewedFiles: new Set(),
       selection: null,
+      detachedReplies: [],
     };
   }
   const cs = seed[0];
@@ -63,6 +75,7 @@ export function initialState(
     fullExpandedFiles: new Set(),
     previewedFiles: new Set(),
     selection: null,
+    detachedReplies: [],
   };
 }
 
@@ -95,6 +108,15 @@ export type Action =
   | { type: "COLLAPSE_SELECTION" }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
   | { type: "LOAD_CHANGESET"; changeset: ChangeSet; replies?: Record<string, Reply[]> }
+  | {
+      // Reload a changeset that's already in state with a fresh snapshot,
+      // preserving comments via the content-anchor pass. The new ChangeSet
+      // typically carries a different id (sha changed); `prevChangesetId`
+      // tells the reducer which entry to replace.
+      type: "RELOAD_CHANGESET";
+      prevChangesetId: string;
+      changeset: ChangeSet;
+    }
   | { type: "DISMISS_GUIDE"; guideId: string }
   | { type: "TOGGLE_ACK"; hunkId: string; lineIdx: number }
   | { type: "ADD_REPLY"; targetKey: string; reply: Reply }
@@ -206,6 +228,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
           : state.replies,
       };
     }
+    case "RELOAD_CHANGESET":
+      return reloadChangeset(state, action.prevChangesetId, action.changeset);
     case "DISMISS_GUIDE": {
       const next = new Set(state.dismissedGuides);
       next.add(action.guideId);
@@ -298,6 +322,215 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "TOGGLE_FILE_REVIEWED":
       return { ...state, reviewedFiles: togglein(state.reviewedFiles, action.fileId) };
+  }
+}
+
+/**
+ * Replace the changeset with id `prevId` with `cs`, then re-route every
+ * reply targeting the old changeset's hunks via the content-anchor pass:
+ *   strict match → keep inline at the same logical position (with new id)
+ *   re-anchor    → rewrite the key to point at where the content ended up
+ *   no match     → push to detachedReplies
+ *
+ * Replies on other changesets are untouched. The cursor is best-effort:
+ * same file if it still exists in the new diff, else file 0.
+ */
+function reloadChangeset(
+  state: ReviewState,
+  prevId: string,
+  cs: ChangeSet,
+): ReviewState {
+  const oldIdx = state.changesets.findIndex((c) => c.id === prevId);
+  if (oldIdx < 0) return state;
+  const oldCs = state.changesets[oldIdx];
+  const firstFile = cs.files[0];
+  const firstHunk = firstFile?.hunks[0];
+  if (!firstFile || !firstHunk) return state;
+
+  const nextChangesets = state.changesets.map((c, i) =>
+    i === oldIdx ? cs : c,
+  );
+
+  // Pre-index old hunks so we can pull anchorPath / hunkIdx out of any reply
+  // key whose hunkId belongs to this changeset.
+  const oldHunkInfo = new Map<
+    string,
+    { file: DiffFile; fileIdx: number; hunkIdx: number; hunk: Hunk }
+  >();
+  for (let fi = 0; fi < oldCs.files.length; fi++) {
+    const f = oldCs.files[fi];
+    for (let hi = 0; hi < f.hunks.length; hi++) {
+      const h = f.hunks[hi];
+      oldHunkInfo.set(h.id, { file: f, fileIdx: fi, hunkIdx: hi, hunk: h });
+    }
+  }
+
+  // New file lookup by path, and a parallel hunk-id-by-path-and-index map so
+  // we can re-emit reply keys against the new hunk ids.
+  const newFileByPath = new Map<string, DiffFile>();
+  for (const f of cs.files) newFileByPath.set(f.path, f);
+
+  const nextReplies: Record<string, Reply[]> = {};
+  const nextDetached: DetachedReply[] = [...state.detachedReplies];
+
+  for (const [key, list] of Object.entries(state.replies)) {
+    const parsed = parseReplyKey(key);
+    if (!parsed) {
+      // Not a key we understand — leave it untouched.
+      nextReplies[key] = list;
+      continue;
+    }
+    const oldRef = oldHunkInfo.get(parsed.hunkId);
+    if (!oldRef) {
+      // This reply belongs to a different changeset; pass through.
+      nextReplies[key] = list;
+      continue;
+    }
+
+    // For block keys we anchor on the lo line; the original span size is
+    // preserved when we know the new lineIdx.
+    const anchorLineIdx =
+      parsed.kind === "block" ? parsed.lo : parsed.lineIdx;
+    const oldLineCount = oldRef.hunk.lines.length;
+    const safeOldIdx = Math.max(0, Math.min(oldLineCount - 1, anchorLineIdx));
+
+    // Each reply may carry its own anchorHash. Replies authored before slice
+    // (c) won't have one — fall back to hashing the old hunk in place so we
+    // still get a best-effort match.
+    const fallbackPath = oldRef.file.path;
+    const fallbackHash = hashAnchorWindow(oldRef.hunk.lines, safeOldIdx);
+
+    // We resolve the *thread's* destination from the first reply that has a
+    // hash; if every reply lacks one we use the in-place fallback. This
+    // keeps a thread together rather than scattering replies one-by-one.
+    const threadHash =
+      list.find((r) => r.anchorHash)?.anchorHash ?? fallbackHash;
+    const threadPath =
+      list.find((r) => r.anchorPath)?.anchorPath ?? fallbackPath;
+
+    const targetFile = newFileByPath.get(threadPath);
+    const match = targetFile
+      ? findAnchorInFile(targetFile.hunks, threadHash, {
+          hunkIdx: oldRef.hunkIdx,
+          lineIdx: safeOldIdx,
+        })
+      : null;
+
+    if (targetFile && match) {
+      const matchedHunk = targetFile.hunks[match.hunkIdx];
+      const newKey = rekey(parsed, matchedHunk.id, match.lineIdx, matchedHunk.lines.length);
+      const merged = nextReplies[newKey] ?? [];
+      nextReplies[newKey] = [...merged, ...list];
+      continue;
+    }
+
+    for (const r of list) {
+      nextDetached.push({ reply: r, threadKey: key });
+    }
+  }
+
+  // Cursor: same file if it still exists in the new cs, else file 0.
+  const wasOnReloadedCs = state.cursor.changesetId === prevId;
+  let nextCursor: Cursor;
+  if (wasOnReloadedCs) {
+    const oldCursorFile = oldCs.files.find((f) => f.id === state.cursor.fileId);
+    const cursorFile =
+      (oldCursorFile && cs.files.find((f) => f.path === oldCursorFile.path)) ??
+      firstFile;
+    const cursorHunk = cursorFile.hunks[0];
+    nextCursor = {
+      changesetId: cs.id,
+      fileId: cursorFile.id,
+      hunkId: cursorHunk.id,
+      lineIdx: 0,
+    };
+  } else {
+    nextCursor = state.cursor;
+  }
+
+  return {
+    ...state,
+    changesets: nextChangesets,
+    cursor: nextCursor,
+    selection: null,
+    readLines: addLine(state.readLines, nextCursor.hunkId, nextCursor.lineIdx),
+    replies: nextReplies,
+    detachedReplies: nextDetached,
+  };
+}
+
+type ParsedReplyKey =
+  | { kind: "note"; hunkId: string; lineIdx: number }
+  | { kind: "user"; hunkId: string; lineIdx: number }
+  | { kind: "block"; hunkId: string; lo: number; hi: number; lineIdx: number }
+  | { kind: "hunkSummary"; hunkId: string; lineIdx: 0 }
+  | { kind: "teammate"; hunkId: string; lineIdx: 0 };
+
+/**
+ * Reply keys embed a hunkId that can itself contain `:` and `/` (see
+ * types.ts). Split off the prefix first; for hunk-line keys, the line
+ * (or lo-hi range) is the trailing component after the LAST colon.
+ */
+function parseReplyKey(key: string): ParsedReplyKey | null {
+  const colon = key.indexOf(":");
+  if (colon < 0) return null;
+  const prefix = key.slice(0, colon);
+  const rest = key.slice(colon + 1);
+  switch (prefix) {
+    case "note":
+    case "user": {
+      const last = rest.lastIndexOf(":");
+      if (last < 0) return null;
+      const hunkId = rest.slice(0, last);
+      const lineIdx = parseInt(rest.slice(last + 1), 10);
+      if (!Number.isFinite(lineIdx)) return null;
+      return prefix === "note"
+        ? { kind: "note", hunkId, lineIdx }
+        : { kind: "user", hunkId, lineIdx };
+    }
+    case "block": {
+      const last = rest.lastIndexOf(":");
+      if (last < 0) return null;
+      const hunkId = rest.slice(0, last);
+      const range = rest.slice(last + 1);
+      const dash = range.indexOf("-");
+      if (dash < 0) return null;
+      const lo = parseInt(range.slice(0, dash), 10);
+      const hi = parseInt(range.slice(dash + 1), 10);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+      return { kind: "block", hunkId, lo, hi, lineIdx: lo };
+    }
+    case "hunkSummary":
+      return { kind: "hunkSummary", hunkId: rest, lineIdx: 0 };
+    case "teammate":
+      return { kind: "teammate", hunkId: rest, lineIdx: 0 };
+    default:
+      return null;
+  }
+}
+
+/** Re-emit a reply key against `newHunkId` at `newLineIdx`. Block ranges
+ *  preserve their original size, clamped to the new hunk's line count. */
+function rekey(
+  parsed: ParsedReplyKey,
+  newHunkId: string,
+  newLineIdx: number,
+  newHunkLineCount: number,
+): string {
+  switch (parsed.kind) {
+    case "note":
+      return lineNoteReplyKey(newHunkId, newLineIdx);
+    case "user":
+      return userCommentKey(newHunkId, newLineIdx);
+    case "block": {
+      const span = parsed.hi - parsed.lo;
+      const newHi = Math.min(newHunkLineCount - 1, newLineIdx + span);
+      return blockCommentKey(newHunkId, newLineIdx, newHi);
+    }
+    case "hunkSummary":
+      return hunkSummaryReplyKey(newHunkId);
+    case "teammate":
+      return teammateReplyKey(newHunkId);
   }
 }
 

@@ -94,6 +94,7 @@ export default function App() {
       dismissedGuides: persisted.dismissedGuides,
       ackedNotes: persisted.ackedNotes,
       replies: { ...initial.replies, ...persisted.replies },
+      detachedReplies: persisted.detachedReplies,
     };
   });
   const [recents, setRecents] = useState<RecentEntry[]>(() => {
@@ -129,6 +130,21 @@ export default function App() {
     setRecents(pushRecent(cs, replies, source));
   }
 
+  // Reload-in-place. Replaces the changeset whose id is `prevChangesetId`
+  // and runs the content-anchor pass over its replies. Used by the debug
+  // "reload now" button today; slice (a) of the live-reload plan will
+  // wire the polling banner to this same path.
+  function handleReloadChangeset(
+    prevChangesetId: string,
+    cs: ChangeSet,
+    source: RecentSource,
+  ) {
+    dispatch({ type: "RELOAD_CHANGESET", prevChangesetId, changeset: cs });
+    // Round-trip through recents so the next welcome screen surfaces the
+    // newest sha rather than pinning the stale one.
+    setRecents(pushRecent(cs, {}, source));
+  }
+
   if (state.changesets.length === 0) {
     return (
       <Welcome
@@ -149,6 +165,7 @@ export default function App() {
       setThemeId={setThemeId}
       onLoadChangeset={handleLoadChangeset}
       currentSource={currentSource}
+      onReloadChangeset={handleReloadChangeset}
     />
   );
 }
