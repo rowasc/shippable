@@ -5,6 +5,8 @@ import {
   beforeAll,
   afterAll,
   beforeEach,
+  vi,
+  afterEach,
 } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -797,6 +799,200 @@ describe("POST /api/github/auth/clear", () => {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "null" },
       body: JSON.stringify({ host: "github.com" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+// ─── POST /api/github/pr/load ─────────────────────────────────────────────
+
+// Minimal GitHub API canned responses for pr/load integration tests.
+const GH_PR_META = {
+  title: "Test PR",
+  body: "description",
+  state: "open",
+  merged: false,
+  html_url: "https://github.com/owner/repo/pull/1",
+  head: { sha: "headsha123", ref: "feature" },
+  base: { sha: "basesha456", ref: "main" },
+  user: { login: "dev" },
+  changed_files: 1,
+};
+const GH_PR_FILES = [
+  {
+    filename: "src/hello.ts",
+    status: "modified",
+    patch: "@@ -1,2 +1,2 @@\n-old\n+new\n context",
+  },
+];
+
+function makeGhResponse(body: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers({ "Content-Type": "application/json" }),
+    json: () => Promise.resolve(body),
+  } as unknown as Response;
+}
+
+/**
+ * Returns a fetch stub that routes github.com requests to canned responses
+ * and forwards everything else to the real fetch (so the local test server
+ * is still reachable).
+ */
+function makeSelectiveFetch(
+  githubHandler: (url: string) => Response,
+): typeof fetch {
+  const realFetch = globalThis.fetch;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (input: any, init?: any) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("api.github.com")) {
+      return Promise.resolve(githubHandler(url));
+    }
+    return realFetch(input, init);
+  };
+}
+
+describe("POST /api/github/pr/load", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns 400 for a missing prUrl", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {});
+    expect(r.status).toBe(400);
+  });
+
+  it("returns 400 for a malformed URL", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "not-a-url",
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/invalid PR URL/);
+  });
+
+  it("returns 400 for a URL that is not a PR path", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/issues/1",
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toMatch(/invalid PR URL/);
+  });
+
+  it("returns 401 github_token_required when no token is stored", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(401);
+    expect(r.body.error).toBe("github_token_required");
+    expect(r.body.host).toBe("github.com");
+  });
+
+  it("returns { changeSet } on success", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_integration_test",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch((url) => {
+        if (url.includes("/pulls/1/files")) return makeGhResponse(GH_PR_FILES);
+        if (url.includes("/pulls/1/comments")) return makeGhResponse([]);
+        if (url.includes("/issues/1/comments")) return makeGhResponse([]);
+        if (url.includes("/pulls/1")) return makeGhResponse(GH_PR_META);
+        return makeGhResponse({});
+      }),
+    );
+
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.changeSet).toBeDefined();
+    expect(r.body.changeSet.id).toBe("pr:github.com:owner:repo:1");
+    expect(r.body.changeSet.prSource).toBeDefined();
+    expect(r.body.changeSet.prSource.state).toBe("open");
+    expect(r.body.changeSet.files).toHaveLength(1);
+    expect(r.body.changeSet.prConversation).toEqual([]);
+  });
+
+  it("returns 403 github_auth_failed on upstream 403 rate-limit", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_integration_test",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch(() => ({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "X-RateLimit-Remaining": "0" }),
+        json: () => Promise.resolve({ message: "rate limited" }),
+      } as unknown as Response)),
+    );
+
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe("github_auth_failed");
+    expect(r.body.hint).toBe("rate-limit");
+  });
+
+  it("returns 404 github_pr_not_found on upstream 404", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_integration_test",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch(() => ({
+        ok: false,
+        status: 404,
+        headers: new Headers(),
+        json: () => Promise.resolve({ message: "Not Found" }),
+      } as unknown as Response)),
+    );
+
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(404);
+    expect(r.body.error).toBe("github_pr_not_found");
+  });
+
+  it("returns 502 github_upstream on 5xx from GitHub", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_integration_test",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch(() => ({
+        ok: false,
+        status: 503,
+        headers: new Headers(),
+        json: () => Promise.resolve({ message: "Service Unavailable" }),
+      } as unknown as Response)),
+    );
+
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(502);
+    expect(r.body.error).toBe("github_upstream");
+  });
+
+  it("denies requests with an opaque origin", async () => {
+    const res = await fetch(`${baseUrl}/api/github/pr/load`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "null" },
+      body: JSON.stringify({ prUrl: "https://github.com/owner/repo/pull/1" }),
     });
     expect(res.status).toBe(403);
   });

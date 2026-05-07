@@ -11,6 +11,9 @@ import * as mcpStatus from "./mcp-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
 import * as authStore from "./github/auth-store.ts";
+import { parsePrUrl } from "./github/url.ts";
+import { loadPr } from "./github/pr-load.ts";
+import { GithubApiError } from "./github/api-client.ts";
 import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 import type { DefinitionRequest } from "../../web/src/definitionTypes.ts";
@@ -108,6 +111,9 @@ export function createApp(): Server {
     }
     if (req.method === "POST" && req.url === "/api/github/auth/clear") {
       return await handleGithubAuthClear(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/github/pr/load") {
+      return await handleGithubPrLoad(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/enqueue") {
       return await handleAgentEnqueue(req, res, origin);
@@ -909,6 +915,93 @@ async function handleGithubAuthClear(
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ ok: true }));
+}
+
+async function handleGithubPrLoad(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { prUrl?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+
+  if (typeof parsed.prUrl !== "string" || !parsed.prUrl) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { prUrl: string }" }));
+    return;
+  }
+
+  let coords: ReturnType<typeof parsePrUrl>;
+  try {
+    coords = parsePrUrl(parsed.prUrl);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+
+  const token = authStore.getToken(coords.host);
+  if (!token) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({ error: "github_token_required", host: coords.host }),
+    );
+    return;
+  }
+
+  try {
+    const changeSet = await loadPr(coords, token);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ changeSet }));
+  } catch (err) {
+    if (err instanceof GithubApiError) {
+      const e = err.error;
+      if (e.kind === "github_token_required") {
+        writeCorsHeaders(res, origin);
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.kind, host: e.host }));
+        return;
+      }
+      if (e.kind === "github_auth_failed") {
+        writeCorsHeaders(res, origin);
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.kind, host: e.host, hint: e.hint }));
+        return;
+      }
+      if (e.kind === "github_pr_not_found") {
+        writeCorsHeaders(res, origin);
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e.kind }));
+        return;
+      }
+      if (e.kind === "github_upstream") {
+        writeCorsHeaders(res, origin);
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: e.kind,
+            status: e.status,
+            message: e.message,
+          }),
+        );
+        return;
+      }
+    }
+    throw err;
+  }
 }
 
 const OUTCOMES: readonly agentQueue.Outcome[] = ["addressed", "declined", "noted"];

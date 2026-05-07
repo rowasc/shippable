@@ -6,6 +6,8 @@ export interface DiffLine {
   oldNo?: number;
   newNo?: number;
   aiNote?: AiNote;
+  /** Read-only line-anchored PR review comments loaded from GitHub. */
+  prReviewComments?: PrReviewComment[];
 }
 
 export type AiNoteSeverity = "info" | "question" | "warning";
@@ -131,6 +133,18 @@ export interface ChangeSet {
    * provenance survives page reloads and changeset switches.
    */
   worktreeSource?: WorktreeSource;
+  /**
+   * Set when this ChangeSet was loaded from a GitHub PR. Carries PR metadata
+   * so the header can show title, state, refs, and a Refresh button.
+   * May coexist with `worktreeSource` when a local worktree is overlaid with
+   * matching PR metadata (worktree↔PR overlay).
+   */
+  prSource?: PrSource;
+  /**
+   * Issue-level discussion comments from the PR. Populated only when
+   * `prSource` is set; empty array means the PR has no issue comments.
+   */
+  prConversation?: PrConversationItem[];
 }
 
 export interface Cursor {
@@ -458,6 +472,55 @@ export interface WorktreeProvenance {
   path: string;
   branch: string | null;
   state: WorktreeState;
+}
+
+/**
+ * GitHub PR provenance carried alongside a ChangeSet when the diff was loaded
+ * from a GitHub (or GHE) pull request. Carries enough metadata to render the
+ * PR header and reissue a refresh. May coexist with `worktreeSource` when a
+ * local-diff ChangeSet is overlaid with upstream PR metadata.
+ */
+export interface PrSource {
+  host: string;
+  owner: string;
+  repo: string;
+  number: number;
+  htmlUrl: string;
+  headSha: string;
+  baseSha: string;
+  state: "open" | "closed" | "merged";
+  title: string;
+  body: string;
+  baseRef: string;
+  headRef: string;
+  /** ISO timestamp of when this PR data was last fetched from GitHub. */
+  lastFetchedAt: string;
+  /** Present when GitHub truncated the diff response. */
+  truncation?: { kind: "files" | "patch"; reason: string };
+}
+
+/** Issue-level (non-line-anchored) PR discussion comment. */
+export interface PrConversationItem {
+  id: number;
+  author: string;
+  createdAt: string;
+  body: string;
+  htmlUrl: string;
+}
+
+/**
+ * Line-anchored PR review comment loaded from GitHub. Attached to
+ * `DiffLine.prReviewComments`; read-only annotations — not persisted in
+ * `ReviewState`, re-fetched with the diff on each load.
+ */
+export interface PrReviewComment {
+  id: number;
+  author: string;
+  createdAt: string;
+  body: string;
+  htmlUrl: string;
+  /** Present for multi-line comments; absent for single-line. */
+  lineSpan?: { lo: number; hi: number };
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {
