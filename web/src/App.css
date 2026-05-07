@@ -129,9 +129,19 @@ body,
 .topbar__btn kbd {
   color: var(--fg-mute);
 }
+/* Destructive action — visible at rest, not just on hover. Borders the
+   button in red but dimmed; sits with extra left margin so it doesn't
+   sit flush against benign neighbors like 'help'. */
+.topbar__btn--danger {
+  color: var(--red);
+  border-color: var(--red);
+  opacity: 0.55;
+  margin-left: 18px;
+}
 .topbar__btn--danger:hover:not(:disabled) {
   color: var(--red);
   border-color: var(--red);
+  opacity: 1;
 }
 /* Plan chip — sits next to the title; reads as part of the changeset
    metadata. Brighter when the modal is open so the user knows where
