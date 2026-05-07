@@ -115,6 +115,22 @@
   stroke-dasharray: 4 3;
 }
 
+.plan-diagram__node[data-role="context"] {
+  opacity: 0.55;
+}
+
+.plan-diagram__node[data-role="context"] rect {
+  fill: color-mix(in srgb, var(--bg-1) 80%, transparent);
+  stroke: color-mix(in srgb, var(--border) 60%, transparent);
+  stroke-dasharray: 2 4;
+}
+
+.plan-diagram__node[data-role="context"] .plan-diagram__node-base,
+.plan-diagram__node[data-role="context"] .plan-diagram__node-dir,
+.plan-diagram__node[data-role="context"] .plan-diagram__node-meta {
+  font-style: italic;
+}
+
 .plan-diagram__node-dir {
   fill: var(--fg-mute);
   font-size: 11px;

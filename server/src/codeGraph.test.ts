@@ -8,7 +8,12 @@ import {
   invalidateCodeGraphForWorkspace,
   _resetCodeGraphCacheForTests,
 } from "./codeGraph.ts";
-import { makeStubLspModule, type StubLspHandle } from "./__fixtures__/stub-lsp.ts";
+import {
+  makeStubLspModule,
+  type StubDocumentSymbol,
+  type StubLocation,
+  type StubLspHandle,
+} from "./__fixtures__/stub-lsp.ts";
 
 const ORIGINAL_PHP_LSP = process.env.SHIPPABLE_PHP_LSP;
 const ORIGINAL_TS_LSP = process.env.SHIPPABLE_TYPESCRIPT_LSP;
@@ -144,9 +149,11 @@ describe("resolveCodeGraph (LSP-derived edges)", () => {
     ]);
   });
 
-  it("drops references that point outside the requested file set", async () => {
+  it("diff scope keeps edges whose target is an unchanged repo file (context node)", async () => {
     const aPath = writeFile("A.php", "<?php\nclass A {}\n");
     const inSetCaller = writeFile("InSet.php", "<?php\nuse A;\n");
+    // OutOfSet.php exists in the workspace but isn't part of the diff.
+    // Its edge should still surface in the graph as a context node.
     writeFile("OutOfSet.php", "<?php\nuse A;\n");
 
     const stub = makeStub({
@@ -173,9 +180,189 @@ describe("resolveCodeGraph (LSP-derived edges)", () => {
       ],
     });
 
-    expect(result.graph.edges.map((e) => `${e.fromPath}->${e.toPath}`)).toEqual([
-      "A.php->InSet.php",
-    ]);
+    const edgePairs = result.graph.edges
+      .map((e) => `${e.fromPath}->${e.toPath}`)
+      .sort();
+    expect(edgePairs).toEqual(["A.php->InSet.php", "A.php->OutOfSet.php"]);
+
+    const nodesByPath = new Map(result.graph.nodes.map((n) => [n.path, n]));
+    expect(nodesByPath.get("A.php")?.role).toBe("changed");
+    expect(nodesByPath.get("InSet.php")?.role).toBe("changed");
+    expect(nodesByPath.get("OutOfSet.php")?.role).toBe("context");
+  });
+
+  it("diff scope drops edges to vendor/ and node_modules/", async () => {
+    const aPath = writeFile("A.php", "<?php\nclass A {}\n");
+    const vendorPath = writeFile("vendor/lib/Helper.php", "<?php\nuse A;\n");
+    const nodeModulesPath = writeFile(
+      "node_modules/pkg/Stub.php",
+      "<?php\nuse A;\n",
+    );
+    const distPath = writeFile("dist/built.php", "<?php\nuse A;\n");
+
+    const stub = makeStub({
+      documentSymbol: {
+        [aPath]: [{ name: "A", kind: 5, range: range(1, 6, 7), selectionRange: range(1, 6, 7) }],
+      },
+      references: {
+        [`${aPath}:1:6`]: [
+          { uri: `file://${vendorPath}`, range: range(1, 4, 5) },
+          { uri: `file://${nodeModulesPath}`, range: range(1, 4, 5) },
+          { uri: `file://${distPath}`, range: range(1, 4, 5) },
+        ],
+      },
+    });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [{ path: "A.php", text: "<?php\nclass A {}\n" }],
+    });
+
+    expect(result.graph.edges).toEqual([]);
+    expect(result.graph.nodes.map((n) => n.path)).toEqual(["A.php"]);
+  });
+
+  it("diff scope drops edges to targets outside the workspace root", async () => {
+    const aPath = writeFile("A.php", "<?php\nclass A {}\n");
+
+    const stub = makeStub({
+      documentSymbol: {
+        [aPath]: [{ name: "A", kind: 5, range: range(1, 6, 7), selectionRange: range(1, 6, 7) }],
+      },
+      references: {
+        [`${aPath}:1:6`]: [
+          // Some other absolute path on the host. Sometimes intelephense's
+          // global cache spits these out for stub bundles.
+          { uri: `file:///tmp/elsewhere/Other.php`, range: range(1, 4, 5) },
+        ],
+      },
+    });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [{ path: "A.php", text: "<?php\nclass A {}\n" }],
+    });
+
+    expect(result.graph.edges).toEqual([]);
+    expect(result.graph.nodes.map((n) => n.path)).toEqual(["A.php"]);
+  });
+
+  it("caps context nodes at 25, picking targets with the most incoming edges", async () => {
+    // 30 unchanged repo files + 1 changed file (Routes.php) that references
+    // every one of them. Targets ranked alphabetically (all tied at one
+    // incoming edge each) — only the first 25 should appear as context.
+    const totalContextFiles = 30;
+    const contextPaths: string[] = [];
+    for (let i = 0; i < totalContextFiles; i++) {
+      const name = `Sibling${i.toString().padStart(2, "0")}.php`;
+      writeFile(name, `<?php\nclass Sibling${i} {}\n`);
+      contextPaths.push(name);
+    }
+    const routesPath = writeFile("Routes.php", "<?php\n// uses everything\n");
+
+    const documentSymbol: Record<string, StubDocumentSymbol[]> = {
+      [routesPath]: [
+        { name: "Routes", kind: 5, range: range(1, 6, 12), selectionRange: range(1, 6, 12) },
+      ],
+    };
+    // All siblings reference Routes (one incoming edge each into Routes.php)
+    // would be the wrong shape. We want Routes' symbol to *be referenced
+    // by* siblings, but we want Routes' refs to flow OUT from siblings to
+    // Routes. The cleaner shape: Routes.php defines `Routes`, every
+    // sibling references it. Then incoming on each sibling is 0; we need
+    // edges going *out of* the changed file. So: each Sibling defines
+    // its own class, and Routes.php references all of them — yielding
+    // 30 edges Sibling*.php -> Routes.php. But the *target* of each
+    // edge is Routes.php (in-set), which gives zero context edges.
+    //
+    // To get context targets, we need defining files in the request set
+    // and using files outside it. So: Routes.php is the request file;
+    // it defines a symbol `Routes`; each sibling references `Routes`.
+    // That yields 30 edges Routes.php -> Sibling*.php with each sibling
+    // as a context target. Each context node has one incoming edge — the
+    // tie-breaker is alphabetical, so Sibling00..Sibling24 win.
+    const allReferences: StubLocation[] = [];
+    for (const sibling of contextPaths) {
+      allReferences.push({
+        uri: `file://${workspaceRoot}/${sibling}`,
+        range: range(1, 4, 10),
+      });
+    }
+    const references: Record<string, StubLocation[]> = {
+      [`${routesPath}:1:6`]: allReferences,
+    };
+
+    const stub = makeStub({ documentSymbol, references });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [{ path: "Routes.php", text: "<?php\n// uses everything\n" }],
+    });
+
+    const contextNodes = result.graph.nodes.filter((n) => n.role === "context");
+    expect(contextNodes.length).toBe(25);
+    // Tie-broken alphabetically; first 25 of "Sibling00".."Sibling29" win.
+    const expected = contextPaths.slice(0, 25).sort();
+    expect(contextNodes.map((n) => n.path).sort()).toEqual(expected);
+  });
+
+  it("ranks context-node candidates by incoming-edge count", async () => {
+    const heavyPath = writeFile("Heavy.php", "<?php\nclass Heavy {}\n");
+    const lightPath = writeFile("Light.php", "<?php\nclass Light {}\n");
+    // Three changed files all reference Heavy.php; only one references
+    // Light.php. With cap=25 (well above 2), both should appear, but the
+    // test asserts the ranker actually counts incoming edges.
+    const callerPaths = ["A.php", "B.php", "C.php"].map((name) => {
+      return writeFile(name, `<?php\nclass ${name.replace(".php", "")} {}\n`);
+    });
+
+    const documentSymbol: Record<string, StubDocumentSymbol[]> = {};
+    const references: Record<string, StubLocation[]> = {};
+    for (const callerAbs of callerPaths) {
+      const baseName = path.basename(callerAbs).replace(".php", "");
+      documentSymbol[callerAbs] = [
+        { name: baseName, kind: 5, range: range(1, 6, 6 + baseName.length), selectionRange: range(1, 6, 6 + baseName.length) },
+      ];
+      references[`${callerAbs}:1:6`] = [
+        { uri: `file://${heavyPath}`, range: range(1, 4, 9) },
+      ];
+    }
+    // Only one caller also references Light.
+    references[`${callerPaths[0]}:1:6`].push(
+      { uri: `file://${lightPath}`, range: range(1, 4, 9) },
+    );
+
+    const stub = makeStub({ documentSymbol, references });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [
+        { path: "A.php", text: "<?php\nclass A {}\n" },
+        { path: "B.php", text: "<?php\nclass B {}\n" },
+        { path: "C.php", text: "<?php\nclass C {}\n" },
+      ],
+    });
+
+    const contextNodes = result.graph.nodes
+      .filter((n) => n.role === "context")
+      .map((n) => n.path)
+      .sort();
+    expect(contextNodes).toEqual(["Heavy.php", "Light.php"]);
+    const heavyIncoming = result.graph.edges.filter((e) => e.toPath === "Heavy.php").length;
+    const lightIncoming = result.graph.edges.filter((e) => e.toPath === "Light.php").length;
+    expect(heavyIncoming).toBeGreaterThan(lightIncoming);
   });
 });
 

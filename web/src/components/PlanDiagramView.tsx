@@ -62,7 +62,9 @@ export function PlanDiagramView({ diagram }: Props) {
           <div className="plan-diagram__hint">
             {diagram.scope === "repo"
               ? "Generated from the current worktree checkout. Changed files stay highlighted; unchanged repo neighbors give the wider map."
-              : "Generated from the current diff. Copy the Mermaid source if you want to refine it elsewhere."}
+              : diagram.nodes.some((node) => node.role === "context")
+                ? "Generated from the current diff. Dimmed nodes are unchanged repo files the diff reaches into."
+                : "Generated from the current diff. Copy the Mermaid source if you want to refine it elsewhere."}
           </div>
         </div>
         <CopyButton text={diagram.mermaid} title="Copy Mermaid diagram source" />
@@ -166,8 +168,14 @@ function DiagramNodeView({
       data-entry={node.isEntryPoint ? "true" : "false"}
       data-test={node.isTest ? "true" : "false"}
       data-status={node.status}
+      data-role={node.role}
     >
-      <title>{node.path}</title>
+      <title>
+        {node.path}
+        {node.role === "context"
+          ? " — context (unchanged file referenced by the diff)"
+          : ""}
+      </title>
       <rect x={x} y={y} width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" ry="8" />
       <text className="plan-diagram__node-dir" x={x + 14} y={y + 22}>
         {dir || "."}

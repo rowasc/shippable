@@ -157,4 +157,48 @@ describe("buildPlanDiagram", () => {
     expect(diagram.nodes.find((node) => node.path === "src/changed.ts")?.status).toBe("modified");
     expect(diagram.mermaid).toContain('buildThing');
   });
+
+  it("propagates the role flag from the source CodeGraph and renders a context class", () => {
+    const plan: ReviewPlan = {
+      headline: "context nodes",
+      intent: [],
+      map: {
+        files: [
+          {
+            fileId: "changed",
+            path: "src/changed.ts",
+            status: "modified",
+            added: 4,
+            removed: 1,
+            isTest: false,
+          },
+        ],
+        symbols: [],
+      },
+      entryPoints: [],
+    };
+
+    const diagram = buildPlanDiagram(plan, {
+      scope: "diff",
+      nodes: [
+        { path: "src/changed.ts", isTest: false, role: "changed" },
+        { path: "src/unchanged.ts", isTest: false, role: "context" },
+      ],
+      edges: [
+        {
+          fromPath: "src/changed.ts",
+          toPath: "src/unchanged.ts",
+          labels: ["helper"],
+          kind: "symbol",
+        },
+      ],
+    });
+
+    const changed = diagram.nodes.find((n) => n.path === "src/changed.ts");
+    const context = diagram.nodes.find((n) => n.path === "src/unchanged.ts");
+    expect(changed?.role).toBe("changed");
+    expect(context?.role).toBe("context");
+    expect(diagram.mermaid).toContain("classDef context");
+    expect(diagram.mermaid).toContain(`class ${context?.id} context`);
+  });
 });

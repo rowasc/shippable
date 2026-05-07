@@ -152,6 +152,54 @@ describe("code-graph E2E (real PHP LSP)", () => {
           expect(FIXTURE_FILES).toContain(from);
         }
       }, 60_000);
+
+      it("E2: surfaces edges from changed files into unchanged repo neighbours", async () => {
+        process.env.SHIPPABLE_PHP_LSP = candidate.binary;
+
+        // Pretend only Cart.php is part of the diff. Cart is referenced
+        // by Order.php (via the constructor's `Cart $cart` parameter) and
+        // by Routes.php — both unchanged neighbours that should now show
+        // up as context nodes with edges from Cart.php.
+        const changed = ["Cart.php"];
+        const files = changed.map((name) => ({
+          path: name,
+          text: fs.readFileSync(path.join(workspaceRoot, name), "utf8"),
+        }));
+
+        const result = await resolveCodeGraph({
+          workspaceRoot,
+          ref: "HEAD",
+          scope: "diff",
+          files,
+        });
+
+        const nodesByPath = new Map(result.graph.nodes.map((n) => [n.path, n]));
+        for (const name of changed) {
+          expect(nodesByPath.get(name)?.role).toBe("changed");
+        }
+
+        // At least one unchanged sibling that uses Cart should have shown
+        // up as a context node. Both intelephense and phpactor *should*
+        // resolve at least one of these; we leave the exact set lenient
+        // since indexer behaviour drifts.
+        const expectedContextCandidates = ["Order.php", "Routes.php"];
+        const contextNodes = result.graph.nodes.filter((n) => n.role === "context");
+        expect(contextNodes.length).toBeGreaterThanOrEqual(1);
+        for (const node of contextNodes) {
+          expect(expectedContextCandidates).toContain(node.path);
+        }
+
+        // Every edge into a context node should originate from a changed
+        // file — defining-file -> using-file is the invariant.
+        const contextPaths = new Set(contextNodes.map((n) => n.path));
+        const edgesIntoContext = result.graph.edges.filter((e) =>
+          contextPaths.has(e.toPath),
+        );
+        expect(edgesIntoContext.length).toBeGreaterThanOrEqual(1);
+        for (const edge of edgesIntoContext) {
+          expect(changed).toContain(edge.fromPath);
+        }
+      }, 60_000);
     });
   }
 });

@@ -79,6 +79,15 @@ export interface DiffFile {
 export interface CodeGraphNode {
   path: string;
   isTest: boolean;
+  /**
+   * `"changed"` — file the caller asked about (every node in a worktree-scope
+   * graph; the changed-file set in a diff-scope graph). `"context"` — an
+   * unchanged repo file pulled in because a changed file references symbols
+   * defined there. The diagram dims context nodes so the eye still tracks
+   * "what the diff actually changed." Absent on legacy persisted graphs;
+   * treat as `"changed"` for back-compat.
+   */
+  role?: "changed" | "context";
 }
 
 export interface CodeGraphEdge {

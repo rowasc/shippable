@@ -7,6 +7,13 @@ export interface PlanDiagramNode {
   status?: FileStatus;
   isTest: boolean;
   isEntryPoint: boolean;
+  /**
+   * `"changed"` for nodes the diff/repo asked about; `"context"` for
+   * unchanged repo neighbours pulled in to show blast radius. Mirrors
+   * `CodeGraphNode.role`. Falls back to `"changed"` for legacy inputs
+   * that don't carry the role.
+   */
+  role: "changed" | "context";
   column: number;
   row: number;
 }
@@ -95,6 +102,7 @@ export function buildPlanDiagram(plan: ReviewPlan, graph?: CodeGraph): PlanDiagr
         isEntryPoint: fileIdByPath.has(file.path)
           ? entryPointFileIds.has(fileIdByPath.get(file.path)!)
           : false,
+        role: file.role ?? "changed",
         column,
         row,
       });
@@ -235,13 +243,18 @@ function buildMermaid(
   const changedNodes = nodes
     .filter((node) => node.status === "added")
     .map((node) => node.id);
+  const contextNodes = nodes
+    .filter((node) => node.role === "context")
+    .map((node) => node.id);
 
   lines.push("  classDef entry fill:#fff1cc,stroke:#9a6700,stroke-width:2px;");
   lines.push("  classDef test fill:#eef6ff,stroke:#1f6feb,stroke-dasharray:4 3;");
   lines.push("  classDef added fill:#e9f9ee,stroke:#1a7f37;");
+  lines.push("  classDef context fill:#f4f4f4,stroke:#bbbbbb,color:#666666;");
   if (entryNodes.length > 0) lines.push(`  class ${entryNodes.join(",")} entry;`);
   if (testNodes.length > 0) lines.push(`  class ${testNodes.join(",")} test;`);
   if (changedNodes.length > 0) lines.push(`  class ${changedNodes.join(",")} added;`);
+  if (contextNodes.length > 0) lines.push(`  class ${contextNodes.join(",")} context;`);
 
   return lines.join("\n");
 }
