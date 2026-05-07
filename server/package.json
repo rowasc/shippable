@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "vitest run --config ./vitest.e2e.config.ts",
     "build:sidecar": "rm -f ../src-tauri/binaries/shippable-server-aarch64-apple-darwin && bun build --compile --minify --sourcemap --target=bun-darwin-arm64 ./src/index.ts --outfile ../src-tauri/binaries/shippable-server-aarch64-apple-darwin"
   },
   "dependencies": {

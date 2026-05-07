@@ -378,6 +378,19 @@ function installDemoMocks() {
       const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
       return jsonResponse({ graph: buildRepoCodeGraph(buildGraphSources(cs)) });
     }
+    if (url.endsWith("/api/code-graph")) {
+      // Demo runs without a real LSP; serve the regex-built graph so
+      // fetchDiffCodeGraph resolves without hitting the network. The demo
+      // path stays regex-only by design.
+      const req = readRequestJson(init);
+      const path = typeof req.workspaceRoot === "string" ? req.workspaceRoot : DEMO_WORKTREES[0].path;
+      const wt = DEMO_WORKTREES.find((item) => item.path === path) ?? DEMO_WORKTREES[0];
+      const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
+      return jsonResponse({
+        graph: buildRepoCodeGraph(buildGraphSources(cs)),
+        sources: [],
+      });
+    }
     if (url.endsWith("/api/plan")) {
       const req = readRequestJson(init);
       const requested = req.changeset as ChangeSet | undefined;

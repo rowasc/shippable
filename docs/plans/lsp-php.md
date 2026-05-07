@@ -125,7 +125,7 @@ E2. The same in-diff and peek shapes as the unit suite, but against a real index
 
 If only one of the two binaries is on `PATH`, that one runs; the other reports "binary not present" as a *failure* unless explicitly waived via `SHIPPABLE_E2E_PHP_LSPS=intelephense` (or similar) — silent partial coverage is what we're trying to avoid.
 
-The stub fixture is shared with `lsp-code-graph.md` and any future LSP-backed feature.
+The stub fixture is shared with `lsp-code-graph.md` and any future LSP-backed feature. It now exists at `server/src/__fixtures__/stub-lsp.{mjs,ts}`; lsp-php's existing `definitions.test.ts` doesn't use it yet, but can adopt it for the in-diff-jump / peek tests when we want wire-level coverage of the definition flow.
 
 ## Risks / open questions
 

@@ -1,6 +1,8 @@
 # LSP-backed code graph
 
-## Status: proposed
+## Status: shipped (Tier 1a, discovery-on-PATH)
+
+The endpoint, multiplexed `LspClient`, per-file LRU + workspace invalidation, capability gating with regex fallback, and the worktree-mount LSP warm-up all landed on `feat/lsp-code-graph` (branch `lsp-diagrams-php-code-graph` in this repo). The remainder of this doc is the original plan; the "What landed" section at the bottom is the diff between this plan and the implementation.
 
 The diagram and review-plan starting points are driven by `web/src/codeGraph.ts`, which finds edges by regex-scanning `import` / `require` / `@import`. That misses every non-JS language with cross-file references. Concretely: PHP files in a worktree render as floating islands in the diagram even when `Routes.php` instantiates half a dozen sibling classes, because PHP's `use Bodega\Foo` + `new Foo()` doesn't look like an ES import.
 
@@ -164,3 +166,23 @@ The existing `web/src/codeGraph.test.ts` regex tests stay; they cover the fallba
 - Implements the "supplemented by a repo-scoped graph from the on-disk checkout" line in [`docs/concepts/symbol-graph-and-entry-points.md`](../concepts/symbol-graph-and-entry-points.md) for non-JS languages.
 - Does not block, and is not blocked by, [`plan-symbols.md`](plan-symbols.md) Step 5 (browser resolvers); they're parallel paths for the memory-only mode.
 - Unblocks adding gopls / pyright / rust-analyzer as graph contributors via the same LanguageModule shape.
+
+## What landed
+
+- **Endpoint.** `POST /api/code-graph` in `server/src/index.ts:62` (handler at L292) backed by `resolveCodeGraph` in `server/src/codeGraph.ts`. Request validates absolute `workspaceRoot`, ref shape, and rejects path traversal in file entries.
+- **Multiplexed LspClient.** Extracted from `definitions.ts` into `server/src/lspClient.ts`. Adds `documentSymbol`, `references` (with client-side self-reference filter), `closeDocument`, `dispose`, `capability(name)`. The pre-existing `pending` map already supported concurrent in-flight requests; `openDocument` is idempotent under concurrency. Verified by `lspClient.test.ts`: 20 parallel `references()` finish in <500ms vs serial 1000ms.
+- **Per-file LRU + invalidation.** Cache keyed on `(workspaceRoot, ref, language, file, contentHash)`, capped at 2000 entries. `invalidateCodeGraphForWorkspace(root)` drops entries and shuts the LSP clients (next request respawns and re-initializes). Wired into `worktrees.stateFor` — the per-workspace fingerprint check, the same signal the live-reload poll uses, fires invalidation when it drifts. There is no separate file-watcher tick.
+- **Capability gating.** Each file's language is looked up via `languageForFile`. If the LSP isn't discovered (or doesn't advertise `documentSymbolProvider` + `referencesProvider` on `initialize`) the file falls through to `buildRepoCodeGraph` regex resolver. LSP and regex edge sets merge with dedup. `sources` reports per-language `resolver: "lsp" | "regex"`.
+- **`repoGraphFor` reimplementation.** `worktrees.repoGraphFor` is now a thin wrapper around `buildRepoGraphRequest` + `resolveCodeGraph`. The analyzable-file walk + `git show` content read live in `codeGraph.ts`.
+- **Client wiring.** `web/src/codeGraphClient.ts` exposes `fetchDiffCodeGraph(path, ref, files)` and `warmCodeGraph(path, ref)`. `worktreeChangeset.ts` and `App.tsx`'s reload-now path both: parse the diff (regex graph as fallback), then await `fetchDiffCodeGraph` and override `cs.graph` if the server returned one. `useWorktreeLoader.ts:113` fires `void warmCodeGraph(...)` on worktree mount so intelephense's index wait lands on "worktree opening…", not first-render. `Demo.tsx` intercepts `/api/code-graph` and serves a regex-built graph; the demo path stays regex-only by design.
+- **Stub LSP fixture.** `server/src/__fixtures__/stub-lsp.{mjs,ts}` — real subprocess speaking real JSON-RPC framing, canned responses driven from a JSON config, optional response delay, per-request stats file. The TS helper writes a shell wrapper the test points `SHIPPABLE_PHP_LSP` at, so tests route through the real `phpLanguage.discover()` codepath instead of stubbing modules. Shared with `lsp-php.md` (whose tests can adopt it next).
+- **Tests.** `server/src/lspClient.test.ts` (concurrency, open-doc dedup, self-ref filter, capability advertisement). `server/src/codeGraph.test.ts` (bucketing into Routes.php, multi-symbol collapse, out-of-set filter, resolver mixing PHP-LSP+TS-regex without dupes, capability fallback, cache hit, content-hash invalidation, workspace invalidation, validation). `server/src/codeGraph.e2e.test.ts` runs against real intelephense via `npm run test:e2e`; `beforeAll` probes for a binary and **fails the suite** with install instructions when none is found — no `it.skip` path. Fixture: `test-fixtures/php-multifile/` (Cart/Order/OrderRepository/Loyalty/PaymentGateway + Routes.php).
+- **Deviation from the plan.** The plan said "buildDiffCodeGraph becomes async; parseDiff awaits." parseDiff has six callers (Demo, LoadModal, Welcome, App.tsx, worktreeChangeset.ts, ReviewWorkspace) — only two have a worktree. Making it async would cascade `await` to the four paste-load callers for no benefit. Instead we kept parseDiff sync and added the pre-fetch helper; the existing `meta.graph` slot already wins over the regex-built graph. Functionally equivalent, less invasive.
+
+## Open follow-ups
+
+- **Phpactor parity.** E2E only runs against intelephense in CI today. The `for (const candidate of detected)` loop will pick up phpactor automatically when it's on `PATH`; we just haven't set up CI to install both yet.
+- **`workspace/symbol` bulk replacement.** Per-file `documentSymbol` is the boring choice today. Worth revisiting if a real workload measures it as the bottleneck.
+- **`didClose` after the last reference query.** `closeDocument` exists on `LspClient` but isn't called yet — the per-workspace LSP client lives long enough that we accumulate open documents until `dispose()`. For larger workspaces this may need plumbing.
+- **Time-budget the first `references` round trip.** Plan §"First-call latency" called for an 8s budget per language with regex fallback on timeout. Not wired today; the warm-on-mount move shifts the wait to a tolerated moment, which seems sufficient on small/medium PHP repos.
+- **Browser-only `/api/code-graph` failure path.** The client's `fetchDiffCodeGraph` swallows network errors and returns `null`; the regex graph from `parseDiff` stays in place. There's no toast surfaced today — mention is mostly for the next person debugging "why is my graph regex when it should be LSP."

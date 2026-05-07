@@ -7,7 +7,8 @@ The HTTP contract between the frontend (and the MCP server) and the local Node b
 Grouped by feature. Full request/response shapes live in `web/src/types.ts` and `web/src/definitionTypes.ts`; the server imports them directly so client and server can't drift.
 
 - **Plan & review.** `POST /api/plan` (one-shot AI plan), `POST /api/review` (streaming review, per-IP rate-limited), `GET /api/health`.
-- **Definition lookup.** `GET /api/definition/capabilities`, `POST /api/definition`. Backed by `typescript-language-server` for now; per-language capabilities are tracked in `docs/plans/api-review.md` and `docs/plans/lsp-php.md`.
+- **Definition lookup.** `GET /api/definition/capabilities`, `POST /api/definition`. Backed by `typescript-language-server` for TS/JS and `intelephense`/`phpactor` for PHP; per-language capabilities are tracked in `docs/plans/api-review.md` and `docs/plans/lsp-php.md`.
+- **Code graph.** `POST /api/code-graph` — `{ workspaceRoot, ref, scope: "diff"|"repo", files: [{ path, text? }] } → { graph, sources }`. Edges resolved via per-language LSP `documentSymbol` + `references` when available, with regex fallback per file. Backed by `server/src/codeGraph.ts` + the shared `LspClient` in `server/src/lspClient.ts`. See `docs/plans/lsp-code-graph.md`.
 - **Prompt library.** `GET /api/library/prompts`, `POST /api/library/refresh` (admin-token-gated).
 - **Worktree ingest.** `POST /api/worktrees/{list, changeset, graph, sessions, agent-context, pick-directory}`, `GET /api/worktrees/mcp-status`. POST-with-body is deliberate — paths in URLs cross-platform are a mess.
 - **Agent comment queue.** `POST /api/agent/{enqueue, pull, unenqueue}`, `GET /api/agent/delivered?path=…`. Drives the MCP server's `shippable_check_review_comments` tool.

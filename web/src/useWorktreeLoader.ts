@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "./apiUrl";
 import { fetchWorktreeChangeset } from "./worktreeChangeset";
+import { warmCodeGraph } from "./codeGraphClient";
 import type { ChangeSet } from "./types";
 import type { RecentSource } from "./recents";
 
@@ -108,6 +109,11 @@ export function useWorktreeLoader({ onLoad }: Props) {
     setErr(null);
     setWtLoadingPath(wt.path);
     try {
+      // Warm the LSP index before the diff fetch so the first diagram
+      // render isn't where the indexer wait lands. Fire and forget — the
+      // diff path doesn't block on it; intelephense services concurrent
+      // requests once initialize resolves.
+      void warmCodeGraph(wt.path, "HEAD");
       const cs = await fetchWorktreeChangeset(wt);
       onLoad(cs, { kind: "worktree", path: wt.path, branch: wt.branch });
     } catch (e) {

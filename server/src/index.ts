@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { getDefinitionCapabilities, resolveDefinition } from "./definitions.ts";
+import { resolveCodeGraph, type CodeGraphRequest } from "./codeGraph.ts";
 import { generatePlan } from "./plan.ts";
 import * as library from "./library.ts";
 import * as prompts from "./prompts.ts";
@@ -58,6 +59,9 @@ export function createApp(): Server {
     }
     if (req.method === "POST" && req.url === "/api/definition") {
       return await handleDefinition(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/code-graph") {
+      return await handleCodeGraph(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/library/refresh") {
       return await handleLibraryRefresh(req, res, origin);
@@ -281,6 +285,35 @@ async function handleDefinition(
     "Content-Type": "application/json",
   });
   res.end(JSON.stringify(result));
+}
+
+async function handleCodeGraph(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: CodeGraphRequest;
+  try {
+    parsed = JSON.parse(body) as CodeGraphRequest;
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  try {
+    const result = await resolveCodeGraph(parsed);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/code-graph err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
 }
 
 async function handleListPrompts(

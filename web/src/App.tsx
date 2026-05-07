@@ -7,7 +7,6 @@ import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
 import type {
   ChangeSet,
-  CodeGraph,
   Reply,
   WorktreeProvenance,
   WorktreeState,
@@ -30,6 +29,7 @@ import { useTheme } from "./useTheme";
 import { useWorktreeLiveReload } from "./useWorktreeLiveReload";
 import { parseDiff } from "./parseDiff";
 import { apiUrl } from "./apiUrl";
+import { fetchDiffCodeGraph } from "./codeGraphClient";
 
 interface BootSeed {
   changesets: ChangeSet[];
@@ -230,18 +230,6 @@ export default function App() {
       if (!res.ok || "error" in json) {
         throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
       }
-      let graph: CodeGraph | undefined;
-      try {
-        const g = await fetch(await apiUrl("/api/worktrees/graph"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: provenance.path }),
-        });
-        const gj = (await g.json()) as { graph?: CodeGraph; error?: string };
-        if (g.ok && gj.graph) graph = gj.graph;
-      } catch {
-        // graph is optional; missing it just means a diff-scoped view
-      }
       const newCs = parseDiff(json.diff, {
         id: `wt-${json.sha.slice(0, 12)}`,
         title:
@@ -250,8 +238,9 @@ export default function App() {
         author: json.author,
         head: json.branch ?? json.sha.slice(0, 7),
         fileContents: json.fileContents,
-        graph,
       });
+      const lspGraph = await fetchDiffCodeGraph(provenance.path, json.sha, newCs.files);
+      if (lspGraph) newCs.graph = lspGraph;
       newCs.worktreeSource = {
         worktreePath: provenance.path,
         commitSha: json.sha,

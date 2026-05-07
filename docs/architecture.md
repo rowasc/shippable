@@ -15,6 +15,8 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 - `POST /api/review` — streams a review. Per-IP rate limit, default 30/60s.
 - `GET  /api/library/prompts` — list prompts.
 - `POST /api/library/refresh` — gated by `SHIPPABLE_ADMIN_TOKEN` (or `SHIPPABLE_DEV_MODE=1`).
+- `GET  /api/definition/capabilities`, `POST /api/definition` — TS/JS via `typescript-language-server`, PHP via `intelephense`/`phpactor`. Per-language module shape in `server/src/languages/`; shared `LspClient` lives in `server/src/lspClient.ts`.
+- `POST /api/code-graph` — derives diagram edges via real LSP `documentSymbol` + `references`, falling back to the regex builder per language. Implementation in `server/src/codeGraph.ts`; per-file LRU keyed on `(workspaceRoot, ref, language, file, contentHash)`.
 - `GET  /api/health`.
 - Origin allowlist with explicit handling of opaque origins (`Origin: null`) and `Sec-Fetch-Site`. The "null"-origin case has bitten us before; see comment in source.
 
@@ -45,6 +47,7 @@ Beyond components, the load-bearing modules in `web/src/`:
 - `symbols.ts` — symbol metadata attached to hunks; basis for the symbol-navigation work tracked in `docs/plan-symbols.md`.
 - `feature-docs.tsx` — entry point for `/feature-docs.html`, paired with per-feature markdown under `docs/features/`.
 - `parseDiff.ts`, `highlight.ts`, `tokens.ts` — diff parsing and Shiki-based highlighting feeding `DiffView`.
+- `codeGraph.ts`, `codeGraphClient.ts` — regex graph builder used as the fallback path; the client wrapper that POSTs to `/api/code-graph` for the LSP-resolved version when a worktree is attached. Demo / paste-load callers stay on the regex path.
 - `persist.ts` — localStorage round-trip for `ReviewState`.
 
 ## Themes

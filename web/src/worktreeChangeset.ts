@@ -1,6 +1,7 @@
 import { apiUrl } from "./apiUrl";
+import { fetchDiffCodeGraph } from "./codeGraphClient";
 import { parseDiff } from "./parseDiff";
-import type { ChangeSet, CodeGraph, WorktreeState } from "./types";
+import type { ChangeSet, WorktreeState } from "./types";
 
 interface WorktreeChangesetResponse {
   diff: string;
@@ -11,10 +12,6 @@ interface WorktreeChangesetResponse {
   branch: string | null;
   fileContents?: Record<string, string>;
   state?: WorktreeState;
-}
-
-interface WorktreeGraphResponse {
-  graph: CodeGraph;
 }
 
 type ErrorResponse = { error: string };
@@ -44,21 +41,6 @@ export async function fetchWorktreeChangeset(wt: {
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
   }
 
-  let graph: CodeGraph | undefined;
-  try {
-    const graphRes = await fetch(await apiUrl("/api/worktrees/graph"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: wt.path }),
-    });
-    const graphJson = (await graphRes.json()) as WorktreeGraphResponse | ErrorResponse;
-    if (graphRes.ok && !("error" in graphJson)) {
-      graph = graphJson.graph;
-    }
-  } catch {
-    // Graph is best-effort — a failed fetch leaves the diff scope intact.
-  }
-
   const cs = parseDiff(json.diff, {
     id: `wt-${json.sha.slice(0, 12)}`,
     title:
@@ -66,11 +48,14 @@ export async function fetchWorktreeChangeset(wt: {
     author: json.author,
     head: json.branch ?? json.sha.slice(0, 7),
     fileContents: json.fileContents,
-    graph,
   });
   if (cs.files.length === 0) {
     throw new Error("Latest commit produced no parseable diff (empty or merge?).");
   }
+  // Upgrade the regex-derived graph to the LSP graph when available. Falls
+  // through silently — the regex one is already on cs.graph.
+  const lspGraph = await fetchDiffCodeGraph(wt.path, json.sha, cs.files);
+  if (lspGraph) cs.graph = lspGraph;
   cs.worktreeSource = {
     worktreePath: wt.path,
     commitSha: json.sha,

@@ -4,7 +4,12 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import { createHash } from "node:crypto";
-import { buildRepoCodeGraph, isGraphAnalyzablePath } from "../../web/src/codeGraph.ts";
+import { isGraphAnalyzablePath } from "../../web/src/codeGraph.ts";
+import {
+  buildRepoGraphRequest,
+  invalidateCodeGraphForWorkspace,
+  resolveCodeGraph,
+} from "./codeGraph.ts";
 import type { CodeGraph } from "../../web/src/types.ts";
 
 // PROTOTYPE: thin wrapper around `git worktree list --porcelain` and
@@ -92,9 +97,6 @@ export interface ChangesetResult {
    */
   fileContents: Record<string, string>;
 }
-
-const MAX_REPO_GRAPH_FILES = 400;
-const MAX_REPO_GRAPH_FILE_BYTES = 256 * 1024;
 
 export type PickDirectoryResult =
   | { path: string }
@@ -256,17 +258,32 @@ export async function listWorktrees(dir: string): Promise<ListResult> {
  * paths, so any edit (staged or unstaged) flips the hash. NUL-separated so
  * paths with spaces or newlines hash the same way they print.
  */
+// Last-seen fingerprint per workspace. The /api/worktrees/state poll is the
+// closest thing we have to a server-side file-watcher tick; when its result
+// drifts, drop the code-graph cache + LSP clients for that workspace so the
+// next graph request gets fresh references against the new content.
+const lastFingerprint = new Map<string, string>();
+
 export async function stateFor(worktreePath: string): Promise<WorktreeState> {
   await assertGitDir(worktreePath);
   const [sha, statusBuf] = await Promise.all([
     revParseHead(worktreePath),
     statusPorcelainV2(worktreePath),
   ]);
-  if (statusBuf.length === 0) {
-    return { sha, dirty: false, dirtyHash: null };
+  const dirtyHash = statusBuf.length === 0
+    ? null
+    : createHash("sha1").update(statusBuf).digest("hex").slice(0, 16);
+  const fingerprint = `${sha}:${dirtyHash ?? ""}`;
+  const previous = lastFingerprint.get(worktreePath);
+  if (previous !== undefined && previous !== fingerprint) {
+    invalidateCodeGraphForWorkspace(worktreePath).catch((err) => {
+      console.warn(`[worktrees] code-graph invalidation failed for ${worktreePath}:`, err);
+    });
   }
-  const dirtyHash = createHash("sha1").update(statusBuf).digest("hex").slice(0, 16);
-  return { sha, dirty: true, dirtyHash };
+  lastFingerprint.set(worktreePath, fingerprint);
+  return dirtyHash === null
+    ? { sha, dirty: false, dirtyHash: null }
+    : { sha, dirty: true, dirtyHash };
 }
 
 async function revParseHead(worktreePath: string): Promise<string> {
@@ -712,34 +729,9 @@ export async function repoGraphFor(
 ): Promise<CodeGraph> {
   await assertGitDir(worktreePath);
   validateRef(ref);
-
-  const { stdout } = await execFileAsync(
-    GIT,
-    ["ls-tree", "-r", "-z", "--name-only", "--full-tree", "--end-of-options", ref],
-    { cwd: worktreePath, maxBuffer: 8 * 1024 * 1024 },
-  );
-
-  const paths = stdout
-    .split("\0")
-    .filter((value) => value.length > 0)
-    .filter(isGraphAnalyzablePath)
-    .slice(0, MAX_REPO_GRAPH_FILES);
-
-  const sources: Array<{ path: string; text: string }> = [];
-  for (const filePath of paths) {
-    try {
-      const { stdout: content } = await execFileAsync(
-        GIT,
-        ["show", "--end-of-options", `${ref}:${filePath}`],
-        { cwd: worktreePath, maxBuffer: MAX_REPO_GRAPH_FILE_BYTES },
-      );
-      sources.push({ path: filePath, text: content });
-    } catch {
-      // Skip files that are too large or unreadable at this ref.
-    }
-  }
-
-  return buildRepoCodeGraph(sources);
+  const request = await buildRepoGraphRequest(worktreePath, ref);
+  const response = await resolveCodeGraph(request);
+  return response.graph;
 }
 
 /**
