@@ -152,6 +152,12 @@
   outline: none;
   border-color: var(--accent);
 }
+.picker__arg-input--missing {
+  border-color: var(--red);
+}
+.picker__arg-input--missing:focus {
+  border-color: var(--red);
+}
 .picker__arg-hint {
   color: var(--fg-mute);
   font-size: 10px;
@@ -175,4 +181,13 @@
   justify-content: flex-end;
   gap: 6px;
   margin-top: 10px;
+}
+.picker__actions-warn {
+  margin-top: 10px;
+  padding: 4px 8px;
+  border: 1px solid var(--red);
+  border-radius: 2px;
+  background: var(--red-bg);
+  color: var(--red);
+  font-size: 11px;
 }

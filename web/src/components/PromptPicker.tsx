@@ -280,6 +280,8 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
         const value = values[arg.name] ?? "";
         const sourceLabel = describeAutoSource(arg.auto, context);
         const edited = !!arg.auto && value !== initialValues[arg.name];
+        const isMissing =
+          arg.required && (values[arg.name] ?? "").trim().length === 0;
         return (
           <div key={arg.name} className="picker__arg">
             <label className="picker__arg-label">
@@ -296,7 +298,10 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
             )}
             {isLong ? (
               <textarea
-                className="picker__arg-textarea"
+                className={
+                  "picker__arg-textarea" +
+                  (isMissing ? " picker__arg-input--missing" : "")
+                }
                 value={value}
                 onChange={(e) =>
                   setValues((v) => ({ ...v, [arg.name]: e.target.value }))
@@ -305,7 +310,10 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
               />
             ) : (
               <input
-                className="picker__arg-input"
+                className={
+                  "picker__arg-input" +
+                  (isMissing ? " picker__arg-input--missing" : "")
+                }
                 type="text"
                 value={value}
                 onChange={(e) =>
@@ -320,6 +328,11 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
         );
       })}
 
+      {missingRequired.length > 0 && (
+        <div className="picker__actions-warn" role="status">
+          requires: {missingRequired.join(", ")}
+        </div>
+      )}
       <div className="picker__actions">
         <button className="modal__btn" onClick={onBack}>
           ← back
@@ -328,11 +341,6 @@ function PromptForm({ prompt, context, onBack, onSubmit }: FormProps) {
           className="modal__btn modal__btn--primary"
           onClick={handleSubmit}
           disabled={missingRequired.length > 0}
-          title={
-            missingRequired.length > 0
-              ? `fill in: ${missingRequired.join(", ")}`
-              : undefined
-          }
         >
           run
         </button>
