@@ -19,17 +19,23 @@ const { loadGithubPrMock } = vi.hoisted(() => ({
   loadGithubPrMock: vi.fn(),
 }));
 
+const { setGithubTokenMock } = vi.hoisted(() => ({
+  setGithubTokenMock: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../githubPrClient", () => ({
   loadGithubPr: loadGithubPrMock,
-  setGithubToken: vi.fn().mockResolvedValue(undefined),
+  setGithubToken: setGithubTokenMock,
   GithubFetchError: class GithubFetchError extends Error {
     discriminator: string;
     host?: string;
-    constructor(discriminator: string, message: string, host?: string) {
+    hint?: string;
+    constructor(discriminator: string, message: string, host?: string, hint?: string) {
       super(message);
       this.name = "GithubFetchError";
       this.discriminator = discriminator;
       this.host = host;
+      this.hint = hint;
     }
   },
 }));
@@ -140,10 +146,24 @@ vi.mock("./PromptPicker", () => ({
   PromptPicker: () => null,
 }));
 
+const { isTauriMock, keychainGetMock } = vi.hoisted(() => ({
+  isTauriMock: vi.fn(() => false),
+  keychainGetMock: vi.fn<() => Promise<string | null>>().mockResolvedValue(null),
+}));
+
+vi.mock("../keychain", () => ({
+  isTauri: isTauriMock,
+  keychainGet: keychainGetMock,
+  keychainSet: vi.fn().mockResolvedValue(undefined),
+}));
+
 afterEach(cleanup);
 afterEach(() => {
   fetchDefinitionCapabilitiesMock.mockReset();
   fetchDefinitionMock.mockReset();
+  isTauriMock.mockReturnValue(false);
+  keychainGetMock.mockResolvedValue(null);
+  setGithubTokenMock.mockResolvedValue(undefined);
 });
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -359,8 +379,92 @@ describe("ReviewWorkspace — PR auth-rejected banner", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: /re-enter token/i }),
+      screen.getByRole("button", { name: /re-enter to retry/i }),
     ).toBeTruthy();
+  });
+
+  it("shows hint in the auth-rejected banner when hint is present", async () => {
+    const { GithubFetchError } = await import("../githubPrClient");
+    loadGithubPrMock.mockRejectedValue(
+      new GithubFetchError("github_auth_failed", "github_auth_failed", "github.com", "rate-limit"),
+    );
+
+    renderPrWorkspace();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/rate limit hit/i)).toBeTruthy(),
+    );
+  });
+
+  it("dismiss button clears the auth-rejected banner", async () => {
+    const { GithubFetchError } = await import("../githubPrClient");
+    loadGithubPrMock.mockRejectedValue(
+      new GithubFetchError("github_auth_failed", "github_auth_failed", "github.com"),
+    );
+
+    renderPrWorkspace();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    // Wait for banner to appear
+    await waitFor(() =>
+      expect(screen.getByText(/was rejected/i)).toBeTruthy(),
+    );
+
+    // Click the dismiss button
+    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
+
+    // Banner should be gone
+    await waitFor(() =>
+      expect(screen.queryByText(/was rejected/i)).toBeNull(),
+    );
+  });
+
+  it("opens token modal on github_token_required when Keychain returns null", async () => {
+    const { GithubFetchError } = await import("../githubPrClient");
+    loadGithubPrMock.mockRejectedValue(
+      new GithubFetchError("github_token_required", "github_token_required", "github.com"),
+    );
+    isTauriMock.mockReturnValue(true);
+    keychainGetMock.mockResolvedValue(null);
+
+    renderPrWorkspace();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/GitHub token required/i)).toBeTruthy(),
+    );
+  });
+
+  it("silently retries refresh when Keychain has a cached token (rehydrate path)", async () => {
+    const { GithubFetchError } = await import("../githubPrClient");
+    const newCs = { ...fixturePrChangeset(), title: "Reloaded PR" };
+    // First call: no token in server → github_token_required
+    // Second call: success after setGithubToken
+    loadGithubPrMock
+      .mockRejectedValueOnce(
+        new GithubFetchError("github_token_required", "github_token_required", "github.com"),
+      )
+      .mockResolvedValueOnce(newCs);
+    isTauriMock.mockReturnValue(true);
+    keychainGetMock.mockResolvedValue("ghp_cached_token");
+    const dispatch = vi.fn();
+
+    renderPrWorkspace({ dispatch });
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOAD_CHANGESET" }),
+      ),
+    );
+    // Token modal must NOT appear
+    expect(screen.queryByText(/GitHub token required/i)).toBeNull();
+    expect(setGithubTokenMock).toHaveBeenCalledWith("github.com", "ghp_cached_token");
   });
 
   it("renders the truncation banner when prSource.truncation is set", () => {

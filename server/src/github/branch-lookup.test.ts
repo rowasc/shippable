@@ -58,6 +58,8 @@ describe("lookupPrForBranch — HTTPS remote, PR found", () => {
       );
       fakeFetch([MATCHED_PR]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).not.toBeNull();
       expect(result.matched!.number).toBe(42);
       expect(result.matched!.title).toBe("My feature");
@@ -83,6 +85,8 @@ describe("lookupPrForBranch — SSH remote", () => {
       );
       fakeFetch([MATCHED_PR]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).not.toBeNull();
       expect(result.matched!.number).toBe(42);
       expect(result.matched!.host).toBe("github.com");
@@ -93,12 +97,13 @@ describe("lookupPrForBranch — SSH remote", () => {
 });
 
 describe("lookupPrForBranch — no remotes", () => {
-  it("returns { matched: null } when no remotes are configured", async () => {
+  it("returns { kind: 'ok', matched: null } when no remotes are configured", async () => {
     const dir = await makeTmpGitDir();
     try {
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).toBeNull();
-      expect("tokenRequiredForHost" in result).toBe(false);
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -106,7 +111,7 @@ describe("lookupPrForBranch — no remotes", () => {
 });
 
 describe("lookupPrForBranch — non-GitHub remote", () => {
-  it("returns { matched: null } for a non-parseable remote", async () => {
+  it("returns { kind: 'ok', matched: null } for a non-parseable remote", async () => {
     const dir = await makeTmpGitDir();
     try {
       await execFileAsync(
@@ -115,6 +120,8 @@ describe("lookupPrForBranch — non-GitHub remote", () => {
         { cwd: dir },
       );
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).toBeNull();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -123,7 +130,7 @@ describe("lookupPrForBranch — non-GitHub remote", () => {
 });
 
 describe("lookupPrForBranch — token absent", () => {
-  it("returns { matched: null, tokenRequiredForHost } when no token", async () => {
+  it("returns { kind: 'token_required', host } when no token", async () => {
     const dir = await makeTmpGitDir();
     try {
       await execFileAsync(
@@ -132,10 +139,9 @@ describe("lookupPrForBranch — token absent", () => {
         { cwd: dir },
       );
       const result = await lookupPrForBranch(dir, () => undefined);
-      expect(result.matched).toBeNull();
-      expect((result as { tokenRequiredForHost: string }).tokenRequiredForHost).toBe(
-        "github.com",
-      );
+      expect(result.kind).toBe("token_required");
+      if (result.kind !== "token_required") return;
+      expect(result.host).toBe("github.com");
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -143,7 +149,7 @@ describe("lookupPrForBranch — token absent", () => {
 });
 
 describe("lookupPrForBranch — empty pulls response", () => {
-  it("returns { matched: null } when GitHub returns empty array", async () => {
+  it("returns { kind: 'ok', matched: null } when GitHub returns empty array", async () => {
     const dir = await makeTmpGitDir();
     try {
       await execFileAsync(
@@ -153,6 +159,8 @@ describe("lookupPrForBranch — empty pulls response", () => {
       );
       fakeFetch([]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).toBeNull();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -179,6 +187,8 @@ describe("lookupPrForBranch — multiple remotes", () => {
       fakeFetch([MATCHED_PR]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
       // Should use origin (owner/repo), not upstream (fork/repo)
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).not.toBeNull();
       expect(result.matched!.owner).toBe("owner");
       expect(result.matched!.repo).toBe("repo");
@@ -199,6 +209,8 @@ describe("lookupPrForBranch — HTTPS remote with embedded credentials", () => {
       );
       fakeFetch([MATCHED_PR]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).not.toBeNull();
       expect(result.matched!.host).toBe("github.com");
       expect(result.matched!.owner).toBe("owner");
@@ -220,6 +232,8 @@ describe("lookupPrForBranch — HTTPS remote without .git suffix", () => {
       );
       fakeFetch([MATCHED_PR]);
       const result = await lookupPrForBranch(dir, () => "ghp_token");
+      expect(result.kind).toBe("ok");
+      if (result.kind !== "ok") return;
       expect(result.matched).not.toBeNull();
       expect(result.matched!.repo).toBe("my-repo");
     } finally {

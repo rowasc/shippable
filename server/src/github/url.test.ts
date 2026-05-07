@@ -102,6 +102,12 @@ describe("parsePrUrl", () => {
   it("throws on a completely unparseable string", () => {
     expect(() => parsePrUrl("not a url at all")).toThrow(/invalid PR URL/);
   });
+
+  it("throws when the scheme is not http or https (file://)", () => {
+    expect(() =>
+      parsePrUrl("file:///owner/repo/pull/1"),
+    ).toThrow(/invalid PR URL: scheme must be http or https/);
+  });
 });
 
 describe("resolveApiBase", () => {

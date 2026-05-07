@@ -31,6 +31,12 @@ vi.mock("../githubPrClient", () => ({
       this.hint = hint;
     }
   },
+  GH_ERROR_MESSAGES: {
+    github_pr_not_found: "PR not found.",
+    github_upstream: "GitHub returned an error. Try again.",
+    invalid_pr_url: "That doesn't look like a valid PR URL.",
+    unknown: "Something went wrong loading the PR.",
+  },
 }));
 
 // Keychain helpers — off by default (non-Tauri). Individual tests can

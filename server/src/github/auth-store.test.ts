@@ -79,4 +79,32 @@ describe("blocked hosts (defensive)", () => {
   it("does not reject a 172.x outside the private range", () => {
     expect(() => setToken("172.32.0.1", "tok")).not.toThrow();
   });
+
+  it("rejects IPv4 link-local (169.254.x.x) — cloud IMDS endpoint", () => {
+    expect(() => setToken("169.254.169.254", "tok")).toThrow();
+    expect(() => setToken("169.254.0.1", "tok")).toThrow();
+  });
+
+  it("rejects CGNAT (100.64.0.0/10)", () => {
+    expect(() => setToken("100.64.0.1", "tok")).toThrow();
+    expect(() => setToken("100.127.255.255", "tok")).toThrow();
+  });
+
+  it("does not reject an address just outside CGNAT (100.63.0.1)", () => {
+    expect(() => setToken("100.63.0.1", "tok")).not.toThrow();
+  });
+
+  it("rejects IPv6 link-local (fe80::)", () => {
+    expect(() => setToken("fe80::1", "tok")).toThrow();
+    expect(() => setToken("fe80::dead:beef", "tok")).toThrow();
+  });
+
+  it("rejects IPv6 ULA fc00::/7 (fd prefix)", () => {
+    expect(() => setToken("fd00::1", "tok")).toThrow();
+    expect(() => setToken("fdab::1234", "tok")).toThrow();
+  });
+
+  it("rejects IPv6 ULA fc00::/7 (fc prefix)", () => {
+    expect(() => setToken("fc00::1", "tok")).toThrow();
+  });
 });

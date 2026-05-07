@@ -24,7 +24,7 @@ const execFileAsync = promisify(execFile);
 
 // Resolve `git` once at module load so a later $PATH change can't redirect us
 // to a different binary. Falls back to bare "git" if the lookup fails.
-const GIT = resolveGit();
+export const GIT = resolveGit();
 
 function resolveGit(): string {
   const envPath = process.env.PATH ?? "";

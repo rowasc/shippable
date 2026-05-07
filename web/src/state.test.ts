@@ -343,6 +343,47 @@ describe("LOAD_CHANGESET", () => {
     const s = reducer(s0, { type: "LOAD_CHANGESET", changeset: noHunks });
     expect(s).toBe(s0);
   });
+
+  // ── Cursor preservation on same-id reload (C2) ─────────────────────────
+
+  it("preserves the cursor when the same changeset reloads and the target hunk still exists", () => {
+    // Move to line 2 of h1
+    const atLine2 = reducer(s0, { type: "MOVE_LINE", delta: 2 });
+    expect(atLine2.cursor.lineIdx).toBe(2);
+    expect(atLine2.cursor.hunkId).toBe("cs1/f1#h1");
+
+    // Reload the same changeset id — same files/hunks
+    const reloaded = defaultChangeset();
+    const s = reducer(atLine2, { type: "LOAD_CHANGESET", changeset: reloaded });
+    expect(s.cursor.changesetId).toBe("cs1");
+    expect(s.cursor.fileId).toBe("cs1/f1");
+    expect(s.cursor.hunkId).toBe("cs1/f1#h1");
+    expect(s.cursor.lineIdx).toBe(2);
+  });
+
+  it("resets the cursor to line 0 of file 0 when the target file disappears on reload", () => {
+    // Move to file 2
+    const atF2 = reducer(s0, { type: "MOVE_FILE", delta: 1 });
+    expect(atF2.cursor.fileId).toBe("cs1/f2");
+
+    // Reload with only the first file — f2 is gone
+    const smallerCs = makeChangeset("cs1", [
+      makeFile("cs1/f1", [makeHunk("cs1/f1#h1", 3)]),
+    ]);
+    const s = reducer(atF2, { type: "LOAD_CHANGESET", changeset: smallerCs });
+    expect(s.cursor.fileId).toBe("cs1/f1");
+    expect(s.cursor.hunkId).toBe("cs1/f1#h1");
+    expect(s.cursor.lineIdx).toBe(0);
+  });
+
+  it("does not preserve cursor when loading a different changeset id (new CS resets)", () => {
+    const atLine2 = reducer(s0, { type: "MOVE_LINE", delta: 2 });
+    const fresh = makeChangeset("cs2", [makeFile("cs2/f", [makeHunk("cs2/f#h1", 2)])]);
+    const s = reducer(atLine2, { type: "LOAD_CHANGESET", changeset: fresh });
+    // New changeset → cursor goes to file 0 line 0 of the new CS
+    expect(s.cursor.changesetId).toBe("cs2");
+    expect(s.cursor.lineIdx).toBe(0);
+  });
 });
 
 // ── RELOAD_CHANGESET ────────────────────────────────────────────────────────
@@ -1345,15 +1386,53 @@ describe("MERGE_PR_OVERLAY", () => {
     return { ...cs, worktreeSource: MOCK_WORKTREE_SOURCE };
   }
 
+  /** Build a minimal PR ChangeSet carrying prSource and prConversation. */
+  function makePrChangeset(
+    prReviewCommentsByPath: Record<string, { lineNo: number; comment: PrReviewComment }[]> = {},
+  ): ChangeSet {
+    const files = Object.entries(prReviewCommentsByPath).map(([filePath, entries]) => {
+      const linesByNo = new Map<number, PrReviewComment[]>();
+      for (const { lineNo, comment } of entries) {
+        const arr = linesByNo.get(lineNo) ?? [];
+        arr.push(comment);
+        linesByNo.set(lineNo, arr);
+      }
+      return makeFile(
+        filePath.replace(".ts", ""),
+        [
+          {
+            id: `${filePath}-h`,
+            header: "@@ -1,3 +1,3 @@",
+            oldStart: 1,
+            oldCount: 3,
+            newStart: 1,
+            newCount: 3,
+            lines: Array.from({ length: 3 }, (_, i) => ({
+              kind: "context" as const,
+              text: `l${i}`,
+              oldNo: i + 1,
+              newNo: i + 1,
+              prReviewComments: linesByNo.get(i + 1) ?? [],
+            })).map((l) => (l.prReviewComments?.length === 0 ? { ...l, prReviewComments: undefined } : l)),
+          },
+        ],
+      );
+    });
+    return {
+      ...makeChangeset("pr-cs", files),
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
+    };
+  }
+
   it("sets prSource and prConversation on the target changeset", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
+    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prSource: MOCK_PR_SOURCE,
-      prConversation: MOCK_PR_CONVERSATION,
-      lineComments: new Map(),
+      prChangeSet,
     });
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
     expect(nextCs.prSource).toEqual(MOCK_PR_SOURCE);
@@ -1363,12 +1442,11 @@ describe("MERGE_PR_OVERLAY", () => {
   it("preserves worktreeSource on the changeset", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
+    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prSource: MOCK_PR_SOURCE,
-      prConversation: [],
-      lineComments: new Map(),
+      prChangeSet,
     });
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
     expect(nextCs.worktreeSource).toEqual(MOCK_WORKTREE_SOURCE);
@@ -1386,16 +1464,12 @@ describe("MERGE_PR_OVERLAY", () => {
       htmlUrl: "https://github.com/owner/repo/pull/42#comment-100",
     };
 
-    // cs1/f1.ts has lines with newNo 1,2,3 in hunk h1
-    const lineComments = new Map<string, Map<number, PrReviewComment[]>>();
-    lineComments.set("cs1/f1.ts", new Map([[2, [comment]]]));
-
+    // The worktree changeset has cs1/f1.ts, so the PR ChangeSet must match that path.
+    const prChangeSet = makePrChangeset({ "cs1/f1.ts": [{ lineNo: 2, comment }] });
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prSource: MOCK_PR_SOURCE,
-      prConversation: [],
-      lineComments,
+      prChangeSet,
     });
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
     const f1 = nextCs.files.find((f) => f.id === "cs1/f1")!;
@@ -1414,12 +1488,11 @@ describe("MERGE_PR_OVERLAY", () => {
   it("preserves the diff structure (files/hunks/lines count unchanged)", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
+    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prSource: MOCK_PR_SOURCE,
-      prConversation: [],
-      lineComments: new Map(),
+      prChangeSet,
     });
     const origCs = state.changesets.find((c) => c.id === "cs1")!;
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
@@ -1436,12 +1509,11 @@ describe("MERGE_PR_OVERLAY", () => {
 
   it("is a no-op for an unknown changesetId", () => {
     const state = initialState([defaultChangeset()]);
+    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "nonexistent",
-      prSource: MOCK_PR_SOURCE,
-      prConversation: [],
-      lineComments: new Map(),
+      prChangeSet,
     });
     expect(next).toBe(state);
   });

@@ -7,9 +7,7 @@ import type {
   DiffFile,
   Hunk,
   LineSelection,
-  PrConversationItem,
   PrReviewComment,
-  PrSource,
   Reply,
   ReviewState,
 } from "./types";
@@ -197,14 +195,12 @@ export type Action =
        * Overlay PR metadata onto an existing worktree-loaded ChangeSet. The
        * diff structure (files/hunks) is untouched; we only set `prSource`,
        * `prConversation`, and attach `prReviewComments` to matching lines.
-       * `worktreeSource` is preserved.
+       * `worktreeSource` is preserved. The reducer extracts per-line comments
+       * directly from `prChangeSet` so the action stays JSON-serializable.
        */
       type: "MERGE_PR_OVERLAY";
       changesetId: string;
-      prSource: PrSource;
-      prConversation: PrConversationItem[];
-      /** filePath → lineNo → comments */
-      lineComments: Map<string, Map<number, PrReviewComment[]>>;
+      prChangeSet: ChangeSet;
     };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
@@ -262,17 +258,36 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         existingIdx >= 0
           ? state.changesets.map((c, i) => (i === existingIdx ? cs : c))
           : [...state.changesets, cs];
+
+      // When reloading a changeset that the cursor is already on, preserve
+      // the cursor position if the target file and hunk still exist in the
+      // new diff. Falls back to line 0 of file 0 if the file or hunk has
+      // disappeared (e.g., file removed in a PR update).
+      let nextCursor: Cursor;
+      if (existingIdx >= 0 && state.cursor.changesetId === cs.id) {
+        const curFile = cs.files.find((f) => f.id === state.cursor.fileId);
+        const curHunk = curFile?.hunks.find((h) => h.id === state.cursor.hunkId);
+        if (curFile && curHunk) {
+          const maxLine = curHunk.lines.length - 1;
+          nextCursor = {
+            changesetId: cs.id,
+            fileId: curFile.id,
+            hunkId: curHunk.id,
+            lineIdx: Math.min(state.cursor.lineIdx, Math.max(0, maxLine)),
+          };
+        } else {
+          nextCursor = { changesetId: cs.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 };
+        }
+      } else {
+        nextCursor = { changesetId: cs.id, fileId: file.id, hunkId: hunk.id, lineIdx: 0 };
+      }
+
       return {
         ...state,
         changesets: nextList,
-        cursor: {
-          changesetId: cs.id,
-          fileId: file.id,
-          hunkId: hunk.id,
-          lineIdx: 0,
-        },
+        cursor: nextCursor,
         selection: null,
-        readLines: addLine(state.readLines, hunk.id, 0),
+        readLines: addLine(state.readLines, nextCursor.hunkId, nextCursor.lineIdx),
         // Seed replies merge in alongside whatever the user has already
         // authored — never overwrite. Useful for stubs that ship with
         // canned threads, and for recents that round-trip the same map.
@@ -430,8 +445,26 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       const csIdx = state.changesets.findIndex((c) => c.id === action.changesetId);
       if (csIdx < 0) return state;
       const cs = state.changesets[csIdx];
+      const prCs = action.prChangeSet;
+
+      // Build a path → (lineNo → comments) index from the PR ChangeSet.
+      // Avoids carrying a non-serializable Map in the action.
+      const lineIndex = new Map<string, Map<number, PrReviewComment[]>>();
+      for (const f of prCs.files) {
+        const lineMap = new Map<number, PrReviewComment[]>();
+        for (const h of f.hunks) {
+          for (const ln of h.lines) {
+            if (ln.prReviewComments && ln.prReviewComments.length > 0) {
+              const no = ln.newNo ?? ln.oldNo;
+              if (no !== undefined) lineMap.set(no, ln.prReviewComments);
+            }
+          }
+        }
+        if (lineMap.size > 0) lineIndex.set(f.path, lineMap);
+      }
+
       const nextFiles = cs.files.map((file) => {
-        const lineMap = action.lineComments.get(file.path);
+        const lineMap = lineIndex.get(file.path);
         if (!lineMap) return file;
         const nextHunks = file.hunks.map((hunk) => {
           const nextLines = hunk.lines.map((line) => {
@@ -448,8 +481,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       const nextCs: ChangeSet = {
         ...cs,
         files: nextFiles,
-        prSource: action.prSource,
-        prConversation: action.prConversation,
+        prSource: prCs.prSource,
+        prConversation: prCs.prConversation ?? [],
       };
       const nextChangesets = state.changesets.map((c, i) =>
         i === csIdx ? nextCs : c,

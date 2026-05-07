@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import "./LoadModal.css";
 
 interface Props {
@@ -31,7 +32,7 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
     // On success the parent unmounts this modal — no need to setBusy(false).
   }
 
-  return (
+  const content = (
     <div className="modal" onClick={onCancel}>
       <div className="modal__box" onClick={(e) => e.stopPropagation()}>
         <header className="modal__h">
@@ -76,4 +77,9 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
       </div>
     </div>
   );
+
+  // Render into document.body so this modal is a sibling of any parent modal
+  // in the DOM — prevents double backdrops when GitHubTokenModal opens from
+  // inside LoadModal.
+  return createPortal(content, document.body);
 }

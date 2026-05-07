@@ -7,6 +7,14 @@
 import { apiUrl } from "./apiUrl";
 import type { ChangeSet } from "./types";
 
+/** Friendly user-facing messages for non-auth GitHub error discriminators. */
+export const GH_ERROR_MESSAGES: Record<string, string> = {
+  github_pr_not_found: "PR not found.",
+  github_upstream: "GitHub returned an error. Try again.",
+  invalid_pr_url: "That doesn't look like a valid PR URL.",
+  unknown: "Something went wrong loading the PR.",
+};
+
 export interface PrMatch {
   host: string;
   owner: string;

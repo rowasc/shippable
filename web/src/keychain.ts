@@ -1,8 +1,6 @@
 // Tauri Keychain helpers. Import from here rather than inline-importing
 // @tauri-apps/api/core at each call site — keeps the isTauri() guard in one
 // place for any new code that needs it.
-//
-// useApiKey.ts uses its own inline copies for now; migrate it when convenient.
 
 export function isTauri(): boolean {
   return (

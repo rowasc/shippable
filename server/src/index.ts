@@ -948,10 +948,10 @@ async function handleGithubPrLoad(
   try {
     coords = parsePrUrl(parsed.prUrl);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const detail = err instanceof Error ? err.message : String(err);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: message }));
+    res.end(JSON.stringify({ error: "invalid_pr_url", detail }));
     return;
   }
 
@@ -1036,13 +1036,13 @@ async function handleGithubPrBranchLookup(
       parsed.worktreePath,
       authStore.getToken,
     );
-    if ("tokenRequiredForHost" in result) {
+    if (result.kind === "token_required") {
       writeCorsHeaders(res, origin);
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({
           error: "github_token_required",
-          host: result.tokenRequiredForHost,
+          host: result.host,
         }),
       );
       return;

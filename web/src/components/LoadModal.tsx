@@ -1,12 +1,5 @@
 import "./LoadModal.css";
 import { useRef, useState } from "react";
-
-const prErrorMessages: Record<string, string> = {
-  github_pr_not_found: "PR not found.",
-  github_upstream: "GitHub returned an error. Try again.",
-  invalid_pr_url: "That doesn't look like a valid PR URL.",
-  unknown: "Something went wrong loading the PR.",
-};
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
 import type { RecentSource } from "../recents";
@@ -14,7 +7,7 @@ import { useWorktreeLoader } from "../useWorktreeLoader";
 import type { LoadOpts } from "../worktreeChangeset";
 import { CopyButton } from "./CopyButton";
 import { RangePicker } from "./RangePicker";
-import { loadGithubPr, setGithubToken, GithubFetchError } from "../githubPrClient";
+import { loadGithubPr, setGithubToken, GithubFetchError, GH_ERROR_MESSAGES } from "../githubPrClient";
 import { GitHubTokenModal } from "./GitHubTokenModal";
 import { isTauri, keychainGet, keychainSet } from "../keychain";
 
@@ -162,7 +155,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
             pendingPrUrl: targetUrl,
           });
         } else {
-          setPrErr(prErrorMessages[e.discriminator] ?? e.discriminator);
+          setPrErr(GH_ERROR_MESSAGES[e.discriminator] ?? e.discriminator);
         }
       } else {
         setPrErr(e instanceof Error ? e.message : "Unknown error");

@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { assertGitDir } from "../worktree-validation.ts";
+import { GIT } from "../worktrees.ts";
 import { githubFetch } from "./api-client.ts";
+import { resolveApiBase } from "./url.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -16,8 +18,8 @@ export interface PrMatch {
 }
 
 export type LookupResult =
-  | { matched: PrMatch | null }
-  | { matched: null; tokenRequiredForHost: string };
+  | { kind: "ok"; matched: PrMatch | null }
+  | { kind: "token_required"; host: string };
 
 interface ParsedRemote {
   host: string;
@@ -43,12 +45,6 @@ function parseRemoteUrl(url: string): ParsedRemote | null {
   return null;
 }
 
-function apiBaseUrl(host: string): string {
-  // GitHub.com uses api.github.com; GHE instances expose the v3 API under /api/v3.
-  if (host === "github.com") return "https://api.github.com";
-  return `https://${host}/api/v3`;
-}
-
 /**
  * Look up the open PR for the branch currently checked out in `worktreePath`.
  *
@@ -66,13 +62,13 @@ export async function lookupPrForBranch(
   let remoteOut: string;
   try {
     const { stdout } = await execFileAsync(
-      "git",
+      GIT,
       ["remote", "-v"],
       { cwd: worktreePath, maxBuffer: 256 * 1024 },
     );
     remoteOut = stdout;
   } catch {
-    return { matched: null };
+    return { kind: "ok", matched: null };
   }
 
   // Parse first usable GitHub-shaped remote (deduplicated by unique host/owner/repo)
@@ -91,31 +87,31 @@ export async function lookupPrForBranch(
     }
   }
 
-  if (!remote) return { matched: null };
+  if (!remote) return { kind: "ok", matched: null };
 
   // Get current branch
   let branch: string;
   try {
     const { stdout } = await execFileAsync(
-      "git",
+      GIT,
       ["rev-parse", "--abbrev-ref", "HEAD"],
       { cwd: worktreePath },
     );
     const trimmed = stdout.trim();
-    if (!trimmed || trimmed === "HEAD") return { matched: null };
+    if (!trimmed || trimmed === "HEAD") return { kind: "ok", matched: null };
     branch = trimmed;
   } catch {
-    return { matched: null };
+    return { kind: "ok", matched: null };
   }
 
   // Resolve token
   const token = getToken(remote.host);
   if (!token) {
-    return { matched: null, tokenRequiredForHost: remote.host };
+    return { kind: "token_required", host: remote.host };
   }
 
   // Query GitHub for open PRs from this branch
-  const base = apiBaseUrl(remote.host);
+  const base = resolveApiBase(remote.host);
   const path = `/repos/${remote.owner}/${remote.repo}/pulls?head=${remote.owner}:${branch}&state=open&per_page=1`;
   try {
     const { json } = await githubFetch(base, path, {
@@ -124,7 +120,7 @@ export async function lookupPrForBranch(
     });
 
     if (!Array.isArray(json) || json.length === 0) {
-      return { matched: null };
+      return { kind: "ok", matched: null };
     }
 
     const pr = json[0];
@@ -133,6 +129,7 @@ export async function lookupPrForBranch(
       rawState === "closed" && pr.merged ? "merged" : (rawState as "open" | "closed");
 
     return {
+      kind: "ok",
       matched: {
         host: remote.host,
         owner: remote.owner,
@@ -144,6 +141,6 @@ export async function lookupPrForBranch(
       },
     };
   } catch {
-    return { matched: null };
+    return { kind: "ok", matched: null };
   }
 }

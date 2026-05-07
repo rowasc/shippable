@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { GitHubTokenModal } from "./GitHubTokenModal";
+import { within } from "@testing-library/dom";
 
 afterEach(cleanup);
 
@@ -109,5 +110,33 @@ describe("GitHubTokenModal", () => {
 
     const link = screen.getByRole("link", { name: /how to create a PAT/i });
     expect(link.getAttribute("href")).toBe("https://git.example.com/settings/tokens");
+  });
+
+  it("renders into document.body via createPortal (not into the provided container)", () => {
+    // Set up a wrapper div that would be the "parent modal" container.
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+
+    render(
+      <GitHubTokenModal
+        host="github.com"
+        reason="first-time"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+      { container },
+    );
+
+    // The modal content should appear in document.body, not inside `container`.
+    // If the portal works correctly, document.body contains the modal box but
+    // `container` itself doesn't have it as a child (it only has the React root).
+    const modalInContainer = within(container).queryByText(/needs a GitHub Personal Access Token/i);
+    // Portal renders elsewhere — the content should NOT be a descendant of container.
+    expect(modalInContainer).toBeNull();
+
+    // But it IS in the document (via body portal).
+    expect(screen.getByText(/needs a GitHub Personal Access Token/i)).toBeTruthy();
+
+    document.body.removeChild(container);
   });
 });

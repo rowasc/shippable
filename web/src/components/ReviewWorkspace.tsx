@@ -38,7 +38,6 @@ import type {
   ChangeSet,
   Cursor,
   EvidenceRef,
-  PrReviewComment,
   PrSource,
   ReviewState,
   Reply,
@@ -65,7 +64,7 @@ import type { ThemeId } from "../tokens";
 import type { RecentSource } from "../recents";
 import { loadGithubPr, setGithubToken, GithubFetchError } from "../githubPrClient";
 import { GitHubTokenModal } from "./GitHubTokenModal";
-import { isTauri, keychainSet } from "../keychain";
+import { isTauri, keychainGet, keychainSet } from "../keychain";
 import {
   buildDiffViewModel,
   buildSidebarViewModel,
@@ -167,6 +166,7 @@ export function ReviewWorkspace({
   const [prAuthRejected, setPrAuthRejected] = useState<{
     csId: string;
     host: string;
+    hint?: string;
   } | null>(null);
   const [prRefreshTokenModal, setPrRefreshTokenModal] = useState<{
     host: string;
@@ -294,13 +294,31 @@ export function ReviewWorkspace({
       const newCs = await loadGithubPr(htmlUrl);
       dispatch({ type: "LOAD_CHANGESET", changeset: newCs });
     } catch (e) {
-      if (
-        e instanceof GithubFetchError &&
-        e.discriminator === "github_auth_failed"
-      ) {
-        setPrAuthRejected({ csId: cs.id, host: e.host ?? "github.com" });
+      if (e instanceof GithubFetchError) {
+        if (e.discriminator === "github_auth_failed") {
+          setPrAuthRejected({ csId: cs.id, host: e.host ?? "github.com", hint: e.hint });
+        } else if (e.discriminator === "github_token_required" && e.host) {
+          // Mirrors the flow in LoadModal.tsx: try Keychain first on Tauri;
+          // on hit, push to server and retry silently. On miss, open the
+          // token modal with a pendingAction so the user can supply it once.
+          if (isTauri()) {
+            const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
+            if (cached) {
+              await setGithubToken(e.host, cached);
+              // Retry: release busy state after the recursive call resolves.
+              setPrRefreshBusy(false);
+              return handlePrRefresh(htmlUrl);
+            }
+          }
+          setPrRefreshTokenModal({
+            host: e.host,
+            reason: "first-time",
+            pendingHtmlUrl: htmlUrl,
+            pendingAction: () => handlePrRefresh(htmlUrl),
+          });
+        }
+        // Other discriminators: swallow silently; button becomes available again.
       }
-      // Other errors surface in console; the button becomes available again.
     } finally {
       setPrRefreshBusy(false);
     }
@@ -960,7 +978,8 @@ export function ReviewWorkspace({
 
       {prAuthRejected && prAuthRejected.csId === cs.id && (
         <div className="topbar__truncation-banner topbar__truncation-banner--warn">
-          Token for {prAuthRejected.host} was rejected.{" "}
+          Token for {prAuthRejected.host} was rejected
+          {prAuthRejected.hint ? ` (${hintText(prAuthRejected.hint)})` : ""}.{" "}
           <button
             className="topbar__banner-btn"
             onClick={() =>
@@ -971,7 +990,14 @@ export function ReviewWorkspace({
               })
             }
           >
-            Re-enter token
+            Re-enter to retry
+          </button>
+          <button
+            className="topbar__banner-btn"
+            aria-label="Dismiss"
+            onClick={() => setPrAuthRejected(null)}
+          >
+            ×
           </button>
         </div>
       )}
@@ -1302,27 +1328,10 @@ export function ReviewWorkspace({
             prSource={cs.prSource}
             changesetId={cs.id}
             onMergePrOverlay={(csId, prCs) => {
-              // Extract per-line comments from the PR ChangeSet into the
-              // Map shape the reducer expects.
-              const lineComments = new Map<string, Map<number, PrReviewComment[]>>();
-              for (const f of prCs.files) {
-                const lineMap = new Map<number, PrReviewComment[]>();
-                for (const h of f.hunks) {
-                  for (const ln of h.lines) {
-                    if (ln.prReviewComments && ln.prReviewComments.length > 0) {
-                      const no = ln.newNo ?? ln.oldNo;
-                      if (no !== undefined) lineMap.set(no, ln.prReviewComments);
-                    }
-                  }
-                }
-                if (lineMap.size > 0) lineComments.set(f.path, lineMap);
-              }
               dispatch({
                 type: "MERGE_PR_OVERLAY",
                 changesetId: csId,
-                prSource: prCs.prSource!,
-                prConversation: prCs.prConversation ?? [],
-                lineComments,
+                prChangeSet: prCs,
               });
             }}
             onAuthError={(host, reason, retry) => {
@@ -1775,6 +1784,20 @@ function selectionForStatusBar(
     loLineNo: loLine?.newNo ?? loLine?.oldNo ?? lo + 1,
     hiLineNo: hiLine?.newNo ?? hiLine?.oldNo ?? hi + 1,
   };
+}
+
+/** Map the hint discriminator to a human-readable parenthetical. */
+function hintText(hint: string): string {
+  switch (hint) {
+    case "rate-limit":
+      return "rate limit hit";
+    case "scope":
+      return "check scope";
+    case "invalid-token":
+      return "check expiry/scope";
+    default:
+      return hint;
+  }
 }
 
 function buildHelpContext({

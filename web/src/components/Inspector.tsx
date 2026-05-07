@@ -28,6 +28,7 @@ import {
   loadGithubPr,
   lookupPrForBranch,
   GithubFetchError,
+  GH_ERROR_MESSAGES,
 } from "../githubPrClient";
 import type { PrMatch } from "../githubPrClient";
 
@@ -252,13 +253,6 @@ export function Inspector({
     return () => { cancelled = true; };
   }, [worktreePath]);
 
-  // Friendly messages for non-auth error discriminators.
-  const pillErrorMessages: Record<string, string> = {
-    github_pr_not_found: "PR not found.",
-    github_upstream: "GitHub returned an error. Try again.",
-    invalid_pr_url: "That doesn't look like a valid PR URL.",
-    unknown: "Something went wrong loading the PR.",
-  };
 
   async function handlePillClick() {
     if (!pillMatch || !changesetId || !onMergePrOverlay) return;
@@ -277,7 +271,7 @@ export function Inspector({
           onAuthError?.(err.host ?? "github.com", "rejected", () => handlePillClick());
         } else {
           setPillError(
-            pillErrorMessages[err.discriminator] ?? "Couldn't load PR overlay.",
+            GH_ERROR_MESSAGES[err.discriminator] ?? "Couldn't load PR overlay.",
           );
         }
       } else {

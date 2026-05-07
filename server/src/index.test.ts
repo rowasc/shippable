@@ -864,20 +864,30 @@ describe("POST /api/github/pr/load", () => {
     expect(r.status).toBe(400);
   });
 
-  it("returns 400 for a malformed URL", async () => {
+  it("returns 400 for a malformed URL — discriminator is invalid_pr_url", async () => {
     const r = await postJson(`${baseUrl}/api/github/pr/load`, {
       prUrl: "not-a-url",
     });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/invalid PR URL/);
+    expect(r.body.error).toBe("invalid_pr_url");
+    expect(r.body.detail).toMatch(/invalid PR URL/);
   });
 
-  it("returns 400 for a URL that is not a PR path", async () => {
+  it("returns 400 for a URL that is not a PR path — discriminator is invalid_pr_url", async () => {
     const r = await postJson(`${baseUrl}/api/github/pr/load`, {
       prUrl: "https://github.com/owner/repo/issues/1",
     });
     expect(r.status).toBe(400);
-    expect(r.body.error).toMatch(/invalid PR URL/);
+    expect(r.body.error).toBe("invalid_pr_url");
+    expect(r.body.detail).toMatch(/invalid PR URL/);
+  });
+
+  it("returns 400 invalid_pr_url for a file:// scheme URL", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "file:///owner/repo/pull/1",
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("invalid_pr_url");
   });
 
   it("returns 401 github_token_required when no token is stored", async () => {
