@@ -359,6 +359,23 @@ export interface SidebarDetachedEntry {
   originType: "committed" | "dirty";
   /** First 7 chars of originSha; empty for replies that didn't store one. */
   originSha7: string;
+  /**
+   * Full origin sha — needed by the "view at" panel to fetch the historical
+   * file. Empty when the reply didn't store one (legacy or non-worktree).
+   */
+  originSha: string;
+  /**
+   * Repo-relative path the reply was anchored to, when the reply has it.
+   * Empty for legacy replies; the view-at affordance only renders for
+   * committed entries that have both this and `originSha`.
+   */
+  anchorPath: string;
+  /**
+   * Anchor line number captured at write time (1-based), driving the
+   * scroll-to-line behavior in the view-at panel. Undefined for legacy
+   * replies — the panel falls back to the top of the file.
+   */
+  anchorLineNo?: number;
   /** Lines from the comment's anchorContext, ready to render in a snippet. */
   snippetLines: { kind: LineKind; text: string; sign: string }[];
 }
@@ -425,6 +442,9 @@ function buildDetachedGroups(
       authoredHHMM: `${hh}:${mm}`,
       originType: d.reply.originType ?? "committed",
       originSha7: d.reply.originSha ? d.reply.originSha.slice(0, 7) : "",
+      originSha: d.reply.originSha ?? "",
+      anchorPath: d.reply.anchorPath ?? "",
+      anchorLineNo: d.reply.anchorLineNo,
       snippetLines,
     });
   }

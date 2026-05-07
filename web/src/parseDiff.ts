@@ -244,7 +244,7 @@ function parseHunk(
   };
 }
 
-function guessLanguage(path: string): string {
+export function guessLanguage(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
     ts: "ts",

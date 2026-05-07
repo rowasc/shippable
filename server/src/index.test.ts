@@ -512,3 +512,74 @@ describe("POST /api/agent/unenqueue", () => {
     expect(un.body.unenqueued).toBe(false);
   });
 });
+
+describe("POST /api/worktrees/file-at", () => {
+  // Spin up a dedicated worktree with one commit so `git show <sha>:<file>`
+  // has something to return. Kept self-contained so the surrounding test
+  // suites don't have to know about its commit history.
+  let viewWtPath: string;
+  let viewSha: string;
+
+  beforeAll(async () => {
+    viewWtPath = await fs.mkdtemp(path.join(os.tmpdir(), "shippable-view-"));
+    await execFileAsync("git", ["init"], { cwd: viewWtPath });
+    await execFileAsync("git", ["config", "user.email", "t@t"], { cwd: viewWtPath });
+    await execFileAsync("git", ["config", "user.name", "t"], { cwd: viewWtPath });
+    await fs.writeFile(path.join(viewWtPath, "src.ts"), "line1\nline2\nline3\n");
+    await execFileAsync("git", ["add", "."], { cwd: viewWtPath });
+    await execFileAsync("git", ["commit", "-m", "init"], { cwd: viewWtPath });
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+      cwd: viewWtPath,
+    });
+    viewSha = stdout.trim();
+  });
+
+  afterAll(async () => {
+    await fs.rm(viewWtPath, { recursive: true, force: true });
+  });
+
+  it("returns the file contents at the given sha", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/file-at`, {
+      path: viewWtPath,
+      sha: viewSha,
+      file: "src.ts",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.content).toBe("line1\nline2\nline3\n");
+  });
+
+  it("rejects when path/sha/file is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/file-at`, {
+      path: viewWtPath,
+      sha: viewSha,
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects an absolute file path", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/file-at`, {
+      path: viewWtPath,
+      sha: viewSha,
+      file: "/etc/passwd",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects a file path with .. segments", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/file-at`, {
+      path: viewWtPath,
+      sha: viewSha,
+      file: "../escape.ts",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects a sha argument that looks like a flag", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/file-at`, {
+      path: viewWtPath,
+      sha: "--upload-pack",
+      file: "src.ts",
+    });
+    expect(r.status).toBe(400);
+  });
+});

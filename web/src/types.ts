@@ -186,6 +186,13 @@ export interface Reply {
    * the same code in the new diff. See `anchor.ts`.
    */
   anchorHash?: string;
+  /**
+   * 1-based line number in the file at `originSha` (or its parent, for `del`
+   * anchors), captured at write time. Drives the "view at <sha7>" panel's
+   * scroll-to-anchor behavior. Optional — legacy replies that pre-date the
+   * field render the historical file from the top.
+   */
+  anchorLineNo?: number;
 }
 
 /**

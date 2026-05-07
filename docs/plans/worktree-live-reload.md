@@ -91,6 +91,8 @@ Implementation notes from the slice (c) landing:
 
 **(e) "View at `<sha>`" for outdated committed comments.** New endpoint `POST /api/worktrees/file-at` returning the file's content (or just a slice) at a given sha. Detached committed entries' "view at" link opens an inline panel that renders the historical file around the comment. Dirty entries don't get this affordance. *Done when:* clicking "view at" on an outdated committed comment shows the file as it was at that sha, scrolled to the anchor.
 
+**Inline vs modal — chose inline.** The detached entry already lives in the sidebar with its body and 10-line snippet; "view at" expands directly underneath the entry, sharing the column. Reasons: (1) the snippet and the historical file are the same artifact at two zoom levels, so keeping them adjacent matches the reviewer's mental model; (2) a modal would steal focus from the live diff and force a context-switch every time a reviewer wanted to peek at a stale anchor; (3) the panel is bounded — fixed max-height with internal scroll — so a long file doesn't dominate the sidebar. Trade-off: with several entries open at once the sidebar gets visually busier; the per-entry hide button keeps that controllable, and panels only render for entries the user explicitly opened. Reply state carries an `anchorLineNo` (1-based) captured at write time so the panel scrolls to the original anchor without a server-side line-mapping pass; pre-anchorLineNo replies fall back to rendering from the top.
+
 **(f) Server-pushed updates (optional, deferred).** Replace polling with SSE backed by `fs.watch` (or chokidar if cross-platform consistency matters by then). Worth doing only if (a) is meaningfully insufficient — e.g. reviewers complain about lag, or the request volume becomes a real cost. *Done when:* there's evidence polling is too slow or too chatty in real use.
 
 Slices (a)–(d) are the feature. (e) is the next-most-useful follow-up. (f) is an "if we need it."
@@ -101,7 +103,8 @@ Slices (a)–(d) are the feature. (e) is the next-most-useful follow-up. (f) is 
 - **(b) Per-worktree toggle persistence** — shipped. `getLiveReloadEnabled` / `setLiveReloadEnabled` in `web/src/persist.ts`, keyed by absolute path, default-on, in its own localStorage key so `clearSession()` doesn't reset it.
 - **(c) Content-anchored comments + detached sidebar** — separate worktree.
 - **(d) Stop polling when the worktree is gone** — shipped. Three-strike error counter in the hook; `onWorktreeGone` fires once.
-- **(e), (f)** — not started.
+- **(e) View at `<sha>`** — shipped. `POST /api/worktrees/file-at` (`git show <sha>:<file>`); inline panel under detached committed entries scrolls to `Reply.anchorLineNo`.
+- **(f)** — not started.
 
 ## Architecture sketch
 

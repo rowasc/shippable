@@ -873,6 +873,7 @@ export function ReviewWorkspace({
           onCloseRun={closePromptRun}
           wide={sidebarWide}
           onToggleWide={() => setSidebarWide((v) => !v)}
+          worktreePath={wtPath}
         />
         <div className="reviewpane">
           <DefinitionPeek

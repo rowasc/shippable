@@ -168,5 +168,52 @@
   font: inherit;
   font-size: 11px;
   padding: 1px 6px;
-  cursor: not-allowed;
+  cursor: pointer;
+}
+.detached-entry__view-at:hover {
+  background: var(--bg-2);
+  color: var(--fg);
+}
+
+.view-at-panel {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-1, var(--bg-2));
+  max-height: 280px;
+  overflow: auto;
+  border-radius: 2px;
+}
+.view-at-panel--status {
+  padding: 6px 8px;
+  color: var(--fg-mute);
+  font-size: 11px;
+}
+.view-at-panel--err {
+  color: var(--red);
+}
+.view-at-panel__code {
+  margin: 0;
+  padding: 6px 0;
+  font-size: 11px;
+  line-height: 1.45;
+  font-family: inherit;
+  white-space: pre;
+}
+.view-at-line {
+  display: block;
+  padding: 0 8px;
+}
+.view-at-line__no {
+  display: inline-block;
+  width: 3.5em;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--fg-mute);
+  user-select: none;
+}
+.view-at-line--anchor {
+  background: var(--cursor-bg);
+}
+.view-at-line--anchor .view-at-line__no {
+  color: var(--yellow);
 }

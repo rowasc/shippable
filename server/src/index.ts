@@ -77,6 +77,9 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/worktrees/state") {
       return handleWorktreesState(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/file-at") {
+      return handleWorktreesFileAt(req, res, origin);
+    }
     if (req.method === "POST" && req.url === "/api/worktrees/graph") {
       return await handleWorktreesGraph(req, res, origin);
     }
@@ -468,6 +471,48 @@ async function handleWorktreesState(
       : 400;
     writeCorsHeaders(res, origin);
     res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesFileAt(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; sha?: unknown; file?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const sha = typeof parsed.sha === "string" ? parsed.sha : "";
+  const file = typeof parsed.file === "string" ? parsed.file : "";
+  if (!wtPath || !sha || !file) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "expected { path: string, sha: string, file: string }",
+      }),
+    );
+    return;
+  }
+  try {
+    const content = await worktrees.fileAt(wtPath, sha, file);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ content }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/file-at err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
   }
 }

@@ -663,6 +663,49 @@ async function synthesiseNewFileDiff(
   return header + body + (body.length > 0 ? "\n" : "");
 }
 
+/**
+ * Return the contents of `file` at commit `sha` via `git show <sha>:<file>`.
+ * Used by the live-reload "view at <sha7>" affordance on detached committed
+ * comments. The path validation matches the rest of this module — same
+ * `assertGitDir`, same `validateRef` rules — and `file` is required to be a
+ * non-empty repo-relative path with no `..` segments and no leading `/`.
+ *
+ * Errors from git (missing blob, oversized output) propagate as exceptions;
+ * the HTTP layer maps them onto a 4xx.
+ */
+export async function fileAt(
+  worktreePath: string,
+  sha: string,
+  file: string,
+): Promise<string> {
+  await assertGitDir(worktreePath);
+  validateRef(sha);
+  validateRepoRelativePath(file);
+  const { stdout } = await execFileAsync(
+    GIT,
+    ["show", "--end-of-options", `${sha}:${file}`],
+    { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+  );
+  return stdout;
+}
+
+function validateRepoRelativePath(p: string): void {
+  if (typeof p !== "string" || p.length === 0) {
+    throw new Error("file must be a non-empty string");
+  }
+  if (p.startsWith("/")) {
+    throw new Error(`file must be repo-relative, got: ${p}`);
+  }
+  if (p.split("/").includes("..")) {
+    throw new Error("file must not contain '..' segments");
+  }
+  // Reject obvious shell-meaningful bytes; git itself is safe (we're going
+  // through execFile, not a shell), but rejecting them keeps surprises low.
+  if (/\x00/.test(p)) {
+    throw new Error("file must not contain NUL bytes");
+  }
+}
+
 export async function repoGraphFor(
   worktreePath: string,
   ref: string = "HEAD",

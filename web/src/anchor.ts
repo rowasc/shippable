@@ -108,7 +108,12 @@ export function findAnchorInFile(
 /** Anchor metadata to merge onto a Reply at write time. */
 export type ReplyAnchorFields = Pick<
   Reply,
-  "anchorPath" | "anchorContext" | "anchorHash" | "originSha" | "originType"
+  | "anchorPath"
+  | "anchorContext"
+  | "anchorHash"
+  | "anchorLineNo"
+  | "originSha"
+  | "originType"
 >;
 
 /**
@@ -166,6 +171,7 @@ export function buildReplyAnchor(
       if (h.id !== hunkId) continue;
       const safeIdx = Math.max(0, Math.min(h.lines.length - 1, lineIdx));
       const cap = captureAnchorContext(h.lines, safeIdx);
+      const anchorLine = h.lines[safeIdx];
       // A worktree-loaded ChangeSet carries its own sha + dirty flag; for
       // pasted/uploaded loads we fall back to the changeset id so detached
       // entries still have *something* to display in their origin caption.
@@ -175,6 +181,7 @@ export function buildReplyAnchor(
         anchorPath: f.path,
         anchorContext: cap.context,
         anchorHash: cap.hash,
+        anchorLineNo: anchorLine?.newNo ?? anchorLine?.oldNo,
         originSha: wt?.commitSha ?? cs.id,
         originType: dirty ? "dirty" : "committed",
       };
