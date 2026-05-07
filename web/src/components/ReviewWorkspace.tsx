@@ -790,7 +790,7 @@ export function ReviewWorkspace({
           title="clear persisted progress and reload"
           aria-label="reset review session (destructive)"
         >
-          <span className="topbar__btn-label">reset session</span>
+          <span className="topbar__btn-label">reset review</span>
         </button>
       </header>
 
