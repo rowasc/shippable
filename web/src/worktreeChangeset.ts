@@ -85,9 +85,11 @@ export async function fetchWorktreeChangeset(
 
   // Range loads use a deterministic id so two reviews of the same slice land
   // on the same ChangeSet identity (matters for ReviewState persistence).
+  // The "to" portion uses the resolved sha so a `toRef === "HEAD"` pick produces
+  // `wt-range-<from>-<sha>` instead of the literal string `wt-range-<from>-HEAD`.
   const id =
     opts?.kind === "range"
-      ? `wt-range-${opts.fromRef.slice(0, 7)}-${opts.toRef.slice(0, 7)}${opts.includeDirty ? "-d" : ""}`
+      ? `wt-range-${opts.fromRef.slice(0, 7)}-${json.sha.slice(0, 7)}${opts.includeDirty ? "-d" : ""}`
       : `wt-${json.sha.slice(0, 12)}`;
 
   const cs = parseDiff(json.diff, {
@@ -103,11 +105,17 @@ export async function fetchWorktreeChangeset(
   }
   const lspGraph = await fetchDiffCodeGraph(wt.path, json.sha, cs.files);
   if (lspGraph) cs.graph = lspGraph;
+  // The server stamps `dirty:<hash>` on json.sha when the loaded view contains
+  // uncommitted edits — applies to `kind: "dirty"` and to range picks with
+  // `includeDirty` against HEAD when the tree is actually dirty. Comments
+  // authored against this view need `originType: "dirty"`, which keys off this.
+  const isDirtyView = json.sha.startsWith("dirty:");
   cs.worktreeSource = {
     worktreePath: wt.path,
     commitSha: json.sha,
     branch: wt.branch ?? null,
     state: json.state,
+    ...(isDirtyView ? { dirty: true } : {}),
     ...(opts?.kind === "range"
       ? {
           range: {
