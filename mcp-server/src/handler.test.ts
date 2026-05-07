@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PORT, handleCheckReviewComments } from "./handler.js";
+import {
+  DEFAULT_PORT,
+  handleCheckReviewComments,
+  handlePostReviewReply,
+} from "./handler.js";
 
 interface CapturedRequest {
   url: string;
@@ -174,5 +178,101 @@ describe("handleCheckReviewComments", () => {
 
     expect(DEFAULT_PORT).toBe(3001);
     expect(calls[0]!.url).toBe(`http://127.0.0.1:${DEFAULT_PORT}/api/agent/pull`);
+  });
+});
+
+describe("handlePostReviewReply", () => {
+  it("POSTs to /api/agent/replies with the input and returns the assigned id", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "reply-1" }));
+
+    const result = await handlePostReviewReply(
+      {
+        worktreePath: "/repo",
+        commentId: "c1",
+        replyText: "fixed it",
+        outcome: "addressed",
+      },
+      { fetchFn },
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toContain("reply-1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toMatch(/\/api\/agent\/replies$/);
+    // Wire field on the local server endpoint stays `body` — the
+    // `replyText` rename is contained to the MCP tool's input schema.
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body).toEqual({
+      worktreePath: "/repo",
+      commentId: "c1",
+      body: "fixed it",
+      outcome: "addressed",
+    });
+  });
+
+  it("falls back to deps.cwd() when worktreePath is absent", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+
+    await handlePostReviewReply(
+      { commentId: "c1", replyText: "x", outcome: "noted" },
+      { fetchFn, cwd: () => "/tmp/cwd" },
+    );
+
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body.worktreePath).toBe("/tmp/cwd");
+  });
+
+  it("returns an error result on HTTP 500 with port and status in the message", async () => {
+    const { fetchFn } = makeFetch(new Response("oops", { status: 500 }));
+
+    const result = await handlePostReviewReply(
+      {
+        worktreePath: "/repo",
+        commentId: "c1",
+        replyText: "x",
+        outcome: "addressed",
+      },
+      { fetchFn, port: 4242 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("4242");
+    expect(result.content[0]!.text).toContain("500");
+  });
+
+  it("returns an error result without throwing on fetch rejection", async () => {
+    const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
+
+    const result = await handlePostReviewReply(
+      {
+        worktreePath: "/repo",
+        commentId: "c1",
+        replyText: "x",
+        outcome: "declined",
+      },
+      { fetchFn, port: 7777 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("ECONNREFUSED");
+    expect(result.content[0]!.text).toContain("7777");
+  });
+
+  it("honors SHIPPABLE_PORT env when deps.port is absent", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "5050");
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+
+    await handlePostReviewReply(
+      {
+        worktreePath: "/repo",
+        commentId: "c1",
+        replyText: "x",
+        outcome: "noted",
+      },
+      { fetchFn },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:5050/api/agent/replies");
   });
 });

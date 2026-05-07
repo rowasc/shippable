@@ -1,12 +1,41 @@
 # @shippable/mcp-server
 
-A TypeScript MCP server that exposes `shippable_check_review_comments` over stdio. It pulls pending reviewer feedback from the local Shippable server and hands it back as the tool result.
+A TypeScript MCP server that exposes two tools over stdio for the Shippable review loop:
 
-## Magic phrase
+- `shippable_check_review_comments` — pulls pending reviewer feedback from the local Shippable server.
+- `shippable_post_review_reply` — posts a structured per-comment reply back so the reviewer sees what the agent did with each note.
 
-Tell your agent: **`check shippable`**
+Both tools talk to the local Shippable server over `127.0.0.1`.
 
-The tool description was tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback", "check shippable"). If the agent doesn't pick it up, fall back to the literal phrase.
+## Magic phrases
+
+Two phrases trigger the round-trip explicitly when prompt drift suppresses the implicit triggers in the tool descriptions:
+
+- **`check shippable`** — pull pending reviewer comments.
+- **`report back to shippable`** — post replies for the comments the agent just addressed.
+
+The descriptions were tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback", "let shippable know what you did"). If the agent doesn't pick them up, fall back to the literal phrases.
+
+## Tools
+
+### `shippable_check_review_comments`
+
+Input: `{ worktreePath?: string }` — defaults to the agent's `cwd()`.
+
+Returns the formatted reviewer-feedback envelope, or `"No pending comments."` when the queue is empty.
+
+### `shippable_post_review_reply`
+
+Input:
+- `commentId: string` — the id of the reviewer comment this reply answers (the `id` attribute on the `<comment>` element returned by `shippable_check_review_comments`).
+- `replyText: string` — free-form prose explaining what you did. Plain text or Markdown; no XML/HTML wrapping needed. (Named `replyText` rather than `body` because some model serializers conflate `body` with HTML's `<body>` element and emit `</body>` close tags into the value.)
+- `outcome: 'addressed' | 'declined' | 'noted'` — what happened with the comment:
+  - `addressed` — you fixed it.
+  - `declined` — you intentionally won't.
+  - `noted` — you saw it but no action.
+- `worktreePath?: string` — defaults to the agent's `cwd()`.
+
+Returns the assigned reply id on success. Multiple replies to the same `commentId` are allowed and append.
 
 ## Install
 
@@ -64,7 +93,7 @@ After the npm publish lands, the `command` becomes `"npx"` with
 
 - `SHIPPABLE_PORT` (default `3001`) — the port the local Shippable server is listening on. Override if you've changed `PORT` for `server/`.
 
-The MCP server connects to `http://127.0.0.1:$SHIPPABLE_PORT/api/agent/pull` — localhost only, no LAN exposure.
+The MCP server connects to `http://127.0.0.1:$SHIPPABLE_PORT/api/agent/pull` (for `shippable_check_review_comments`) and `…/api/agent/replies` (for `shippable_post_review_reply`) — localhost only, no LAN exposure.
 
 ## Local development
 

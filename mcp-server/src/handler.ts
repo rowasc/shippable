@@ -92,3 +92,76 @@ export async function handleCheckReviewComments(
     content: [{ type: "text", text }],
   };
 }
+
+export type Outcome = "addressed" | "declined" | "noted";
+
+interface PostReplyInput {
+  worktreePath?: string;
+  commentId: string;
+  /**
+   * Free-form prose for the reply. Named `replyText` rather than `body`
+   * because some model serializers conflate `body` with the HTML element
+   * and emit `</body>` close tags into the value — see the reply-flow
+   * notes in `docs/sdd/agent-reply-support/spec.md`.
+   */
+  replyText: string;
+  outcome: Outcome;
+}
+
+interface PostReplyResponse {
+  id: string;
+}
+
+export async function handlePostReviewReply(
+  input: PostReplyInput,
+  deps?: HandlerDeps,
+): Promise<ToolResult> {
+  const port = resolvePort(deps);
+  const worktreePath = resolveWorktreePath(input, deps);
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const url = `${baseUrl}/api/agent/replies`;
+  const fetchFn = deps?.fetchFn ?? fetch;
+
+  let response: Response;
+  try {
+    response = await fetchFn(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        worktreePath,
+        commentId: input.commentId,
+        // Wire-level field on the local server endpoint stays `body` —
+        // the rename is contained to the MCP tool's input schema.
+        body: input.replyText,
+        outcome: input.outcome,
+      }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(
+      `Error contacting Shippable server at ${baseUrl}: ${message}`,
+    );
+  }
+
+  if (!response.ok) {
+    return errorResult(
+      `Error contacting Shippable server at ${baseUrl}: HTTP ${response.status}`,
+    );
+  }
+
+  let parsed: PostReplyResponse;
+  try {
+    parsed = (await response.json()) as PostReplyResponse;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return errorResult(
+      `Error contacting Shippable server at ${baseUrl}: invalid JSON response (${message})`,
+    );
+  }
+
+  return {
+    content: [
+      { type: "text", text: `Posted reply ${parsed.id} for comment ${input.commentId}.` },
+    ],
+  };
+}
