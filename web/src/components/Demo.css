@@ -167,3 +167,118 @@
   max-height: calc(100vh - 140px);
   overflow: auto;
 }
+
+/* Fake agent CLI — a static "terminal window" overlay that appears on the
+   agent-integration frames so the round-trip is visible. Themed dark
+   regardless of the demo theme so it reads as 'a separate window the user
+   has open' rather than part of Shippable. Positioned middle-left to leave
+   the inspector's comment threads visible on the right. */
+.demo__agent-cli {
+  position: fixed;
+  left: 32px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 620px;
+  max-height: 70vh;
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow: hidden;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  animation: demo-cli-in 320ms ease-out;
+}
+
+@keyframes demo-cli-in {
+  from { opacity: 0; transform: translate(-8px, -50%); }
+  to   { opacity: 1; transform: translate(0, -50%); }
+}
+
+.demo__agent-cli-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+.demo__agent-cli-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.demo__agent-cli-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.demo__agent-cli-dot--r { background: #ff5f57; }
+.demo__agent-cli-dot--y { background: #febc2e; }
+.demo__agent-cli-dot--g { background: #28c840; }
+
+.demo__agent-cli-title {
+  flex: 1;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.demo__agent-cli-body {
+  padding: 14px 16px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.demo__agent-cli-line {
+  margin: 0 0 10px;
+}
+.demo__agent-cli-line:last-child {
+  margin-bottom: 0;
+}
+
+.demo__agent-cli-user {
+  color: #79c0ff;
+}
+.demo__agent-cli-user::before {
+  content: "> ";
+  color: #58a6ff;
+  font-weight: 600;
+}
+
+.demo__agent-cli-assistant {
+  color: #c9d1d9;
+}
+
+.demo__agent-cli-tool-head {
+  color: #7ee787;
+}
+.demo__agent-cli-tool-head::before {
+  content: "⏺ ";
+}
+
+.demo__agent-cli-tool-args {
+  color: #8b949e;
+}
+
+.demo__agent-cli-tool-result {
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-left: 2px solid #30363d;
+  color: #8b949e;
+  font-size: 11px;
+  /* pre-wrap: preserve the envelope's explicit newlines + indentation, but
+     also wrap long lines (e.g. the prose body of a posted reply) so the
+     terminal never gets a horizontal scrollbar. */
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+

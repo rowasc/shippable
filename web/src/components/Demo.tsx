@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { CS_42, REPLIES_42 } from "../fixtures/cs-42-preferences";
 import { CS_72, REPLIES_72 } from "../fixtures/cs-72-docs-preview";
+import { CS_91, REPLIES_91 } from "../fixtures/cs-91-agent-flow";
 import {
   initialState,
   reducer,
@@ -44,21 +45,26 @@ import {
   lineNoteReplyKey,
   noteKey,
   userCommentKey,
+  type AgentContextSlice,
   type Cursor,
+  type DeliveredComment,
   type EvidenceRef,
   type ReviewState,
   type ChangeSet,
 } from "../types";
+import type { AgentContextProps } from "./Inspector";
 import "./Demo.css";
 
 const CS = CS_42;
 const PREVIEW_CS = CS_72;
+const AGENT_CS = CS_91;
 const USER_FILE = CS.files[0];
 const PREF_FILE = CS.files.find(
   (f) => f.path === "src/components/PreferencesPanel.tsx",
 )!;
 const STORAGE_FILE = CS.files.find((f) => f.path === "src/utils/storage.ts")!;
 const PREVIEW_FILE = PREVIEW_CS.files[0];
+const AGENT_QUEUE_FILE = AGENT_CS.files[0];
 
 const DEMO_INLINE_SOURCE =
   "function clamp(value, min, max) {\n" +
@@ -136,6 +142,14 @@ const DEMO_WORKTREES = [
     head: "9bda200f4d77f9832c9fd0d8be0bb4c03d0bc7ab",
     isMain: false,
   },
+  {
+    // Path matches CS_91.worktreeSource.worktreePath so the agent-context
+    // panel renders for the trailing agent-integration frames.
+    path: `${DEMO_WORKTREE_DIR}-agent-flow`,
+    branch: AGENT_CS.branch,
+    head: AGENT_CS.worktreeSource!.commitSha,
+    isMain: false,
+  },
 ];
 
 const DEMO_RECENTS: RecentEntry[] = [
@@ -184,6 +198,40 @@ interface WorkspaceFrame extends BaseFrame {
   showInspector?: boolean;
   sidebarWide?: boolean;
   seedRuns?: PromptRunView[];
+  /**
+   * Synthetic agent-context bundle for frames that exercise the
+   * agent-integration surface. Present only on the agent-flow frames; absent
+   * frames render Inspector without the agent panel (current behavior).
+   * Drives the Delivered (N) block — pip glyphs come from each Reply's
+   * `enqueuedCommentId` matched against `delivered`.
+   */
+  agentSnapshot?: AgentSnapshot;
+  /**
+   * Optional fake-CLI overlay for the agent-integration frames. Static —
+   * each frame supplies the fully-populated content it wants visible.
+   */
+  agentCli?: AgentCliContent;
+}
+
+interface AgentSnapshot {
+  slice: AgentContextSlice | null;
+  delivered: DeliveredComment[];
+}
+
+/**
+ * A fake agent terminal overlay rendered on the agent-integration frames so
+ * the round-trip is visible as concrete tool calls instead of just a
+ * caption. Static — frames swap in fully populated content; no typewriter
+ * animation. See `AgentCli` below.
+ */
+type AgentCliLine =
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool"; tool: string; args?: string; result?: string };
+
+interface AgentCliContent {
+  title?: string;
+  lines: AgentCliLine[];
 }
 
 interface WelcomeFrame extends BaseFrame {
@@ -206,6 +254,7 @@ type Frame = WorkspaceFrame | WelcomeFrame | KeySetupFrame | PromptEditorFrame;
 function repliesFor(cs: ChangeSet): Record<string, ReviewState["replies"][string]> {
   if (cs.id === CS.id) return { ...REPLIES_42 };
   if (cs.id === PREVIEW_CS.id) return { ...REPLIES_72 };
+  if (cs.id === AGENT_CS.id) return { ...REPLIES_91 };
   return {};
 }
 
@@ -360,7 +409,12 @@ function installDemoMocks() {
       const req = readRequestJson(init);
       const path = typeof req.path === "string" ? req.path : DEMO_WORKTREES[0].path;
       const wt = DEMO_WORKTREES.find((item) => item.path === path) ?? DEMO_WORKTREES[0];
-      const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
+      const cs =
+        wt.path === DEMO_WORKTREES[1].path
+          ? PREVIEW_CS
+          : wt.path === DEMO_WORKTREES[3].path
+            ? AGENT_CS
+            : CS;
       return jsonResponse({
         diff: changesetToDiff(cs),
         sha: wt.head,
@@ -375,7 +429,12 @@ function installDemoMocks() {
       const req = readRequestJson(init);
       const path = typeof req.path === "string" ? req.path : DEMO_WORKTREES[0].path;
       const wt = DEMO_WORKTREES.find((item) => item.path === path) ?? DEMO_WORKTREES[0];
-      const cs = wt.path === DEMO_WORKTREES[1].path ? PREVIEW_CS : CS;
+      const cs =
+        wt.path === DEMO_WORKTREES[1].path
+          ? PREVIEW_CS
+          : wt.path === DEMO_WORKTREES[3].path
+            ? AGENT_CS
+            : CS;
       return jsonResponse({ graph: buildRepoCodeGraph(buildGraphSources(cs)) });
     }
     if (url.endsWith("/api/code-graph")) {
@@ -406,6 +465,215 @@ function buildFrames(): Frame[] {
   const PREF_H1 = PREF_FILE.hunks[0];
   const STORAGE_H1 = STORAGE_FILE.hunks[0];
   const STORAGE_H2 = STORAGE_FILE.hunks[1];
+  const AGENT_H1 = AGENT_QUEUE_FILE.hunks[0];
+
+  // ── agent-integration segment (four trailing frames) ────────────────────
+  // Walks the round-trip: comments queue → ◌ pip → agent fetches → ✓ pip +
+  // Delivered (N) → agent posts structured replies (addressed / declined)
+  // that thread under each comment. WorkspaceStage does not run the polling
+  // hook, so the lifecycle is expressed as plain seeded state per frame;
+  // the synthetic agent-context bundle is built from each frame's
+  // `agentSnapshot`. The fixture has no AI notes so both reviewer comments
+  // surface in the inspector's "Your comments" section, side-by-side with
+  // their agent replies.
+
+  const AGENT_LINE1_LINE_IDX = 1;  // the new `import { assertGitDir }`
+  const AGENT_LINE2_LINE_IDX = 7;  // the silent-no-op guard
+
+  const lineKey1 = userCommentKey(AGENT_H1.id, AGENT_LINE1_LINE_IDX);
+  const lineKey2 = userCommentKey(AGENT_H1.id, AGENT_LINE2_LINE_IDX);
+
+  const replyLine1 = {
+    id: "demo-r-a1",
+    author: "you",
+    body: "`assertGitDir` reads like it returns void — rename to `assertWorktreeIsGitDir`?",
+    createdAt: "2026-05-06T10:01:30Z",
+    enqueuedCommentId: "cmt_a1",
+  };
+  const replyLine2 = {
+    id: "demo-r-a2",
+    author: "you",
+    body: "this should throw — `{ id: \"\" }` reads as success on the wire.",
+    createdAt: "2026-05-06T10:02:10Z",
+    enqueuedCommentId: "cmt_a2",
+  };
+
+  const deliveredA1: DeliveredComment = {
+    id: "cmt_a1",
+    kind: "line",
+    file: AGENT_QUEUE_FILE.path,
+    lines: "4",
+    body: replyLine1.body,
+    commitSha: AGENT_CS.worktreeSource!.commitSha,
+    supersedes: null,
+    enqueuedAt: replyLine1.createdAt,
+    deliveredAt: "2026-05-06T10:04:00Z",
+  };
+  const deliveredA2: DeliveredComment = {
+    id: "cmt_a2",
+    kind: "line",
+    file: AGENT_QUEUE_FILE.path,
+    lines: "10",
+    body: replyLine2.body,
+    commitSha: AGENT_CS.worktreeSource!.commitSha,
+    supersedes: null,
+    enqueuedAt: replyLine2.createdAt,
+    deliveredAt: "2026-05-06T10:04:00Z",
+  };
+
+  // Matches the slice shape users actually see in the live tool: a session
+  // ref + the bare footer ("N turns"), with the per-block sections collapsed
+  // because the slice has no in-window messages, todos, or files-touched.
+  // Faking a fully-populated slice was misleading.
+  const agentSlice: AgentContextSlice = {
+    session: {
+      sessionId: "01HZ8M3K4P9X2YQ7B6N5T1V0WC",
+      filePath: "~/.claude/projects/shippable-agent-flow/01HZ8M3K4P9X2YQ7B6N5T1V0WC.jsonl",
+      startedAt: "2026-05-06T22:14:00Z",
+      lastEventAt: "2026-05-06T22:31:00Z",
+      taskTitle: "validate worktree path on agent enqueue",
+      turnCount: 0,
+      cwds: [AGENT_CS.worktreeSource!.worktreePath],
+    },
+    commitSha: AGENT_CS.worktreeSource!.commitSha,
+    fromTime: null,
+    toTime: "2026-05-06T22:31:00Z",
+    task: null,
+    followUps: [],
+    todos: [],
+    filesTouched: [],
+    messages: [],
+    tokensIn: 0,
+    tokensOut: 0,
+    durationMs: 0,
+    model: null,
+  };
+
+  const agentBase = {
+    ...initialState([AGENT_CS], REPLIES_91),
+    cursor: {
+      changesetId: AGENT_CS.id,
+      fileId: AGENT_QUEUE_FILE.id,
+      hunkId: AGENT_H1.id,
+      lineIdx: AGENT_LINE1_LINE_IDX,
+    },
+  };
+
+  // Frame agent-1 — fresh worktree-loaded view, no comments yet.
+  const fAgent1State: ReviewState = { ...agentBase };
+
+  // Frame agent-2 — both line comments seeded with `enqueuedCommentId` set
+  // → both render the ◌ queued pip. No delivered ids yet.
+  const fAgent2State: ReviewState = {
+    ...agentBase,
+    replies: {
+      [lineKey1]: [replyLine1],
+      [lineKey2]: [replyLine2],
+    },
+  };
+
+  // Frame agent-3 — agent fetches: same replies, but `delivered` carries
+  // both so pips flip to ✓ and the panel shows Delivered (2).
+  const fAgent3State: ReviewState = { ...fAgent2State };
+
+  // Frame agent-4 — agent posts replies: addressed on the rename, declined
+  // on the throw-vs-silent-no-op call. Both visible in the same view because
+  // the comments share a hunk.
+  const fAgent4State: ReviewState = {
+    ...agentBase,
+    replies: {
+      [lineKey1]: [
+        {
+          ...replyLine1,
+          agentReplies: [
+            {
+              id: "ar-1",
+              body: "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
+              outcome: "addressed",
+              postedAt: "2026-05-06T10:05:00Z",
+            },
+          ],
+        },
+      ],
+      [lineKey2]: [
+        {
+          ...replyLine2,
+          agentReplies: [
+            {
+              id: "ar-2",
+              body: "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",
+              outcome: "declined",
+              postedAt: "2026-05-06T10:06:30Z",
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  const agentSnapshotEmpty: AgentSnapshot = { slice: agentSlice, delivered: [] };
+  const agentSnapshotDelivered: AgentSnapshot = {
+    slice: agentSlice,
+    delivered: [deliveredA2, deliveredA1], // newest-first
+  };
+
+  // Fake terminal content for the delivered + replies frames. Static; the
+  // replies frame appends to the delivered frame's transcript so the user
+  // can see what was already there before scrolling shows the new lines.
+  const reviewerFeedbackEnvelope =
+    `<reviewer-feedback from="shippable" commit="a3c91d7e">\n` +
+    `  <comment id="cmt_a1" file="server/src/agent-queue.ts" lines="4" kind="line">\n` +
+    `    \`assertGitDir\` reads like it returns void — rename to\n` +
+    `    \`assertWorktreeIsGitDir\`?\n` +
+    `  </comment>\n` +
+    `  <comment id="cmt_a2" file="server/src/agent-queue.ts" lines="10" kind="line">\n` +
+    `    this should throw — \`{ id: "" }\` reads as success on the wire.\n` +
+    `  </comment>\n` +
+    `</reviewer-feedback>`;
+
+  const cliFetchLines: AgentCliLine[] = [
+    { kind: "user", text: "check shippable" },
+    {
+      kind: "tool",
+      tool: "shippable_check_review_comments",
+      result: reviewerFeedbackEnvelope,
+    },
+  ];
+
+  const cliDelivered: AgentCliContent = {
+    title: "agent · shippable-agent-flow",
+    lines: cliFetchLines,
+  };
+
+  const cliReplies: AgentCliContent = {
+    title: "agent · shippable-agent-flow",
+    lines: [
+      ...cliFetchLines,
+      {
+        kind: "assistant",
+        text: "Two reviewer comments. I'll handle each.",
+      },
+      {
+        kind: "tool",
+        tool: "shippable_post_review_reply",
+        args: "cmt_a1 · addressed",
+        result:
+          "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
+      },
+      {
+        kind: "tool",
+        tool: "shippable_post_review_reply",
+        args: "cmt_a2 · declined",
+        result:
+          "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",
+      },
+      {
+        kind: "assistant",
+        text:
+          "Renamed and pushed `c8e21f9`. Kept the no-op for now and explained the contract in JSDoc.",
+      },
+    ],
+  };
 
   // 5 — ack the note at line 14, plus a user reply on the note at line 21.
   const f5State = withCursor(
@@ -594,6 +862,44 @@ function buildFrames(): Frame[] {
       kind: "keySetup",
       caption: "desktop mode asks for an API key only when AI features need it",
       durationMs: 7000,
+    },
+    {
+      kind: "workspace",
+      caption: "open from a worktree; the inspector tracks your agent's session",
+      durationMs: 6500,
+      state: fAgent1State,
+      overlay: { kind: "none" },
+      showInspector: true,
+      agentSnapshot: agentSnapshotEmpty,
+    },
+    {
+      kind: "workspace",
+      caption: "every comment queues for your agent — ◌ means it hasn't fetched yet",
+      durationMs: 7500,
+      state: fAgent2State,
+      overlay: { kind: "none" },
+      showInspector: true,
+      agentSnapshot: agentSnapshotEmpty,
+    },
+    {
+      kind: "workspace",
+      caption: "your agent ran check shippable — pips flip to ✓ and Delivered logs the pull",
+      durationMs: 7500,
+      state: fAgent3State,
+      overlay: { kind: "none" },
+      showInspector: true,
+      agentSnapshot: agentSnapshotDelivered,
+      agentCli: cliDelivered,
+    },
+    {
+      kind: "workspace",
+      caption: "replies thread under each comment — ✓ addressed, ⊘ declined",
+      durationMs: 8500,
+      state: fAgent4State,
+      overlay: { kind: "none" },
+      showInspector: true,
+      agentSnapshot: agentSnapshotDelivered,
+      agentCli: cliReplies,
     },
     {
       kind: "workspace",
@@ -952,6 +1258,29 @@ function WorkspaceStage({
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
+
+  // Synthetic agent-context bundle for the trailing agent-integration
+  // frames. WorkspaceStage doesn't run the polling hook, so the bundle is
+  // pure props built from the frame's snapshot. Frames without a snapshot
+  // pass `undefined`, which keeps the Inspector's pre-existing behaviour
+  // (no panel) intact for the rest of the reel.
+  const agentContext = useMemo<AgentContextProps | undefined>(() => {
+    const snap = frame.agentSnapshot;
+    if (!snap) return undefined;
+    return {
+      slice: snap.slice,
+      candidates: snap.slice ? [snap.slice.session] : [],
+      selectedSessionFilePath: snap.slice?.session.filePath ?? null,
+      loading: false,
+      error: null,
+      mcpStatus: { installed: true, installCommand: "claude mcp add shippable …" },
+      delivered: snap.delivered,
+      lastSuccessfulPollAt: new Date().toISOString(),
+      deliveredError: false,
+      onPickSession: () => {},
+      onRefresh: () => {},
+    };
+  }, [frame.agentSnapshot]);
 
   // Demo runs without a server, so the plan overlay is seeded from the
   // rule-based fixture utility (the same path gallery-fixtures uses) and
@@ -1429,6 +1758,7 @@ function WorkspaceStage({
                 inputs: recipe.inputs,
               }));
             }}
+            agentContext={agentContext}
           />
         )}
       </div>
@@ -1520,6 +1850,73 @@ function WorkspaceStage({
         onFreeClose={() => setFreeRunnerOpen(false)}
         runRequest={runRequest}
       />
+
+      {frame.agentCli && <AgentCli content={frame.agentCli} />}
+    </div>
+  );
+}
+
+/**
+ * Floating agent-terminal overlay used on the agent-integration frames.
+ * Generic naming on purpose — the round-trip is harness-agnostic; any
+ * MCP-speaking agent could fill this surface. Rendered with a fixed dark
+ * theme regardless of the demo's active theme so it reads as a separate
+ * window. Auto-scrolls to the bottom on mount so multi-line transcripts
+ * land on the latest entry.
+ */
+function AgentCli({ content }: { content: AgentCliContent }) {
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [content]);
+  return (
+    <div className="demo__agent-cli" role="presentation">
+      <div className="demo__agent-cli-titlebar">
+        <div className="demo__agent-cli-dots">
+          <span className="demo__agent-cli-dot demo__agent-cli-dot--r" />
+          <span className="demo__agent-cli-dot demo__agent-cli-dot--y" />
+          <span className="demo__agent-cli-dot demo__agent-cli-dot--g" />
+        </div>
+        <div className="demo__agent-cli-title">
+          {content.title ?? "agent"}
+        </div>
+      </div>
+      <div className="demo__agent-cli-body" ref={bodyRef}>
+        {content.lines.map((line, i) => {
+          if (line.kind === "user") {
+            return (
+              <p
+                key={i}
+                className="demo__agent-cli-line demo__agent-cli-user"
+              >
+                {line.text}
+              </p>
+            );
+          }
+          if (line.kind === "assistant") {
+            return (
+              <p
+                key={i}
+                className="demo__agent-cli-line demo__agent-cli-assistant"
+              >
+                {line.text}
+              </p>
+            );
+          }
+          return (
+            <div key={i} className="demo__agent-cli-line">
+              <span className="demo__agent-cli-tool-head">{line.tool}</span>
+              {line.args && (
+                <span className="demo__agent-cli-tool-args"> ({line.args})</span>
+              )}
+              {line.result && (
+                <pre className="demo__agent-cli-tool-result">{line.result}</pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
