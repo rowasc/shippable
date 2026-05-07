@@ -68,8 +68,8 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
       const msg = e instanceof Error ? e.message : String(e);
       setErr(
         isLikelyCors
-          ? `Couldn't reach that URL — likely a CORS rejection. Download the diff and drop it here instead.`
-          : `fetch failed: ${msg}`,
+          ? `${hostFromUrl(url)} blocks browser fetches with CORS — common for GitHub raw URLs. Save the diff to a file (e.g. \`gh pr diff <num> > pr.diff\`) and load it from the file input or paste box below.`
+          : `Couldn't fetch the URL: ${msg}`,
       );
     } finally {
       setUrlBusy(false);
@@ -383,6 +383,14 @@ function titleFromUrl(url: string): string {
   try {
     const u = new URL(url);
     return `${u.hostname}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function hostFromUrl(url: string): string {
+  try {
+    return new URL(url).hostname;
   } catch {
     return url;
   }
