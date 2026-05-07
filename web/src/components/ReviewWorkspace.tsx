@@ -21,6 +21,7 @@ import { HelpOverlay } from "./HelpOverlay";
 import { Inspector } from "./Inspector";
 import { LineContextMenu, type ContextMenuItem } from "./LineContextMenu";
 import { LoadModal } from "./LoadModal";
+import { RangePicker } from "./RangePicker";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
 import { ThemePicker } from "./ThemePicker";
@@ -50,6 +51,11 @@ import {
 } from "../agentContextClient";
 import { deriveCommentPayload } from "../agentCommentPayload";
 import { buildReplyAnchor } from "../anchor";
+import {
+  fetchWorktreeChangeset,
+  fetchWorktreeCommits,
+  type LoadOpts,
+} from "../worktreeChangeset";
 import { useDeliveredPolling } from "../useDeliveredPolling";
 import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
@@ -101,6 +107,9 @@ export function ReviewWorkspace({
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
+  const [showRangePicker, setShowRangePicker] = useState(false);
+  const [rangePickerBusy, setRangePickerBusy] = useState(false);
+  const [rangePickerErr, setRangePickerErr] = useState<string | null>(null);
   const [freeRunnerOpen, setFreeRunnerOpen] = useState(false);
   const [runRequest, setRunRequest] = useState<{
     tick: number;
@@ -717,6 +726,17 @@ export function ReviewWorkspace({
         <span className="topbar__branch">
           {cs.branch} → {cs.base}
         </span>
+        {cs.worktreeSource && (
+          <button
+            type="button"
+            className={`topbar__btn topbar__btn--range ${showRangePicker ? "topbar__btn--on" : ""}`}
+            onClick={() => setShowRangePicker((v) => !v)}
+            title="pick a SHA range to review"
+            disabled={rangePickerBusy}
+          >
+            <span className="topbar__btn-label">⇄ range</span>
+          </button>
+        )}
         <DefinitionStatusChip
           currentSource={currentSource}
           fileLanguage={file.language}
@@ -793,6 +813,71 @@ export function ReviewWorkspace({
           <span className="topbar__btn-label">reset review</span>
         </button>
       </header>
+
+      {showRangePicker && cs.worktreeSource && (
+        <div className="topbar-popover">
+          {rangePickerErr && (
+            <div className="topbar-popover__err">{rangePickerErr}</div>
+          )}
+          <RangePicker
+            worktreePath={cs.worktreeSource.worktreePath}
+            fetchCommits={fetchWorktreeCommits}
+            defaultFromRef={cs.worktreeSource.range?.fromRef}
+            defaultToRef={cs.worktreeSource.range?.toRef ?? "HEAD"}
+            defaultIncludeDirty={cs.worktreeSource.range?.includeDirty}
+            busy={rangePickerBusy}
+            onApply={async (opts: LoadOpts) => {
+              if (!cs.worktreeSource) return;
+              setRangePickerBusy(true);
+              setRangePickerErr(null);
+              try {
+                const newCs = await fetchWorktreeChangeset(
+                  {
+                    path: cs.worktreeSource.worktreePath,
+                    branch: cs.worktreeSource.branch,
+                  },
+                  opts,
+                );
+                onLoadChangeset(newCs, {}, {
+                  kind: "worktree",
+                  path: cs.worktreeSource.worktreePath,
+                  branch: cs.worktreeSource.branch,
+                });
+                setShowRangePicker(false);
+              } catch (e) {
+                setRangePickerErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setRangePickerBusy(false);
+              }
+            }}
+            onCancel={() => setShowRangePicker(false)}
+            onJustThis={async (sha: string) => {
+              if (!cs.worktreeSource) return;
+              setRangePickerBusy(true);
+              setRangePickerErr(null);
+              try {
+                const newCs = await fetchWorktreeChangeset(
+                  {
+                    path: cs.worktreeSource.worktreePath,
+                    branch: cs.worktreeSource.branch,
+                  },
+                  { kind: "ref", ref: sha },
+                );
+                onLoadChangeset(newCs, {}, {
+                  kind: "worktree",
+                  path: cs.worktreeSource.worktreePath,
+                  branch: cs.worktreeSource.branch,
+                });
+                setShowRangePicker(false);
+              } catch (e) {
+                setRangePickerErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setRangePickerBusy(false);
+              }
+            }}
+          />
+        </div>
+      )}
 
       {liveReloadBar}
 

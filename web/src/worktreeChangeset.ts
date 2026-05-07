@@ -16,6 +16,31 @@ interface WorktreeChangesetResponse {
 
 type ErrorResponse = { error: string };
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  date: string;
+  parents: string[];
+}
+
+export async function fetchWorktreeCommits(
+  worktreePath: string,
+  limit?: number,
+): Promise<CommitInfo[]> {
+  const res = await fetch(await apiUrl("/api/worktrees/commits"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: worktreePath, ...(limit ? { limit } : {}) }),
+  });
+  const json = (await res.json()) as { commits: CommitInfo[] } | ErrorResponse;
+  if (!res.ok || "error" in json) {
+    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
+  }
+  return json.commits;
+}
+
 export type LoadOpts =
   | { kind: "range"; fromRef: string; toRef: string; includeDirty: boolean }
   | { kind: "ref"; ref: string }

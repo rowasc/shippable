@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "./apiUrl";
-import { fetchWorktreeChangeset } from "./worktreeChangeset";
+import {
+  fetchWorktreeChangeset,
+  fetchWorktreeCommits,
+} from "./worktreeChangeset";
 import type { LoadOpts } from "./worktreeChangeset";
 import { warmCodeGraph } from "./codeGraphClient";
 import type { ChangeSet } from "./types";
@@ -13,15 +16,6 @@ export interface Worktree {
   branch: string | null;
   head: string;
   isMain: boolean;
-}
-
-export interface CommitInfo {
-  sha: string;
-  shortSha: string;
-  subject: string;
-  author: string;
-  date: string;
-  parents: string[];
 }
 
 type ErrorResponse = { error: string };
@@ -134,27 +128,9 @@ export function useWorktreeLoader({ onLoad }: Props) {
     }
   }
 
-  async function fetchCommits(
-    worktreePath: string,
-    limit?: number,
-  ): Promise<CommitInfo[]> {
-    const res = await fetch(await apiUrl("/api/worktrees/commits"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: worktreePath, ...(limit ? { limit } : {}) }),
-    });
-    const json = (await res.json()) as
-      | { commits: CommitInfo[] }
-      | ErrorResponse;
-    if (!res.ok || "error" in json) {
-      throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-    }
-    return json.commits;
-  }
-
   return {
     err,
-    fetchCommits,
+    fetchCommits: fetchWorktreeCommits,
     loadFromWorktree,
     pickDirectory,
     scanWorktrees,

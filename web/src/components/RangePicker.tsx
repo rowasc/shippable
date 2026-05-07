@@ -1,7 +1,6 @@
 import "./RangePicker.css";
 import { useEffect, useState } from "react";
-import type { CommitInfo } from "../useWorktreeLoader";
-import type { LoadOpts } from "../worktreeChangeset";
+import type { CommitInfo, LoadOpts } from "../worktreeChangeset";
 
 interface Props {
   worktreePath: string;
