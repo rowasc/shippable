@@ -10,6 +10,7 @@ import * as agentContext from "./agent-context.ts";
 import * as mcpStatus from "./mcp-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
+import * as authStore from "./github/auth-store.ts";
 import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 import type { DefinitionRequest } from "../../web/src/definitionTypes.ts";
@@ -98,6 +99,15 @@ export function createApp(): Server {
     }
     if (req.method === "GET" && req.url === "/api/worktrees/mcp-status") {
       return await handleWorktreesMcpStatus(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/github/auth/set") {
+      return await handleGithubAuthSet(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/github/auth/has") {
+      return await handleGithubAuthHas(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/github/auth/clear") {
+      return await handleGithubAuthClear(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/enqueue") {
       return await handleAgentEnqueue(req, res, origin);
@@ -805,6 +815,101 @@ const COMMENT_KINDS: readonly CommentKind[] = [
   "reply-to-teammate",
   "reply-to-hunk-summary",
 ];
+
+async function handleGithubAuthSet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { host?: unknown; token?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  if (typeof parsed.host !== "string" || !parsed.host) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { host: string, token: string }" }));
+    return;
+  }
+  if (typeof parsed.token !== "string" || !parsed.token) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { host: string, token: string }" }));
+    return;
+  }
+  try {
+    authStore.setToken(parsed.host, parsed.token);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }));
+}
+
+async function handleGithubAuthHas(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { host?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  if (typeof parsed.host !== "string" || !parsed.host) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { host: string }" }));
+    return;
+  }
+  const has = authStore.hasToken(parsed.host);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ has }));
+}
+
+async function handleGithubAuthClear(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { host?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  if (typeof parsed.host !== "string" || !parsed.host) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { host: string }" }));
+    return;
+  }
+  authStore.clearToken(parsed.host);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ ok: true }));
+}
 
 const OUTCOMES: readonly agentQueue.Outcome[] = ["addressed", "declined", "noted"];
 

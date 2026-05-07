@@ -24,6 +24,7 @@ let server: Server;
 let baseUrl: string;
 let worktreePath: string;
 let resetForTests: () => void;
+let resetAuthStore: () => void;
 
 interface JsonResponse {
   status: number;
@@ -52,7 +53,9 @@ beforeAll(async () => {
 
   const indexMod = await import("./index.ts");
   const queueMod = await import("./agent-queue.ts");
+  const authMod = await import("./github/auth-store.ts");
   resetForTests = queueMod.resetForTests;
+  resetAuthStore = authMod.resetForTests;
 
   server = indexMod.createApp();
   await new Promise<void>((resolve) => {
@@ -74,6 +77,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   resetForTests();
+  resetAuthStore();
 });
 
 describe("POST /api/agent/enqueue", () => {
@@ -666,5 +670,134 @@ describe("POST /api/worktrees/commits and range changeset", () => {
     expect(r.status).toBe(200);
     // Tree is clean; dirty changeset returns the HEAD sha and an empty diff.
     expect(r.body.sha).toBe(secondSha);
+  });
+});
+
+describe("POST /api/github/auth/set", () => {
+  it("returns { ok: true } on a valid host + token", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_test",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+
+  it("rejects an invalid JSON body", async () => {
+    const res = await fetch(`${baseUrl}/api/github/auth/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects when host is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
+      token: "ghp_test",
+    });
+    expect(r.status).toBe(400);
+    expect(String(r.body.error)).toBeTruthy();
+  });
+
+  it("rejects when token is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects a blocked host (localhost)", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "localhost",
+      token: "tok",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("denies requests with an opaque origin", async () => {
+    const res = await fetch(`${baseUrl}/api/github/auth/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "null" },
+      body: JSON.stringify({ host: "github.com", token: "tok" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/github/auth/has", () => {
+  it("returns { has: false } when no token is stored", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/has`, {
+      host: "github.com",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.has).toBe(false);
+  });
+
+  it("returns { has: true } after a token is set", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_test",
+    });
+    const r = await postJson(`${baseUrl}/api/github/auth/has`, {
+      host: "github.com",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.has).toBe(true);
+  });
+
+  it("rejects when host is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/has`, {});
+    expect(r.status).toBe(400);
+  });
+
+  it("denies requests with an opaque origin", async () => {
+    const res = await fetch(`${baseUrl}/api/github/auth/has`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "null" },
+      body: JSON.stringify({ host: "github.com" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/github/auth/clear", () => {
+  it("clears a stored token and has returns false", async () => {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_test",
+    });
+    const clear = await postJson(`${baseUrl}/api/github/auth/clear`, {
+      host: "github.com",
+    });
+    expect(clear.status).toBe(200);
+    expect(clear.body.ok).toBe(true);
+
+    const has = await postJson(`${baseUrl}/api/github/auth/has`, {
+      host: "github.com",
+    });
+    expect(has.body.has).toBe(false);
+  });
+
+  it("is a no-op for an unknown host", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/clear`, {
+      host: "unknown.example.com",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+
+  it("rejects when host is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/github/auth/clear`, {});
+    expect(r.status).toBe(400);
+  });
+
+  it("denies requests with an opaque origin", async () => {
+    const res = await fetch(`${baseUrl}/api/github/auth/clear`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "null" },
+      body: JSON.stringify({ host: "github.com" }),
+    });
+    expect(res.status).toBe(403);
   });
 });
