@@ -143,6 +143,43 @@ body,
   border-color: var(--red);
   opacity: 1;
 }
+/* Inline reset-review confirm. Mirrors the editor/reply confirm clusters
+   so the destructive action gets the same two-step affordance everywhere. */
+.topbar__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 18px;
+  font-size: 11px;
+}
+.topbar__confirm-q {
+  color: var(--fg-dim);
+}
+.topbar__confirm-yes,
+.topbar__confirm-no {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.topbar__confirm-yes {
+  color: var(--red);
+  border-color: var(--red);
+}
+.topbar__confirm-yes:hover,
+.topbar__confirm-yes:focus-visible {
+  background: var(--red-bg);
+}
+.topbar__confirm-no:hover,
+.topbar__confirm-no:focus-visible {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
 .topbar-popover {
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);

@@ -107,6 +107,9 @@ export function ReviewWorkspace({
   const [showHelp, setShowHelp] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
+  // Two-step inline confirm for the reset-review button (matches the pattern
+  // in ReplyThread / PromptEditor — no native confirm() to break focus).
+  const [armedReset, setArmedReset] = useState(false);
   const [showRangePicker, setShowRangePicker] = useState(false);
   const [rangePickerBusy, setRangePickerBusy] = useState(false);
   const [rangePickerErr, setRangePickerErr] = useState<string | null>(null);
@@ -794,24 +797,46 @@ export function ReviewWorkspace({
           <span className="topbar__btn-label">help</span>
           <kbd>?</kbd>
         </button>
-        <button
-          type="button"
-          className="topbar__btn topbar__btn--danger"
-          onClick={() => {
-            if (
-              window.confirm(
-                "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
-              )
-            ) {
-              clearSession();
-              window.location.reload();
-            }
-          }}
-          title="clear persisted progress and reload"
-          aria-label="reset review session (destructive)"
-        >
-          <span className="topbar__btn-label">reset review</span>
-        </button>
+        {armedReset ? (
+          <span
+            className="topbar__confirm"
+            role="group"
+            aria-label="confirm reset review"
+          >
+            <span className="topbar__confirm-q">
+              reset? read marks, sign-offs, comments, and drafts will be cleared.
+            </span>
+            <button
+              type="button"
+              className="topbar__confirm-yes"
+              onClick={() => {
+                setArmedReset(false);
+                clearSession();
+                window.location.reload();
+              }}
+              autoFocus
+            >
+              yes
+            </button>
+            <button
+              type="button"
+              className="topbar__confirm-no"
+              onClick={() => setArmedReset(false)}
+            >
+              cancel
+            </button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="topbar__btn topbar__btn--danger"
+            onClick={() => setArmedReset(true)}
+            title="clear persisted progress and reload"
+            aria-label="reset review session (destructive)"
+          >
+            <span className="topbar__btn-label">reset review</span>
+          </button>
+        )}
       </header>
 
       {showRangePicker && cs.worktreeSource && (
