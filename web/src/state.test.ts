@@ -1107,3 +1107,189 @@ describe("coverage helpers", () => {
     expect(reviewedFilesCount(cs, reviewed)).toBe(1);
   });
 });
+
+// ── Mouse-driven actions ───────────────────────────────────────────────────
+
+describe("SET_SELECTION_RANGE", () => {
+  it("sets a line-range selection without moving the cursor", () => {
+    const s1 = reducer(s0, {
+      type: "SET_SELECTION_RANGE",
+      hunkId: "cs1/f1#h1",
+      anchor: 0,
+      head: 2,
+    });
+    expect(s1.cursor).toEqual(s0.cursor);
+    expect(s1.selection).toEqual({ hunkId: "cs1/f1#h1", anchor: 0, head: 2 });
+  });
+
+  it("drops charRange when anchor !== head", () => {
+    const s1 = reducer(s0, {
+      type: "SET_SELECTION_RANGE",
+      hunkId: "cs1/f1#h1",
+      anchor: 0,
+      head: 2,
+      charRange: { lineIdx: 0, fromCol: 0, toCol: 3 },
+    });
+    expect(s1.selection?.charRange).toBeUndefined();
+  });
+
+  it("preserves charRange when anchor === head", () => {
+    const s1 = reducer(s0, {
+      type: "SET_SELECTION_RANGE",
+      hunkId: "cs1/f1#h1",
+      anchor: 0,
+      head: 0,
+      charRange: { lineIdx: 0, fromCol: 1, toCol: 2 },
+    });
+    expect(s1.selection?.charRange).toEqual({ lineIdx: 0, fromCol: 1, toCol: 2 });
+  });
+
+  it("ignores moves to a different hunk than the cursor's", () => {
+    const s1 = reducer(s0, {
+      type: "SET_SELECTION_RANGE",
+      hunkId: "cs1/f1#h2",
+      anchor: 0,
+      head: 1,
+    });
+    expect(s1).toBe(s0);
+  });
+});
+
+describe("SET_LINE_CHAR_RANGE", () => {
+  it("sets a single-line selection with a charRange", () => {
+    const s1 = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 1,
+      fromCol: 2,
+      toCol: 5,
+    });
+    expect(s1.selection).toEqual({
+      hunkId: "cs1/f1#h1",
+      anchor: 1,
+      head: 1,
+      charRange: { lineIdx: 1, fromCol: 2, toCol: 5 },
+    });
+  });
+
+  it("is a no-op when fromCol >= toCol", () => {
+    const s1 = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 0,
+      fromCol: 3,
+      toCol: 3,
+    });
+    expect(s1).toBe(s0);
+  });
+
+  it("ignores out-of-cursor-hunk events", () => {
+    const s1 = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h2",
+      lineIdx: 0,
+      fromCol: 0,
+      toCol: 1,
+    });
+    expect(s1).toBe(s0);
+  });
+});
+
+describe("MARK_LINES_READ / MARK_LINES_UNREAD", () => {
+  it("MARK_LINES_READ adds every idx in the inclusive range", () => {
+    const s1 = reducer(s0, {
+      type: "MARK_LINES_READ",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 0,
+      hiLineIdx: 2,
+    });
+    expect(Array.from(s1.readLines["cs1/f1#h1"]).sort()).toEqual([0, 1, 2]);
+  });
+
+  it("MARK_LINES_READ leaves cursor and selection untouched", () => {
+    const s1 = reducer(s0, {
+      type: "MARK_LINES_READ",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 1,
+      hiLineIdx: 2,
+    });
+    expect(s1.cursor).toEqual(s0.cursor);
+    expect(s1.selection).toEqual(s0.selection);
+  });
+
+  it("MARK_LINES_UNREAD removes the range and drops the key when empty", () => {
+    const seeded = reducer(s0, {
+      type: "MARK_LINES_READ",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 0,
+      hiLineIdx: 2,
+    });
+    const cleared = reducer(seeded, {
+      type: "MARK_LINES_UNREAD",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 0,
+      hiLineIdx: 2,
+    });
+    expect(cleared.readLines["cs1/f1#h1"]).toBeUndefined();
+  });
+
+  it("MARK_LINES_UNREAD is a no-op when nothing in the range was read", () => {
+    const seeded = reducer(s0, {
+      type: "MARK_LINES_READ",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 0,
+      hiLineIdx: 0,
+    });
+    const next = reducer(seeded, {
+      type: "MARK_LINES_UNREAD",
+      hunkId: "cs1/f1#h1",
+      loLineIdx: 1,
+      hiLineIdx: 2,
+    });
+    expect(next).toBe(seeded);
+  });
+});
+
+describe("charRange invariants under existing actions", () => {
+  it("MOVE_LINE { extend: true } produces a selection without charRange", () => {
+    const seeded = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 0,
+      fromCol: 0,
+      toCol: 2,
+    });
+    expect(seeded.selection?.charRange).toBeDefined();
+    const after = reducer(seeded, { type: "MOVE_LINE", delta: 1, extend: true });
+    expect(after.selection).toEqual({
+      hunkId: "cs1/f1#h1",
+      anchor: 0,
+      head: 1,
+    });
+    expect(after.selection?.charRange).toBeUndefined();
+  });
+
+  it("plain MOVE_LINE clears charRange", () => {
+    const seeded = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 0,
+      fromCol: 0,
+      toCol: 2,
+    });
+    const after = reducer(seeded, { type: "MOVE_LINE", delta: 1 });
+    expect(after.selection).toBeNull();
+  });
+
+  it("COLLAPSE_SELECTION clears charRange", () => {
+    const seeded = reducer(s0, {
+      type: "SET_LINE_CHAR_RANGE",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 0,
+      fromCol: 0,
+      toCol: 2,
+    });
+    const after = reducer(seeded, { type: "COLLAPSE_SELECTION" });
+    expect(after.selection).toBeNull();
+  });
+});

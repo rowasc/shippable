@@ -1,5 +1,6 @@
 import type {
   AgentReply,
+  CharRange,
   Cursor,
   ChangeSet,
   DetachedReply,
@@ -152,7 +153,42 @@ export type Action =
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
   | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
-  | { type: "TOGGLE_FILE_REVIEWED"; fileId: string };
+  | { type: "TOGGLE_FILE_REVIEWED"; fileId: string }
+  | {
+      // Set the line-range selection directly without moving the cursor.
+      // Used by the DiffView drag pipeline once per pointermove tick. Drops
+      // any prior charRange when anchor !== head; ignored if hunkId differs
+      // from the cursor's current hunk.
+      type: "SET_SELECTION_RANGE";
+      hunkId: string;
+      anchor: number;
+      head: number;
+      charRange?: CharRange;
+    }
+  | {
+      // Set a single-line char-range selection from native text-selection
+      // mouseup. No-op when fromCol >= toCol.
+      type: "SET_LINE_CHAR_RANGE";
+      hunkId: string;
+      lineIdx: number;
+      fromCol: number;
+      toCol: number;
+    }
+  | {
+      // Mark every lineIdx in [loLineIdx, hiLineIdx] as read for `hunkId`.
+      // Leaves cursor + selection untouched. Driven by the right-click
+      // "Mark as read" menu item.
+      type: "MARK_LINES_READ";
+      hunkId: string;
+      loLineIdx: number;
+      hiLineIdx: number;
+    }
+  | {
+      type: "MARK_LINES_UNREAD";
+      hunkId: string;
+      loLineIdx: number;
+      hiLineIdx: number;
+    };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
   // Welcome mode (no changesets) — only LOAD_CHANGESET is meaningful.
@@ -322,6 +358,57 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "TOGGLE_FILE_REVIEWED":
       return { ...state, reviewedFiles: togglein(state.reviewedFiles, action.fileId) };
+    case "SET_SELECTION_RANGE": {
+      // Drag is per-hunk; ignore moves that drift to a different hunk.
+      if (action.hunkId !== state.cursor.hunkId) return state;
+      const charRange = action.anchor === action.head ? action.charRange : undefined;
+      const next: LineSelection = charRange
+        ? { hunkId: action.hunkId, anchor: action.anchor, head: action.head, charRange }
+        : { hunkId: action.hunkId, anchor: action.anchor, head: action.head };
+      return { ...state, selection: next };
+    }
+    case "SET_LINE_CHAR_RANGE": {
+      if (action.fromCol >= action.toCol) return state;
+      if (action.hunkId !== state.cursor.hunkId) return state;
+      return {
+        ...state,
+        selection: {
+          hunkId: action.hunkId,
+          anchor: action.lineIdx,
+          head: action.lineIdx,
+          charRange: {
+            lineIdx: action.lineIdx,
+            fromCol: action.fromCol,
+            toCol: action.toCol,
+          },
+        },
+      };
+    }
+    case "MARK_LINES_READ": {
+      const lo = Math.min(action.loLineIdx, action.hiLineIdx);
+      const hi = Math.max(action.loLineIdx, action.hiLineIdx);
+      const set = new Set(state.readLines[action.hunkId] ?? []);
+      const before = set.size;
+      for (let i = lo; i <= hi; i++) set.add(i);
+      if (set.size === before) return state;
+      return { ...state, readLines: { ...state.readLines, [action.hunkId]: set } };
+    }
+    case "MARK_LINES_UNREAD": {
+      const existing = state.readLines[action.hunkId];
+      if (!existing || existing.size === 0) return state;
+      const lo = Math.min(action.loLineIdx, action.hiLineIdx);
+      const hi = Math.max(action.loLineIdx, action.hiLineIdx);
+      const set = new Set(existing);
+      let changed = false;
+      for (let i = lo; i <= hi; i++) {
+        if (set.delete(i)) changed = true;
+      }
+      if (!changed) return state;
+      const next = { ...state.readLines };
+      if (set.size === 0) delete next[action.hunkId];
+      else next[action.hunkId] = set;
+      return { ...state, readLines: next };
+    }
   }
 }
 

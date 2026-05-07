@@ -19,6 +19,7 @@ import { StatusBar } from "./StatusBar";
 import { GuidePrompt } from "./GuidePrompt";
 import { HelpOverlay } from "./HelpOverlay";
 import { Inspector } from "./Inspector";
+import { LineContextMenu, type ContextMenuItem } from "./LineContextMenu";
 import { LoadModal } from "./LoadModal";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
@@ -109,6 +110,12 @@ export function ReviewWorkspace({
   const [draftingKey, setDraftingKey] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    hunkId: string;
+    lineIdx: number;
+  } | null>(null);
   const [mouseTip, setMouseTip] = useState<string | null>(null);
   const [runs, setRuns] = useState<PromptRunView[]>([]);
   const [sidebarWide, setSidebarWide] = useState(false);
@@ -264,6 +271,26 @@ export function ReviewWorkspace({
     hasCommandPalette: showCommandPalette,
   };
 
+  // Mouse interactions on the diff are disabled while a modal-style overlay
+  // owns input. Symbol jumps still work — those go through LineText's own
+  // click handler, not our delegated pointer plumbing.
+  const interactionsEnabled =
+    !showHelp &&
+    !showPlan &&
+    !showLoad &&
+    !showPicker &&
+    !showCommandPalette &&
+    !freeRunnerOpen;
+
+  // A modal opening on top of an open right-click menu should dismiss it;
+  // the menu itself can't observe the overlays so the parent does it. The
+  // alternative — closing from every modal opener — would scatter this
+  // concern across many setShow…(true) callsites.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing one piece of UI state when its precondition flips false
+    if (!interactionsEnabled) setContextMenu(null);
+  }, [interactionsEnabled]);
+
   function runAction(action: ActionId) {
     const preserveSelection = draftingKey?.startsWith("block:") ?? false;
     switch (action) {
@@ -328,7 +355,7 @@ export function ReviewWorkspace({
       case "START_COMMENT": {
         const sel = state.selection;
         const key =
-          sel && sel.hunkId === state.cursor.hunkId
+          sel && sel.hunkId === state.cursor.hunkId && sel.anchor !== sel.head
             ? blockCommentKey(
                 sel.hunkId,
                 Math.min(sel.anchor, sel.head),
@@ -835,6 +862,86 @@ export function ReviewWorkspace({
             clickableSymbols={clickableSymbols}
             allowAnyIdentifier={allowAnyIdentifier}
             onSymbolClick={handleSymbolClick}
+            interactionsEnabled={interactionsEnabled}
+            onLineFocus={(hunkId, lineIdx, opts) => {
+              const targetCursor: Cursor = {
+                changesetId: cs.id,
+                fileId: file.id,
+                hunkId,
+                lineIdx,
+              };
+              if (opts.extend) {
+                // Extend from existing selection's anchor (if any) or the
+                // current cursor. Mirrors keyboard shift+arrow.
+                const sel = state.selection;
+                const anchor =
+                  sel && sel.hunkId === hunkId
+                    ? sel.anchor
+                    : state.cursor.hunkId === hunkId
+                      ? state.cursor.lineIdx
+                      : lineIdx;
+                dispatch({
+                  type: "SET_CURSOR",
+                  cursor: targetCursor,
+                  selection: { hunkId, anchor, head: lineIdx },
+                });
+              } else {
+                dispatch({ type: "SET_CURSOR", cursor: targetCursor });
+              }
+            }}
+            onLineSelectRange={(hunkId, anchor, head) => {
+              dispatch({
+                type: "SET_CURSOR",
+                cursor: {
+                  changesetId: cs.id,
+                  fileId: file.id,
+                  hunkId,
+                  lineIdx: head,
+                },
+                selection: { hunkId, anchor, head },
+              });
+            }}
+            onLineCharSelect={(hunkId, lineIdx, fromCol, toCol) => {
+              // Move cursor onto the line first so the read-rail tracks the
+              // user's intent. SET_LINE_CHAR_RANGE then sets the substring
+              // selection without disturbing the cursor.
+              dispatch({
+                type: "SET_CURSOR",
+                cursor: {
+                  changesetId: cs.id,
+                  fileId: file.id,
+                  hunkId,
+                  lineIdx,
+                },
+              });
+              dispatch({
+                type: "SET_LINE_CHAR_RANGE",
+                hunkId,
+                lineIdx,
+                fromCol,
+                toCol,
+              });
+            }}
+            onLineContextMenu={(hunkId, lineIdx, x, y) => {
+              const sel = state.selection;
+              const inSelection =
+                sel &&
+                sel.hunkId === hunkId &&
+                lineIdx >= Math.min(sel.anchor, sel.head) &&
+                lineIdx <= Math.max(sel.anchor, sel.head);
+              if (!inSelection) {
+                dispatch({
+                  type: "SET_CURSOR",
+                  cursor: {
+                    changesetId: cs.id,
+                    fileId: file.id,
+                    hunkId,
+                    lineIdx,
+                  },
+                });
+              }
+              setContextMenu({ x, y, hunkId, lineIdx });
+            }}
           />
         </div>
         {showInspector && (
@@ -1057,6 +1164,71 @@ export function ReviewWorkspace({
           onSubmit={(prompt, rendered) => startPromptRun(prompt, rendered)}
         />
       )}
+      {contextMenu &&
+        (() => {
+          const sel = state.selection;
+          const range =
+            sel && sel.hunkId === contextMenu.hunkId
+              ? {
+                  lo: Math.min(sel.anchor, sel.head),
+                  hi: Math.max(sel.anchor, sel.head),
+                }
+              : { lo: contextMenu.lineIdx, hi: contextMenu.lineIdx };
+          const readSet = state.readLines[contextMenu.hunkId] ?? new Set<number>();
+          let allRead = true;
+          for (let i = range.lo; i <= range.hi; i++) {
+            if (!readSet.has(i)) {
+              allRead = false;
+              break;
+            }
+          }
+          const targetHunk = file.hunks.find((h) => h.id === contextMenu.hunkId);
+          const targetLine = targetHunk?.lines[contextMenu.lineIdx];
+          const replyEnabled = !sel && !!targetLine?.aiNote;
+          const items: ContextMenuItem[] = [
+            {
+              id: "comment",
+              label: "Comment",
+              shortcut: "c",
+              enabled: true,
+              onSelect: () => runAction("START_COMMENT"),
+            },
+            {
+              id: "prompt",
+              label: "Run prompt…",
+              shortcut: "/",
+              enabled: true,
+              onSelect: () => runAction("OPEN_PROMPT_PICKER"),
+            },
+            {
+              id: "reply-ai",
+              label: "Reply to AI",
+              shortcut: "r",
+              enabled: replyEnabled,
+              onSelect: () => runAction("START_REPLY"),
+            },
+            {
+              id: allRead ? "mark-unread" : "mark-read",
+              label: allRead ? "Mark as unread" : "Mark as read",
+              enabled: true,
+              onSelect: () =>
+                dispatch({
+                  type: allRead ? "MARK_LINES_UNREAD" : "MARK_LINES_READ",
+                  hunkId: contextMenu.hunkId,
+                  loLineIdx: range.lo,
+                  hiLineIdx: range.hi,
+                }),
+            },
+          ];
+          return (
+            <LineContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              items={items}
+              onClose={() => setContextMenu(null)}
+            />
+          );
+        })()}
       {showCommandPalette && (
         <CommandPalette
           predicates={palettePredicates}

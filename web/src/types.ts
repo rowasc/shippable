@@ -231,16 +231,34 @@ export interface DetachedReply {
 }
 
 /**
+ * A character-level subrange inside a single line. Only valid when its host
+ * `LineSelection` is collapsed (anchor === head) — multi-line selections are
+ * always line-granular. UTF-16 column offsets into `hunk.lines[lineIdx].text`,
+ * with `fromCol < toCol`. Captured from the browser's native text selection
+ * on mouseup over `.line__text`.
+ */
+export interface CharRange {
+  lineIdx: number;
+  fromCol: number;
+  toCol: number;
+}
+
+/**
  * A contiguous line range within a single hunk, produced by shift-extending
- * the cursor. `anchor` is where the selection started; `head` is its current
- * end (kept in sync with `cursor.lineIdx`). The effective range is
+ * the cursor or dragging with the mouse. `anchor` is where the selection
+ * started; `head` is its current end. The effective range is
  * min(anchor, head)..max(anchor, head) inclusive. Selection collapses to null
  * on any non-extending move, hunk/file change, or Escape.
+ *
+ * `charRange` carries an optional sub-line text selection. Present only when
+ * `anchor === head`; dropped on any motion that grows the line range and on
+ * any cursor-move that collapses selection.
  */
 export interface LineSelection {
   hunkId: string;
   anchor: number;
   head: number;
+  charRange?: CharRange;
 }
 
 export interface ReviewState {

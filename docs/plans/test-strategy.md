@@ -88,7 +88,7 @@ Follow-up done as a separate cleanup commit:
 ### Tier 2 — UI behavior tied to product invariants
 
 - [ ] `ReviewPlanView` refuses claims without evidence (documented promise — test it).
-- [ ] `DiffView` selection: click, shift-click ranges, expand-above/below cursor preservation.
+- [ ] `DiffView` selection: click, shift-click ranges, expand-above/below cursor preservation. Pointer dispatch (focus, shift-extend flag, right-click menu) is covered by `DiffView.test.tsx`; range correctness and expand-above/below cursor preservation still need cases.
 - [ ] `PromptRunsPanel` + `promptRun` machine: idle / streaming / error / completed → DOM.
 - [ ] `LoadModal` URL ingest, happy + error, with `fetch` mocked.
 

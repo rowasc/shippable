@@ -177,6 +177,30 @@ export function buildAutoFillContext(
   selection: LineSelection | null,
 ): AutoFillContext {
   const total = hunk.lines.length;
+  // Char-range case: substring inside a single line. Returns the literal
+  // text (no diff +/-/space framing) since the selection is implicitly
+  // context — the kind belongs to the host line, not the substring.
+  if (
+    selection &&
+    selection.charRange &&
+    selection.hunkId === hunk.id &&
+    hunk.lines[selection.charRange.lineIdx]
+  ) {
+    const cr = selection.charRange;
+    const line = hunk.lines[cr.lineIdx];
+    const substring = line.text.slice(cr.fromCol, cr.toCol);
+    return {
+      changeset: { title: cs.title, diff: changesetToDiff(cs) },
+      file: { path: file.path },
+      selection: substring,
+      selectionInfo: {
+        kind: "lines",
+        lo: cr.lineIdx + 1,
+        hi: cr.lineIdx + 1,
+        hunkLines: total,
+      },
+    };
+  }
   const info: AutoFillContext["selectionInfo"] =
     selection && selection.hunkId === hunk.id
       ? {
