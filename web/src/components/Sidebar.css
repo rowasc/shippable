@@ -18,6 +18,15 @@
   font-size: 11px;
   letter-spacing: 0.08em;
 }
+.panel__h-hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-mute);
+  font-size: 10.5px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-style: italic;
+}
 .panel__list {
   margin: 0;
   padding: 0;

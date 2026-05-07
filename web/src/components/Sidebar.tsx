@@ -72,7 +72,15 @@ export function Sidebar({
       </section>
       {viewModel.detached.length > 0 && (
         <section className="panel">
-          <header className="panel__h">Detached</header>
+          <header
+            className="panel__h"
+            title="comments left on lines that no longer exist in this diff (the file was rewritten or moved). Use 'view at' to see the line at the original commit."
+          >
+            Detached
+            <span className="panel__h-hint">
+              comments without a target line
+            </span>
+          </header>
           <ul className="panel__list panel__list--detached">
             {viewModel.detached.map((group) => (
               <li key={group.path} className="detached-group">
