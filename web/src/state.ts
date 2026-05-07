@@ -1,5 +1,19 @@
-import type { Cursor, ChangeSet, LineSelection, Reply, ReviewState } from "./types";
+import type {
+  AgentReply,
+  Cursor,
+  ChangeSet,
+  LineSelection,
+  Reply,
+  ReviewState,
+} from "./types";
 import { noteKey } from "./types";
+
+/**
+ * Wire shape of a polled agent reply: same as `AgentReply` plus the
+ * `commentId` link that keys it back to the reviewer Reply whose
+ * `enqueuedCommentId` matches.
+ */
+export type PolledAgentReply = AgentReply & { commentId: string };
 
 /**
  * Sentinel cursor used while no changeset is loaded (welcome screen).
@@ -105,6 +119,13 @@ export type Action =
       targetKey: string;
       replyId: string;
       error: boolean;
+    }
+  | {
+      // Merge a polled batch of agent replies into the reviewer Replies they
+      // answer, keyed by commentId ↔ enqueuedCommentId. Idempotent: existing
+      // ids update in place, new ids append, sorted by postedAt ascending.
+      type: "MERGE_AGENT_REPLIES";
+      polled: PolledAgentReply[];
     }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
@@ -248,6 +269,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         replies: { ...state.replies, [action.targetKey]: patched },
       };
     }
+    case "MERGE_AGENT_REPLIES":
+      return mergeAgentReplies(state, action.polled);
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
       return {
@@ -400,6 +423,85 @@ function applyCursor(
     selection,
     readLines: addLine(state.readLines, cursor.hunkId, cursor.lineIdx),
   };
+}
+
+function mergeAgentReplies(
+  state: ReviewState,
+  polled: PolledAgentReply[],
+): ReviewState {
+  if (polled.length === 0) return state;
+
+  // Group polled entries by commentId.
+  const byCommentId = new Map<string, AgentReply[]>();
+  for (const p of polled) {
+    const { commentId, ...rest } = p;
+    let bucket = byCommentId.get(commentId);
+    if (!bucket) {
+      bucket = [];
+      byCommentId.set(commentId, bucket);
+    }
+    bucket.push(rest);
+  }
+
+  let touched = false;
+  const nextReplies: Record<string, Reply[]> = {};
+  for (const [key, list] of Object.entries(state.replies)) {
+    let listChanged = false;
+    const nextList = list.map((reply) => {
+      const cid = reply.enqueuedCommentId;
+      if (cid == null) return reply;
+      const incoming = byCommentId.get(cid);
+      if (!incoming) return reply;
+      const reconciled = reconcileAgentReplies(
+        reply.agentReplies ?? [],
+        incoming,
+      );
+      if (reconciled === reply.agentReplies) return reply;
+      listChanged = true;
+      return { ...reply, agentReplies: reconciled };
+    });
+    nextReplies[key] = listChanged ? nextList : list;
+    if (listChanged) touched = true;
+  }
+  if (!touched) return state;
+  return { ...state, replies: nextReplies };
+}
+
+function reconcileAgentReplies(
+  existing: AgentReply[],
+  incoming: AgentReply[],
+): AgentReply[] {
+  if (existing.length === 0 && incoming.length === 0) return existing;
+  const byId = new Map<string, AgentReply>();
+  for (const e of existing) byId.set(e.id, e);
+  let changed = false;
+  for (const inc of incoming) {
+    const prev = byId.get(inc.id);
+    if (!prev) {
+      byId.set(inc.id, inc);
+      changed = true;
+      continue;
+    }
+    if (!shallowEqualAgentReply(prev, inc)) {
+      byId.set(inc.id, inc);
+      changed = true;
+    }
+  }
+  if (!changed) return existing;
+  const merged = Array.from(byId.values()).sort((a, b) =>
+    a.postedAt.localeCompare(b.postedAt),
+  );
+  return merged;
+}
+
+function shallowEqualAgentReply(a: AgentReply, b: AgentReply): boolean {
+  return (
+    a.id === b.id &&
+    a.body === b.body &&
+    a.outcome === b.outcome &&
+    a.postedAt === b.postedAt &&
+    a.agentLabel === b.agentLabel
+  );
 }
 
 export function hunkCoverage(

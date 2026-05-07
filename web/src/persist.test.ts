@@ -147,6 +147,67 @@ describe("persist — Reply.enqueuedCommentId migration", () => {
 // forward-only, so a v: 999 blob has no path back to the head we know about.
 // Failing closed = same behavior as a malformed blob: peek → null,
 // load → empty hydration. Anything else risks corrupt state on disk.
+describe("persist — Reply.agentReplies migration", () => {
+  it("rehydrates a persisted Reply missing agentReplies as []", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const legacyReply = {
+      id: "r1",
+      author: "a",
+      body: "hi",
+      createdAt: "2026-04-30T00:00:00Z",
+      enqueuedCommentId: "cmt_1",
+    };
+    const snapshot = {
+      v: 1,
+      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
+      readLines: {},
+      reviewedFiles: [],
+      dismissedGuides: [],
+      ackedNotes: [],
+      replies: { [key]: [legacyReply] },
+      drafts: {},
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+
+    const hydrated = loadSession([cs]);
+    const replies = hydrated.state!.replies[key];
+    expect(replies).toHaveLength(1);
+    expect(replies[0].agentReplies).toEqual([]);
+    expect("agentReplies" in replies[0]).toBe(true);
+  });
+
+  it("preserves an existing non-empty agentReplies array across save/load", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const reply: Reply = {
+      id: "r1",
+      author: "you",
+      body: "queued",
+      createdAt: "2026-04-30T00:00:00Z",
+      enqueuedCommentId: "cmt_42",
+      agentReplies: [
+        {
+          id: "ar1",
+          body: "fixed it",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    };
+    const state = {
+      ...initialState([cs]),
+      replies: { [key]: [reply] },
+    };
+    saveSession(state, {});
+
+    const hydrated = loadSession([cs]);
+    const got = hydrated.state!.replies[key][0];
+    expect(got.agentReplies).toHaveLength(1);
+    expect(got.agentReplies![0].outcome).toBe("addressed");
+  });
+});
+
 describe("persist — unknown future version fails closed", () => {
   it("peekSession returns null for v greater than CURRENT_VERSION", () => {
     localStorage.setItem(

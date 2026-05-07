@@ -169,22 +169,23 @@ export function ReviewWorkspace({
   const wtPath = activeWorktreeSource?.worktreePath ?? null;
   const wtSha = activeWorktreeSource?.commitSha ?? null;
 
-  // Collect every Reply.enqueuedCommentId across all threads — the polling
-  // hook subtracts the delivered set internally to compute pending pips.
-  const allEnqueuedIds: string[] = [];
-  for (const list of Object.values(state.replies)) {
-    for (const r of list) {
-      if (r.enqueuedCommentId) allEnqueuedIds.push(r.enqueuedCommentId);
-    }
-  }
+  // Polling runs while the panel is mounted AND the tab is visible — see
+  // docs/sdd/agent-reply-support/spec.md for why per-comment outstanding
+  // gates are unsound under multi-reply.
   const {
     delivered: deliveredComments,
+    agentReplies: polledAgentReplies,
     lastSuccessfulPollAt: deliveredLastSuccessAt,
     error: deliveredErrorState,
-  } = useDeliveredPolling({
-    worktreePath: wtPath,
-    enqueuedIds: allEnqueuedIds,
-  });
+  } = useDeliveredPolling({ worktreePath: wtPath });
+
+  // Reconcile polled agent replies into the matching reviewer Reply's
+  // `agentReplies` array. The reducer is idempotent so we don't have to
+  // dedupe before dispatching.
+  useEffect(() => {
+    if (polledAgentReplies.length === 0) return;
+    dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
+  }, [polledAgentReplies, dispatch]);
 
   const wantedFetchKey =
     wtPath && wtSha
@@ -982,13 +983,6 @@ export function ReviewWorkspace({
                     deliveredError: deliveredErrorState,
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
-                    onSendToAgent: async (message) => {
-                      await enqueueComment({
-                        worktreePath: activeWorktreeSource.worktreePath,
-                        commitSha: activeWorktreeSource.commitSha,
-                        comment: { kind: "freeform", body: message },
-                      });
-                    },
                   }
                 : undefined
             }

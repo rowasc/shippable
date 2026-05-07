@@ -151,6 +151,29 @@ export interface Reply {
    * delivered pip wins regardless of any stale error flag.
    */
   enqueueError?: boolean;
+  /**
+   * Agent replies threaded under this reviewer Reply. Match key is the
+   * server's wire `commentId` ↔ `enqueuedCommentId` here. Append-only on
+   * the server; idempotent reconcile on the client (existing ids update in
+   * place, new ids append, sorted by `postedAt` ascending). Optional
+   * because it's absent on legacy fixture/persisted replies that pre-date
+   * the field — those rehydrate to `[]` via the persist-layer migration.
+   */
+  agentReplies?: AgentReply[];
+}
+
+/**
+ * An agent's structured reply to a reviewer comment. See
+ * `docs/sdd/agent-reply-support/spec.md` for the design.
+ */
+export interface AgentReply {
+  id: string;
+  body: string;
+  outcome: "addressed" | "declined" | "noted";
+  /** ISO timestamp stamped at post time. */
+  postedAt: string;
+  /** Optional generic identity surface; reserved for future per-harness label. */
+  agentLabel?: string;
 }
 
 /**

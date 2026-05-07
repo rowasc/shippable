@@ -317,11 +317,17 @@ function filterRepliesByHunk(
     if (replyKeyTargetsValidHunk(key, validHunkIds)) {
       // Normalize legacy/pre-queue replies missing the enqueuedCommentId
       // field — slice 2 added it; older snapshots rehydrate to `null`.
-      out[key] = list.map((r) =>
-        r.enqueuedCommentId === undefined
-          ? { ...r, enqueuedCommentId: null }
-          : r,
-      );
+      // Same forward-fill for `agentReplies` — added by the agent-reply
+      // feature; legacy snapshots default to `[]`.
+      out[key] = list.map((r) => {
+        const next: Reply =
+          r.enqueuedCommentId === undefined
+            ? { ...r, enqueuedCommentId: null }
+            : r;
+        return next.agentReplies === undefined
+          ? { ...next, agentReplies: [] }
+          : next;
+      });
     }
   }
   return out;

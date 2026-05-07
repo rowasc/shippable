@@ -8,6 +8,7 @@ import type {
   CommentKind,
   DeliveredComment,
 } from "./types";
+import type { PolledAgentReply } from "./state";
 
 export async function listSessionsForWorktree(
   worktreePath: string,
@@ -135,6 +136,22 @@ export async function fetchDelivered(
     throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
   }
   return json.delivered;
+}
+
+export async function fetchAgentReplies(
+  worktreePath: string,
+): Promise<PolledAgentReply[]> {
+  const url = await apiUrl(
+    `/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+  );
+  const res = await fetch(url);
+  const json = (await res.json()) as
+    | { replies: PolledAgentReply[] }
+    | { error: string };
+  if (!res.ok || "error" in json) {
+    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
+  }
+  return json.replies;
 }
 
 /**

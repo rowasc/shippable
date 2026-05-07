@@ -59,7 +59,6 @@ export interface AgentContextProps {
   deliveredError: boolean;
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
-  onSendToAgent: (message: string) => Promise<void>;
 }
 
 /**
@@ -195,7 +194,6 @@ export function Inspector({
           onJump={onJump}
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
-          onSendToAgent={agentContext.onSendToAgent}
         />
       )}
 

@@ -8,6 +8,12 @@ import type {
 } from "../types";
 import type { SymbolIndex } from "../symbols";
 
+// Free-form composer was removed alongside the `freeform` CommentKind.
+// The agent → reviewer back-channel is now `shippable_post_review_reply`
+// per docs/sdd/agent-reply-support/spec.md; reviewer → agent stays the
+// existing per-thread queue. Pushback / clarification flows back into
+// the user-agent chat, not Shippable.
+
 interface Props {
   slice: AgentContextSlice | null;
   /** All sessions matched to this worktree (for the picker). */
@@ -57,13 +63,6 @@ interface Props {
    * in last-known state; the panel-level banner surfaces the failure.
    */
   deliveredError: boolean;
-  /**
-   * Send a freeform message to the agent. Resolves once the comment has
-   * been enqueued; the agent picks it up the next time it calls the MCP
-   * pull tool (typically via the `check shippable` magic phrase). Failures
-   * propagate — the composer surfaces them inline.
-   */
-  onSendToAgent: (message: string) => Promise<void>;
 }
 
 /** localStorage key for the "I installed it" dismiss flag. One flag per
@@ -84,7 +83,6 @@ export function AgentContextSection({
   deliveredError,
   onPickSession,
   onRefresh,
-  onSendToAgent,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -166,8 +164,6 @@ export function AgentContextSection({
       )}
 
       <DeliveredBlock delivered={delivered} />
-
-      <SendToAgent onSend={onSendToAgent} />
     </section>
   );
 }
@@ -195,9 +191,7 @@ function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
       <ul className="ac__delivered-list">
         {delivered.map((d) => (
           <li key={d.id} className="ac__delivered-item">
-            <span className="ac__delivered-loc">
-              {d.kind === "freeform" ? "(freeform message)" : formatLoc(d)}
-            </span>
+            <span className="ac__delivered-loc">{formatLoc(d)}</span>
             <span className="ac__delivered-sep"> · </span>
             <span className="ac__delivered-kind">{d.kind}</span>
             <span className="ac__delivered-sep"> · </span>
@@ -213,7 +207,6 @@ function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
 }
 
 function formatLoc(d: DeliveredComment): string {
-  if (!d.file) return "(no file)";
   return d.lines ? `${d.file}:${d.lines}` : d.file;
 }
 
@@ -221,79 +214,6 @@ function clipBody(body: string, max: number): string {
   const flat = body.replace(/\s+/g, " ").trim();
   if (flat.length <= max) return flat;
   return flat.slice(0, max - 1) + "…";
-}
-
-type SendStatus =
-  | { kind: "idle" }
-  | { kind: "sending" }
-  | { kind: "error"; message: string };
-
-function SendToAgent({
-  onSend,
-}: {
-  onSend: (m: string) => Promise<void>;
-}) {
-  // Slice 5 collapsed the legacy inbox-file polling. The composer now
-  // simply enqueues — once the agent calls the MCP tool, the message
-  // appears in the Delivered (N) block via the slice-4 polling hook.
-  const [draft, setDraft] = useState("");
-  const [status, setStatus] = useState<SendStatus>({ kind: "idle" });
-
-  async function submit() {
-    const body = draft.trim();
-    if (!body) return;
-    setStatus({ kind: "sending" });
-    try {
-      await onSend(body);
-      setDraft("");
-      setStatus({ kind: "idle" });
-    } catch (e) {
-      setStatus({
-        kind: "error",
-        message: e instanceof Error ? e.message : String(e),
-      });
-    }
-  }
-
-  return (
-    <div className="ac__send">
-      <div className="ac__label">Send to agent</div>
-      <textarea
-        className="ac__send-textarea"
-        value={draft}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          if (status.kind === "error") setStatus({ kind: "idle" });
-        }}
-        placeholder="Reply to the agent. Delivered when the agent runs `check shippable`."
-        rows={3}
-        disabled={status.kind === "sending"}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            void submit();
-          }
-        }}
-      />
-      <div className="ac__send-row">
-        <button
-          className="ac__send-btn"
-          onClick={() => void submit()}
-          disabled={status.kind === "sending" || draft.trim().length === 0}
-        >
-          {status.kind === "sending" ? "Sending…" : "Send"}
-        </button>
-        <span className="ac__send-status">
-          {status.kind === "error" && (
-            <span className="ac__send-err">error: {status.message}</span>
-          )}
-          {status.kind === "idle" && (
-            <span className="ac__send-hint">⌘↵ to send</span>
-          )}
-        </span>
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -556,7 +476,16 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 // relative to its own source location and hands back the local-build line
 // when present (and the npx form when not).
 
-const MAGIC_PHRASE = "check shippable";
+/**
+ * Two magic phrases — one per direction of the loop. `check shippable` pulls
+ * pending reviewer comments via the `shippable_check_review_comments` tool;
+ * `report back to shippable` posts per-comment replies via the new
+ * `shippable_post_review_reply` tool. The descriptions on both tools tune
+ * for implicit triggering, but a literal phrase is the prompt-drift escape
+ * hatch — see docs/sdd/agent-reply-support/spec.md.
+ */
+const MAGIC_PHRASE_PULL = "check shippable";
+const MAGIC_PHRASE_REPORT = "report back to shippable";
 
 function McpInstallAffordance({
   mcpStatus,
@@ -618,8 +547,12 @@ function McpInstallAffordance({
         <CopyChip text={mcpStatus.installCommand} />
       </div>
       <div className="ac__mcp-row">
-        <div className="ac__mcp-label">Then say:</div>
-        <CopyChip text={MAGIC_PHRASE} />
+        <div className="ac__mcp-label">Pull comments:</div>
+        <CopyChip text={MAGIC_PHRASE_PULL} />
+      </div>
+      <div className="ac__mcp-row">
+        <div className="ac__mcp-label">Report back:</div>
+        <CopyChip text={MAGIC_PHRASE_REPORT} />
       </div>
       <div className="ac__mcp-actions">
         <button

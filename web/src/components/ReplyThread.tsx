@@ -1,6 +1,6 @@
 import "./ReplyThread.css";
 import { useEffect, useRef } from "react";
-import type { Cursor, DeliveredComment, Reply } from "../types";
+import type { AgentReply, Cursor, DeliveredComment, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { RichText } from "./RichText";
 
@@ -110,6 +110,11 @@ export function ReplyThread({
             <div className="reply__body">
               <RichText text={r.body} symbols={symbols} onJump={onJump} />
             </div>
+            <AgentRepliesList
+              entries={r.agentReplies ?? []}
+              symbols={symbols}
+              onJump={onJump}
+            />
           </li>
           );
         })}
@@ -128,6 +133,80 @@ export function ReplyThread({
       )}
     </div>
   );
+}
+
+/**
+ * Renders the agent's structured replies threaded under a single reviewer
+ * Reply. Defensive sort by `postedAt` ascending — the reducer already does
+ * this, but a render-time guard keeps a future bypass-the-reducer caller
+ * from accidentally surfacing them in the wrong order.
+ */
+function AgentRepliesList({
+  entries,
+  symbols,
+  onJump,
+}: {
+  entries: AgentReply[];
+  symbols: SymbolIndex;
+  onJump: (c: Cursor) => void;
+}) {
+  if (entries.length === 0) return null;
+  const ordered = entries
+    .slice()
+    .sort((a, b) => a.postedAt.localeCompare(b.postedAt));
+  return (
+    <ul className="agent-reply-list">
+      {ordered.map((ar) => (
+        <li
+          key={ar.id}
+          className={`agent-reply agent-reply--${ar.outcome}`}
+        >
+          <div className="agent-reply__head">
+            <span
+              className="agent-reply__icon"
+              aria-label={ar.outcome}
+              title={outcomeLabel(ar.outcome)}
+            >
+              {outcomeGlyph(ar.outcome)}
+            </span>
+            <span className="agent-reply__label">{ar.agentLabel ?? "agent"}</span>
+            <span className="agent-reply__sep">·</span>
+            <span
+              className="agent-reply__time"
+              title={ar.postedAt}
+            >
+              {timeAgo(ar.postedAt)}
+            </span>
+          </div>
+          <div className="agent-reply__body">
+            <RichText text={ar.body} symbols={symbols} onJump={onJump} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function outcomeGlyph(outcome: AgentReply["outcome"]): string {
+  switch (outcome) {
+    case "addressed":
+      return "✓";
+    case "declined":
+      return "⊘";
+    case "noted":
+      return "ℹ";
+  }
+}
+
+function outcomeLabel(outcome: AgentReply["outcome"]): string {
+  switch (outcome) {
+    case "addressed":
+      return "addressed";
+    case "declined":
+      return "declined";
+    case "noted":
+      return "noted";
+  }
 }
 
 function Composer({

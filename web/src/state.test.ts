@@ -594,6 +594,199 @@ describe("DELETE_REPLY", () => {
   });
 });
 
+// ── MERGE_AGENT_REPLIES ────────────────────────────────────────────────────
+
+describe("MERGE_AGENT_REPLIES", () => {
+  function withReply(
+    state: ReviewState,
+    targetKey: string,
+    enqueuedCommentId: string | null,
+    replyId = "r1",
+  ): ReviewState {
+    return reducer(state, {
+      type: "ADD_REPLY",
+      targetKey,
+      reply: {
+        id: replyId,
+        author: "you",
+        body: "x",
+        createdAt: "2026-04-30T00:00:00Z",
+        enqueuedCommentId,
+        agentReplies: [],
+      },
+    });
+  }
+
+  it("attaches a polled agent reply to the matching reviewer Reply by enqueuedCommentId", () => {
+    const s1 = withReply(s0, "k", "cmt_1");
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "ar1",
+          commentId: "cmt_1",
+          body: "fixed",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    expect(s2.replies["k"][0].agentReplies).toEqual([
+      {
+        id: "ar1",
+        body: "fixed",
+        outcome: "addressed",
+        postedAt: "2026-04-30T00:01:00Z",
+      },
+    ]);
+  });
+
+  it("sorts by postedAt ascending after the merge", () => {
+    const s1 = withReply(s0, "k", "cmt_1");
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "b",
+          commentId: "cmt_1",
+          body: "B",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:02:00Z",
+        },
+        {
+          id: "a",
+          commentId: "cmt_1",
+          body: "A",
+          outcome: "noted",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    expect(s2.replies["k"][0].agentReplies!.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+
+  it("updates existing entries in place (matched by id) and appends new ones", () => {
+    const s1 = withReply(s0, "k", "cmt_1");
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "ar1",
+          commentId: "cmt_1",
+          body: "first",
+          outcome: "noted",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    const s3 = reducer(s2, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        // Same id with updated body should overwrite.
+        {
+          id: "ar1",
+          commentId: "cmt_1",
+          body: "first (edited)",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+        {
+          id: "ar2",
+          commentId: "cmt_1",
+          body: "second",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:02:00Z",
+        },
+      ],
+    });
+    const replies = s3.replies["k"][0].agentReplies!;
+    expect(replies).toHaveLength(2);
+    expect(replies[0].body).toBe("first (edited)");
+    expect(replies[0].outcome).toBe("addressed");
+    expect(replies[1].id).toBe("ar2");
+  });
+
+  it("is a no-op when no Reply matches the polled commentId", () => {
+    const s1 = withReply(s0, "k", "cmt_1");
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "ar1",
+          commentId: "cmt_other",
+          body: "orphan",
+          outcome: "noted",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    expect(s2).toBe(s1);
+  });
+
+  it("ignores Replies with null enqueuedCommentId (defensive)", () => {
+    const s1 = withReply(s0, "k", null);
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "ar1",
+          commentId: "cmt_1",
+          body: "x",
+          outcome: "noted",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    expect(s2).toBe(s1);
+  });
+
+  it("is idempotent — repeated merges of the same data leave state unchanged", () => {
+    const s1 = withReply(s0, "k", "cmt_1");
+    const polled = [
+      {
+        id: "ar1",
+        commentId: "cmt_1",
+        body: "x",
+        outcome: "addressed" as const,
+        postedAt: "2026-04-30T00:01:00Z",
+      },
+    ];
+    const s2 = reducer(s1, { type: "MERGE_AGENT_REPLIES", polled });
+    const s3 = reducer(s2, { type: "MERGE_AGENT_REPLIES", polled });
+    expect(s3).toBe(s2);
+  });
+
+  it("groups polled entries across multiple commentIds onto distinct Replies", () => {
+    let s = withReply(s0, "k1", "cmt_1", "r1");
+    s = withReply(s, "k2", "cmt_2", "r2");
+    const merged = reducer(s, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [
+        {
+          id: "ar_a",
+          commentId: "cmt_1",
+          body: "a",
+          outcome: "noted",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+        {
+          id: "ar_b",
+          commentId: "cmt_2",
+          body: "b",
+          outcome: "addressed",
+          postedAt: "2026-04-30T00:01:00Z",
+        },
+      ],
+    });
+    expect(merged.replies["k1"][0].agentReplies!.map((r) => r.id)).toEqual([
+      "ar_a",
+    ]);
+    expect(merged.replies["k2"][0].agentReplies!.map((r) => r.id)).toEqual([
+      "ar_b",
+    ]);
+  });
+});
+
 // ── SET_EXPAND_LEVEL ───────────────────────────────────────────────────────
 
 describe("SET_EXPAND_LEVEL", () => {

@@ -12,7 +12,6 @@ import type { DeliveredComment } from "../types";
 
 const empty = new Map<string, never>();
 const noop = () => {};
-const noopAsync = async () => {};
 
 const MCP_DISMISS_KEY = "shippable.mcpInstallDismissed";
 
@@ -61,7 +60,6 @@ function renderPanel(opts: RenderOpts = {}) {
       deliveredError={opts.deliveredError ?? false}
       onPickSession={noop}
       onRefresh={noop}
-      onSendToAgent={noopAsync}
     />,
   );
 }
@@ -141,18 +139,6 @@ describe("AgentContextSection — Delivered (N) block", () => {
     expect(summary?.textContent).toContain("(showing last 200)");
   });
 
-  it("renders a freeform comment as '(freeform message)' rather than file:lines", () => {
-    const ff = delivered({
-      id: "cmt_ff",
-      kind: "freeform",
-      file: undefined,
-      lines: undefined,
-      body: "hello agent",
-    });
-    const { container } = renderPanel({ delivered: [ff] });
-    const loc = container.querySelector(".ac__delivered-loc");
-    expect(loc?.textContent).toBe("(freeform message)");
-  });
 });
 
 describe("AgentContextSection — failure-mode banner", () => {
@@ -205,14 +191,15 @@ describe("AgentContextSection — MCP install affordance (slice 5)", () => {
     const block = container.querySelector(".ac__mcp");
     expect(block).not.toBeNull();
     expect(block?.classList.contains("ac__mcp--ok")).toBe(false);
-    // Both copy chips render.
+    // Three copy chips: install line + two magic phrases (pull + report).
     const chips = container.querySelectorAll(".ac__mcp-chip");
-    expect(chips.length).toBe(2);
+    expect(chips.length).toBe(3);
     // The install line is exactly what the server returned (local-build
-    // form here) and the magic phrase is still rendered verbatim.
+    // form here) and both magic phrases are still rendered verbatim.
     const text = block?.textContent ?? "";
     expect(text).toContain(LOCAL_BUILD_LINE);
     expect(text).toContain("check shippable");
+    expect(text).toContain("report back to shippable");
     // The dismiss button renders.
     expect(container.querySelector(".ac__mcp-dismiss")).not.toBeNull();
   });

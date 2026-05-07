@@ -352,6 +352,121 @@ describe("ReplyThread — errored pip + retry", () => {
   });
 });
 
+describe("ReplyThread — agentReplies (nested under parent Reply)", () => {
+  it("renders nothing extra when agentReplies is absent or empty", () => {
+    const { container } = render(
+      <ReplyThread
+        replies={[reply({ enqueuedCommentId: "cmt_1" })]}
+        isDrafting={false}
+        draftBody=""
+        onStartDraft={noop}
+        onCloseDraft={noop}
+        onChangeDraft={noop}
+        onSubmitReply={noop}
+        onDeleteReply={noop}
+        symbols={emptySymbols()}
+        onJump={noop}
+      />,
+    );
+    expect(container.querySelector(".agent-reply")).toBeNull();
+  });
+
+  it("renders one nested block per AgentReply with outcome icon, label, body and timestamp", () => {
+    const r = reply({
+      enqueuedCommentId: "cmt_1",
+      agentReplies: [
+        {
+          id: "ar1",
+          body: "fixed it",
+          outcome: "addressed",
+          postedAt: "2026-05-06T12:35:01.000Z",
+        },
+        {
+          id: "ar2",
+          body: "won't fix",
+          outcome: "declined",
+          postedAt: "2026-05-06T12:36:01.000Z",
+        },
+        {
+          id: "ar3",
+          body: "noted",
+          outcome: "noted",
+          postedAt: "2026-05-06T12:37:01.000Z",
+        },
+      ],
+    });
+    const { container } = render(
+      <ReplyThread
+        replies={[r]}
+        isDrafting={false}
+        draftBody=""
+        onStartDraft={noop}
+        onCloseDraft={noop}
+        onChangeDraft={noop}
+        onSubmitReply={noop}
+        onDeleteReply={noop}
+        symbols={emptySymbols()}
+        onJump={noop}
+      />,
+    );
+    const blocks = container.querySelectorAll(".agent-reply");
+    expect(blocks.length).toBe(3);
+    // Generic agent label appears on each.
+    blocks.forEach((b) =>
+      expect(b.querySelector(".agent-reply__label")?.textContent).toBe("agent"),
+    );
+    // Outcome modifier classes pin to the spec values.
+    expect(
+      container.querySelector(".agent-reply--addressed"),
+    ).not.toBeNull();
+    expect(container.querySelector(".agent-reply--declined")).not.toBeNull();
+    expect(container.querySelector(".agent-reply--noted")).not.toBeNull();
+    // Bodies render verbatim.
+    const bodies = Array.from(
+      container.querySelectorAll(".agent-reply__body"),
+    ).map((el) => el.textContent);
+    expect(bodies).toEqual(["fixed it", "won't fix", "noted"]);
+  });
+
+  it("stacks agent replies in postedAt ascending order even when input is unsorted", () => {
+    const r = reply({
+      enqueuedCommentId: "cmt_1",
+      agentReplies: [
+        {
+          id: "z",
+          body: "Z",
+          outcome: "addressed",
+          postedAt: "2026-05-06T12:38:01.000Z",
+        },
+        {
+          id: "a",
+          body: "A",
+          outcome: "noted",
+          postedAt: "2026-05-06T12:35:01.000Z",
+        },
+      ],
+    });
+    const { container } = render(
+      <ReplyThread
+        replies={[r]}
+        isDrafting={false}
+        draftBody=""
+        onStartDraft={noop}
+        onCloseDraft={noop}
+        onChangeDraft={noop}
+        onSubmitReply={noop}
+        onDeleteReply={noop}
+        symbols={emptySymbols()}
+        onJump={noop}
+      />,
+    );
+    const bodies = Array.from(
+      container.querySelectorAll(".agent-reply__body"),
+    ).map((el) => el.textContent);
+    expect(bodies).toEqual(["A", "Z"]);
+  });
+});
+
 describe("ReplyThread — pip tooltips", () => {
   it("queued tooltip uses the exact 'Sent to your agent's queue at HH:MM:SS.' prefix", () => {
     const { container } = render(

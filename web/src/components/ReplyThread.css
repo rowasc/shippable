@@ -144,6 +144,82 @@
   min-width: 0;
 }
 
+/* Nested agent replies under a reviewer Reply. One level of nesting only;
+ * see docs/sdd/agent-reply-support/spec.md for the threading limitation. */
+.agent-reply-list {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-reply {
+  margin-left: 12px;
+  padding: 3px 6px 3px 8px;
+  border-left: 2px solid var(--border);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  border-radius: 2px;
+}
+.agent-reply__head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-dim);
+  font-size: 11px;
+}
+.agent-reply__icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.agent-reply__label {
+  color: var(--fg-mute);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  font-size: 10.5px;
+  border: 1px solid var(--border);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.agent-reply__sep {
+  color: var(--fg-mute);
+}
+.agent-reply__time {
+  color: var(--fg-mute);
+}
+.agent-reply__body {
+  margin-top: 2px;
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.5;
+  min-width: 0;
+}
+.agent-reply--addressed {
+  border-left-color: var(--green, #6c6);
+}
+.agent-reply--addressed .agent-reply__icon {
+  color: var(--green, #6c6);
+}
+.agent-reply--declined {
+  border-left-color: var(--red, #d66);
+}
+.agent-reply--declined .agent-reply__icon {
+  color: var(--red, #d66);
+}
+.agent-reply--noted {
+  border-left-color: var(--blue);
+}
+.agent-reply--noted .agent-reply__icon {
+  color: var(--blue);
+}
+
 .composer {
   margin-top: 6px;
   display: flex;
