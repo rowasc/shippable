@@ -37,6 +37,7 @@ import type {
   AgentSessionRef,
   ChangeSet,
   Cursor,
+  DetachedReply,
   EvidenceRef,
   PrSource,
   ReviewState,
@@ -83,11 +84,12 @@ interface Props {
   themeId: ThemeId;
   setThemeId: (id: ThemeId) => void;
   /** Called when LoadModal parses a fresh changeset — App handles dispatch
-   *  + recents upsert. */
+   *  + recents upsert. `prData` is present only on GitHub PR loads. */
   onLoadChangeset: (
     cs: ChangeSet,
     replies: Record<string, Reply[]>,
     source: RecentSource,
+    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
   ) => void;
   currentSource: RecentSource | null;
   /** Live-reload banner slot. App owns the polling hook + drift state and
@@ -291,8 +293,14 @@ export function ReviewWorkspace({
     setPrRefreshBusy(true);
     setPrAuthRejected(null);
     try {
-      const newCs = await loadGithubPr(htmlUrl);
-      dispatch({ type: "LOAD_CHANGESET", changeset: newCs });
+      const result = await loadGithubPr(htmlUrl);
+      dispatch({ type: "LOAD_CHANGESET", changeset: result.changeSet });
+      dispatch({
+        type: "MERGE_PR_REPLIES",
+        changesetId: result.changeSet.id,
+        prReplies: result.prReplies,
+        prDetached: result.prDetached,
+      });
     } catch (e) {
       if (e instanceof GithubFetchError) {
         if (e.discriminator === "github_auth_failed") {
@@ -1322,16 +1330,22 @@ export function ReviewWorkspace({
                   }
                 : undefined
             }
-            prReviewComments={line?.prReviewComments}
             prConversation={cs.prConversation}
             worktreeSource={activeWorktreeSource ?? undefined}
             prSource={cs.prSource}
             changesetId={cs.id}
-            onMergePrOverlay={(csId, prCs) => {
+            onMergePrOverlay={(csId, prSource, prConversation, prReplies, prDetached) => {
               dispatch({
                 type: "MERGE_PR_OVERLAY",
                 changesetId: csId,
-                prChangeSet: prCs,
+                prSource,
+                prConversation,
+              });
+              dispatch({
+                type: "MERGE_PR_REPLIES",
+                changesetId: csId,
+                prReplies,
+                prDetached,
               });
             }}
             onAuthError={(host, reason, retry) => {
@@ -1494,8 +1508,8 @@ export function ReviewWorkspace({
       {showLoad && (
         <LoadModal
           onClose={() => setShowLoad(false)}
-          onLoad={(newCs, source) => {
-            onLoadChangeset(newCs, {}, source);
+          onLoad={(newCs, source, prData) => {
+            onLoadChangeset(newCs, {}, source, prData);
             // Clear any prior slice/sessions so the fresh load doesn't
             // briefly show the previous worktree's transcript while the
             // new fetch runs. Provenance lives on cs.worktreeSource.

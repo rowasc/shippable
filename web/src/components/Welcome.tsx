@@ -1,13 +1,12 @@
 import "./Welcome.css";
 import { useRef, useState } from "react";
-import type { ChangeSet, Reply } from "../types";
+import type { ChangeSet, DetachedReply, Reply } from "../types";
 import { parseDiff } from "../parseDiff";
 import { STUBS } from "../fixtures";
 import type { RecentEntry, RecentSource } from "../recents";
 import { removeRecent } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
-import { loadGithubPr, setGithubToken, GithubFetchError, GH_ERROR_MESSAGES } from "../githubPrClient";
-import { isTauri, keychainGet, keychainSet } from "../keychain";
+import { useGithubPrLoad, isGithubPrUrl } from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
 
 interface Props {
@@ -17,6 +16,7 @@ interface Props {
     cs: ChangeSet,
     replies: Record<string, Reply[]>,
     source: RecentSource,
+    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
   ) => void;
   /** Notify parent so it re-reads recents from storage. */
   onRecentsChange: (next: RecentEntry[]) => void;
@@ -25,7 +25,7 @@ interface Props {
 export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   const [err, setErr] = useState<string | null>(null);
 
-  // URL pane.
+  // Single URL field (handles both raw diff URLs and GitHub PR HTML URLs).
   const [url, setUrl] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
 
@@ -40,23 +40,25 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   const [fileDropActive, setFileDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // GitHub PR section state.
-  const [prUrl, setPrUrl] = useState("");
-  const [prBusy, setPrBusy] = useState(false);
-  const [prErr, setPrErr] = useState<string | null>(null);
-  const [tokenModal, setTokenModal] = useState<{
-    host: string;
-    reason: "first-time" | "rejected";
-    pendingPrUrl: string;
-  } | null>(null);
-
   function deliver(
     cs: ChangeSet,
     replies: Record<string, Reply[]>,
     source: RecentSource,
+    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
   ) {
-    onLoad(cs, replies, source);
+    onLoad(cs, replies, source, prData);
   }
+
+  const pr = useGithubPrLoad({
+    onResult: (result, prUrl) => {
+      deliver(
+        result.changeSet,
+        {},
+        { kind: "pr", prUrl },
+        { prReplies: result.prReplies, prDetached: result.prDetached },
+      );
+    },
+  });
 
   function handleParsed(text: string, id: string, title: string | undefined, source: RecentSource) {
     try {
@@ -74,6 +76,12 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   async function loadFromUrl() {
     if (!isValidHttpUrl(url)) return;
     setErr(null);
+    // PR HTML URLs route through the server-side GitHub flow (handles auth,
+    // pagination, comments). Anything else hits the browser fetch path.
+    if (isGithubPrUrl(url)) {
+      await pr.loadPr(url);
+      return;
+    }
     setUrlBusy(true);
     try {
       const res = await fetch(url);
@@ -114,58 +122,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     });
   }
 
-  async function loadFromGithubPr(targetUrl: string) {
-    if (!targetUrl.trim()) return;
-    setPrErr(null);
-    setPrBusy(true);
-    try {
-      const cs = await loadGithubPr(targetUrl);
-      deliver(cs, {}, { kind: "pr", prUrl: targetUrl });
-    } catch (e) {
-      if (e instanceof GithubFetchError) {
-        if (e.discriminator === "github_token_required" && e.host) {
-          // Tauri-only: try Keychain first. If found, push to server and retry
-          // before bothering the user. In dev mode (no Tauri) skip straight to
-          // the modal — Keychain isn't available.
-          if (isTauri()) {
-            const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
-            if (cached) {
-              await setGithubToken(e.host, cached);
-              return loadFromGithubPr(targetUrl);
-            }
-          }
-          setTokenModal({
-            host: e.host,
-            reason: "first-time",
-            pendingPrUrl: targetUrl,
-          });
-        } else if (e.discriminator === "github_auth_failed") {
-          setTokenModal({
-            host: e.host ?? "github.com",
-            reason: "rejected",
-            pendingPrUrl: targetUrl,
-          });
-        } else {
-          setPrErr(GH_ERROR_MESSAGES[e.discriminator] ?? e.discriminator);
-        }
-      } else {
-        setPrErr(e instanceof Error ? e.message : "Unknown error");
-      }
-    } finally {
-      setPrBusy(false);
-    }
-  }
-
-  async function handleTokenSubmit(host: string, token: string): Promise<void> {
-    if (isTauri()) {
-      await keychainSet(`GITHUB_TOKEN:${host}`, token);
-    }
-    await setGithubToken(host, token);
-    // Token saved — close the modal and retry the PR load.
-    const pendingUrl = tokenModal?.pendingPrUrl ?? prUrl;
-    setTokenModal(null);
-    await loadFromGithubPr(pendingUrl);
-  }
 
   const worktrees = useWorktreeLoader({
     onLoad: (cs, source) => deliver(cs, {}, source),
@@ -345,49 +301,28 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
           </section>
         )}
 
-        {tokenModal && (
+        {pr.tokenModal && (
           <GitHubTokenModal
-            host={tokenModal.host}
-            reason={tokenModal.reason}
-            onSubmit={handleTokenSubmit}
-            onCancel={() => setTokenModal(null)}
+            host={pr.tokenModal.host}
+            reason={pr.tokenModal.reason}
+            onSubmit={pr.submitToken}
+            onCancel={pr.dismissTokenModal}
           />
         )}
 
         {/* Always-on secondary loaders. */}
         <section className="welcome__sec">
-          <h2 className="welcome__sec-h">From a GitHub PR</h2>
+          <h2 className="welcome__sec-h">From a URL</h2>
           <p>
-            Paste a GitHub or GitHub Enterprise pull request URL. You'll be
-            prompted for a Personal Access Token on first use per host.
+            Paste a GitHub PR URL or a raw <code>.diff</code>/<code>.patch</code>{" "}
+            URL. PR URLs route through your local server (you'll be prompted
+            for a Personal Access Token on first use per host).
           </p>
           <div className="welcome__row">
             <input
               className="welcome__input"
               type="url"
               placeholder="https://github.com/owner/repo/pull/123"
-              value={prUrl}
-              onChange={(e) => setPrUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && loadFromGithubPr(prUrl)}
-            />
-            <button
-              className="welcome__btn"
-              onClick={() => loadFromGithubPr(prUrl)}
-              disabled={prBusy || !prUrl.trim()}
-            >
-              {prBusy ? "loading…" : "load PR"}
-            </button>
-          </div>
-          {prErr && <div className="welcome__err">{prErr}</div>}
-        </section>
-
-        <section className="welcome__sec">
-          <h2 className="welcome__sec-h">From a URL</h2>
-          <div className="welcome__row">
-            <input
-              className="welcome__input"
-              type="url"
-              placeholder="https://github.com/owner/repo/pull/123.diff"
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadFromUrl()}
@@ -395,11 +330,12 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
             <button
               className="welcome__btn"
               onClick={loadFromUrl}
-              disabled={urlBusy || !isValidHttpUrl(url)}
+              disabled={urlBusy || pr.busy || !isValidHttpUrl(url)}
             >
-              {urlBusy ? "loading…" : "load"}
+              {urlBusy || pr.busy ? "loading…" : "load"}
             </button>
           </div>
+          {pr.error && <div className="welcome__err">{pr.error}</div>}
         </section>
 
         {worktrees.serverAvailable === true && (

@@ -4,6 +4,8 @@
  * callers can switch on `kind` rather than catching raw HTTP status codes.
  */
 
+import { getDispatcher } from "../proxy.ts";
+
 export type GithubError =
   | { kind: "github_token_required"; host: string }
   | { kind: "github_auth_failed"; host: string; hint: "rate-limit" | "scope" }
@@ -74,7 +76,10 @@ export async function githubFetch(
 ): Promise<FetchResult> {
   const host = opts.host ?? new URL(apiBaseUrl).hostname;
   const url = `${apiBaseUrl.replace(/\/$/, "")}${path}`;
-  const res = await fetch(url, {
+  // `dispatcher` is forwarded to undici under the hood for HTTPS_PROXY support.
+  // Cast through `unknown` because node's RequestInit pulls `dispatcher` from
+  // `undici-types`, which collides with the runtime `undici` package's types.
+  const init = {
     method: opts.method ?? "GET",
     headers: {
       ...REQUIRED_HEADERS,
@@ -82,7 +87,9 @@ export async function githubFetch(
       ...(opts.body ? { "Content-Type": "application/json" } : {}),
     },
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
+    dispatcher: getDispatcher(host),
+  } as unknown as RequestInit;
+  const res = await fetch(url, init);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let json: any;

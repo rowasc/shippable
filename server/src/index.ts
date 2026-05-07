@@ -966,10 +966,10 @@ async function handleGithubPrLoad(
   }
 
   try {
-    const changeSet = await loadPr(coords, token);
+    const result = await loadPr(coords, token);
     writeCorsHeaders(res, origin);
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ changeSet }));
+    res.end(JSON.stringify(result));
   } catch (err) {
     if (err instanceof GithubApiError) {
       const e = err.error;

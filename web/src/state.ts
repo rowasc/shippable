@@ -7,7 +7,6 @@ import type {
   DiffFile,
   Hunk,
   LineSelection,
-  PrReviewComment,
   Reply,
   ReviewState,
 } from "./types";
@@ -193,14 +192,26 @@ export type Action =
   | {
       /**
        * Overlay PR metadata onto an existing worktree-loaded ChangeSet. The
-       * diff structure (files/hunks) is untouched; we only set `prSource`,
-       * `prConversation`, and attach `prReviewComments` to matching lines.
-       * `worktreeSource` is preserved. The reducer extracts per-line comments
-       * directly from `prChangeSet` so the action stays JSON-serializable.
+       * diff structure (files/hunks) is untouched; only `prSource` and
+       * `prConversation` are set. `worktreeSource` is preserved. PR review
+       * comments arrive separately via MERGE_PR_REPLIES.
        */
       type: "MERGE_PR_OVERLAY";
       changesetId: string;
-      prChangeSet: ChangeSet;
+      prSource: import("./types").PrSource;
+      prConversation: import("./types").PrConversationItem[];
+    }
+  | {
+      /**
+       * Install PR-sourced review comments as Reply / DetachedReply entries.
+       * Idempotent across refresh: every existing reply tagged
+       * `external.source === "pr"` is removed before the new entries are
+       * merged in, so re-fetching the same PR doesn't accumulate duplicates.
+       */
+      type: "MERGE_PR_REPLIES";
+      changesetId: string;
+      prReplies: Record<string, Reply[]>;
+      prDetached: DetachedReply[];
     };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
@@ -445,49 +456,43 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       const csIdx = state.changesets.findIndex((c) => c.id === action.changesetId);
       if (csIdx < 0) return state;
       const cs = state.changesets[csIdx];
-      const prCs = action.prChangeSet;
-
-      // Build a path → (lineNo → comments) index from the PR ChangeSet.
-      // Avoids carrying a non-serializable Map in the action.
-      const lineIndex = new Map<string, Map<number, PrReviewComment[]>>();
-      for (const f of prCs.files) {
-        const lineMap = new Map<number, PrReviewComment[]>();
-        for (const h of f.hunks) {
-          for (const ln of h.lines) {
-            if (ln.prReviewComments && ln.prReviewComments.length > 0) {
-              const no = ln.newNo ?? ln.oldNo;
-              if (no !== undefined) lineMap.set(no, ln.prReviewComments);
-            }
-          }
-        }
-        if (lineMap.size > 0) lineIndex.set(f.path, lineMap);
-      }
-
-      const nextFiles = cs.files.map((file) => {
-        const lineMap = lineIndex.get(file.path);
-        if (!lineMap) return file;
-        const nextHunks = file.hunks.map((hunk) => {
-          const nextLines = hunk.lines.map((line) => {
-            const no = line.newNo ?? line.oldNo;
-            if (no === undefined) return line;
-            const comments = lineMap.get(no);
-            if (!comments || comments.length === 0) return line;
-            return { ...line, prReviewComments: comments };
-          });
-          return { ...hunk, lines: nextLines };
-        });
-        return { ...file, hunks: nextHunks };
-      });
       const nextCs: ChangeSet = {
         ...cs,
-        files: nextFiles,
-        prSource: prCs.prSource,
-        prConversation: prCs.prConversation ?? [],
+        prSource: action.prSource,
+        prConversation: action.prConversation,
       };
       const nextChangesets = state.changesets.map((c, i) =>
         i === csIdx ? nextCs : c,
       );
       return { ...state, changesets: nextChangesets };
+    }
+    case "MERGE_PR_REPLIES": {
+      // Strip prior PR-sourced entries first so refresh doesn't duplicate.
+      // Other replies (user, AI, teammate) are preserved untouched.
+      const cleanedReplies: Record<string, Reply[]> = {};
+      for (const [key, list] of Object.entries(state.replies)) {
+        const filtered = list.filter((r) => r.external?.source !== "pr");
+        if (filtered.length > 0) cleanedReplies[key] = filtered;
+      }
+      const cleanedDetached = state.detachedReplies.filter(
+        (d) => d.reply.external?.source !== "pr",
+      );
+
+      // Merge in the new PR-sourced entries.
+      const nextReplies: Record<string, Reply[]> = { ...cleanedReplies };
+      for (const [key, list] of Object.entries(action.prReplies)) {
+        if (list.length === 0) continue;
+        nextReplies[key] = nextReplies[key]
+          ? [...nextReplies[key], ...list]
+          : [...list];
+      }
+      const nextDetached = [...cleanedDetached, ...action.prDetached];
+
+      return {
+        ...state,
+        replies: nextReplies,
+        detachedReplies: nextDetached,
+      };
     }
   }
 }

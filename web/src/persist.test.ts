@@ -333,3 +333,65 @@ describe("persist — v2 round-trip with anchor + detached state", () => {
     expect(hydrated.state!.replies[key]).toHaveLength(1);
   });
 });
+
+describe("persist — Reply.external is dropped on save", () => {
+  it("filters external replies from replies and detachedReplies", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const userReply: Reply = {
+      id: "u1",
+      author: "luiz",
+      body: "looks good",
+      createdAt: "2026-05-07T00:00:00.000Z",
+    };
+    const prReply: Reply = {
+      id: "pr-comment:42",
+      author: "external-reviewer",
+      body: "consider X",
+      createdAt: "2026-05-06T00:00:00.000Z",
+      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r42" },
+    };
+    const detachedPrReply: Reply = {
+      id: "pr-comment:43",
+      author: "external-reviewer",
+      body: "stale comment",
+      createdAt: "2026-05-06T00:00:00.000Z",
+      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r43" },
+    };
+    const state = {
+      ...initialState([cs]),
+      replies: { [key]: [userReply, prReply] },
+      detachedReplies: [{ reply: detachedPrReply, threadKey: key }],
+    };
+    saveSession(state, {});
+
+    const raw = localStorage.getItem(STORAGE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.replies[key]).toHaveLength(1);
+    expect(parsed.replies[key][0].id).toBe("u1");
+    expect(parsed.detachedReplies).toEqual([]);
+  });
+
+  it("rehydrates without external replies after a save→load cycle", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const prReply: Reply = {
+      id: "pr-comment:99",
+      author: "external-reviewer",
+      body: "drop me",
+      createdAt: "2026-05-06T00:00:00.000Z",
+      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r99" },
+    };
+    saveSession(
+      {
+        ...initialState([cs]),
+        replies: { [key]: [prReply] },
+      },
+      {},
+    );
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state).not.toBeNull();
+    expect(hydrated.state!.replies[key] ?? []).toEqual([]);
+  });
+});

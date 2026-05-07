@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import { ProxyAgent } from "undici";
 import {
   githubFetch,
   githubFetchAll,
   GithubApiError,
 } from "./api-client.ts";
+import { __resetDispatcherForTests } from "../proxy.ts";
 
 const API_BASE = "https://api.github.com";
 const TOKEN = "ghp_test_token";
@@ -24,6 +26,11 @@ function makeFetchResponse(
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.HTTPS_PROXY;
+  delete process.env.https_proxy;
+  delete process.env.NO_PROXY;
+  delete process.env.no_proxy;
+  __resetDispatcherForTests();
 });
 
 describe("githubFetch", () => {
@@ -149,6 +156,24 @@ describe("githubFetch", () => {
       (e: unknown) =>
         e instanceof GithubApiError && e.error.kind === "github_pr_not_found",
     );
+  });
+
+  it("forwards a ProxyAgent dispatcher when HTTPS_PROXY is set", async () => {
+    process.env.HTTPS_PROXY = "http://proxy.example.com:3128";
+    __resetDispatcherForTests();
+
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValue(makeFetchResponse(200, { id: 1 }));
+    vi.stubGlobal("fetch", mockFetch);
+
+    await githubFetch(API_BASE, "/repos/o/r/pulls/1", { token: TOKEN });
+
+    const [, init] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit & { dispatcher?: unknown },
+    ];
+    expect(init.dispatcher).toBeInstanceOf(ProxyAgent);
   });
 
   it("throws github_upstream on 5xx", async () => {

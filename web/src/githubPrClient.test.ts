@@ -82,7 +82,25 @@ describe("loadGithubPr — error handling", () => {
     });
   });
 
-  it("returns the changeset on a 200 response", async () => {
+  it("returns the changeset, prReplies, and prDetached on a 200 response", async () => {
+    const fakeCs = { id: "pr:github.com:owner:repo:1", title: "Fix bug" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({ changeSet: fakeCs, prReplies: {}, prDetached: [] }),
+      }),
+    );
+
+    const result = await loadGithubPr("https://github.com/owner/repo/pull/1");
+    expect(result.changeSet).toEqual(fakeCs);
+    expect(result.prReplies).toEqual({});
+    expect(result.prDetached).toEqual([]);
+  });
+
+  it("defaults prReplies and prDetached when the server omits them", async () => {
     const fakeCs = { id: "pr:github.com:owner:repo:1", title: "Fix bug" };
     vi.stubGlobal(
       "fetch",
@@ -93,8 +111,9 @@ describe("loadGithubPr — error handling", () => {
       }),
     );
 
-    const cs = await loadGithubPr("https://github.com/owner/repo/pull/1");
-    expect(cs).toEqual(fakeCs);
+    const result = await loadGithubPr("https://github.com/owner/repo/pull/1");
+    expect(result.prReplies).toEqual({});
+    expect(result.prDetached).toEqual([]);
   });
 
   it("throws invalid_pr_url for an empty URL", async () => {

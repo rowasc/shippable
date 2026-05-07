@@ -167,6 +167,17 @@ export function buildSnapshot(
     if (set.size === 0) continue;
     readLines[hunkId] = Array.from(set).sort((a, b) => a - b);
   }
+  // Externally-sourced replies (today: GitHub PR comments) are never persisted —
+  // they re-arrive with the next pr/load. Persisting them would accumulate stale
+  // upstream state and create rehydration ordering questions.
+  const replies: Record<string, typeof state.replies[string]> = {};
+  for (const [key, list] of Object.entries(state.replies)) {
+    const filtered = list.filter((r) => !r.external);
+    if (filtered.length > 0) replies[key] = filtered;
+  }
+  const detachedReplies = state.detachedReplies.filter(
+    (d) => !d.reply.external,
+  );
   return {
     v: 2,
     cursor: state.cursor,
@@ -174,9 +185,9 @@ export function buildSnapshot(
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
     dismissedGuides: Array.from(state.dismissedGuides).sort(),
     ackedNotes: Array.from(state.ackedNotes).sort(),
-    replies: state.replies,
+    replies,
     drafts,
-    detachedReplies: state.detachedReplies,
+    detachedReplies,
   };
 }
 

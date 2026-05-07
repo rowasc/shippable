@@ -7,6 +7,7 @@ import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
 import type {
   ChangeSet,
+  DetachedReply,
   Reply,
   WorktreeProvenance,
   WorktreeState,
@@ -136,8 +137,17 @@ export default function App() {
     cs: ChangeSet,
     replies: Record<string, Reply[]>,
     source: RecentSource,
+    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
   ) {
     dispatch({ type: "LOAD_CHANGESET", changeset: cs, replies });
+    if (prData) {
+      dispatch({
+        type: "MERGE_PR_REPLIES",
+        changesetId: cs.id,
+        prReplies: prData.prReplies,
+        prDetached: prData.prDetached,
+      });
+    }
     setCurrentSource(source);
     setRecents(pushRecent(cs, replies, source));
   }

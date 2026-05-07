@@ -5,7 +5,15 @@
 // callers can branch on `discriminator` without parsing raw status codes.
 
 import { apiUrl } from "./apiUrl";
-import type { ChangeSet } from "./types";
+import type { ChangeSet, DetachedReply, Reply } from "./types";
+
+export interface PrLoadResult {
+  changeSet: ChangeSet;
+  /** PR review comments anchored in the current diff, bucketed by reply key. */
+  prReplies: Record<string, Reply[]>;
+  /** PR review comments that no longer anchor (outdated, or off the patch view). */
+  prDetached: DetachedReply[];
+}
 
 /** Friendly user-facing messages for non-auth GitHub error discriminators. */
 export const GH_ERROR_MESSAGES: Record<string, string> = {
@@ -60,7 +68,7 @@ export async function setGithubToken(
 }
 
 
-export async function loadGithubPr(prUrl: string): Promise<ChangeSet> {
+export async function loadGithubPr(prUrl: string): Promise<PrLoadResult> {
   // Basic local validation before hitting the server.
   if (!prUrl.trim()) {
     throw new GithubFetchError("invalid_pr_url", "PR URL is required");
@@ -108,7 +116,11 @@ export async function loadGithubPr(prUrl: string): Promise<ChangeSet> {
     throw new GithubFetchError("unknown", "Unexpected response from server");
   }
 
-  return json.changeSet as ChangeSet;
+  return {
+    changeSet: json.changeSet as ChangeSet,
+    prReplies: (json.prReplies ?? {}) as Record<string, Reply[]>,
+    prDetached: (json.prDetached ?? []) as DetachedReply[],
+  };
 }
 
 export async function lookupPrForBranch(

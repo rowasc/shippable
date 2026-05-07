@@ -17,8 +17,6 @@ const COORDS: PrCoords = {
 
 const TOKEN = "ghp_test";
 
-// Minimal GitHub API response shapes for stubbing.
-
 const PR_META = {
   title: "Fix the bug",
   body: "Describes the fix",
@@ -53,6 +51,8 @@ const LINE_COMMENTS = [
     line: 3, // newNo in the diff
     original_line: 3,
     start_line: null,
+    original_commit_id: "headsha",
+    diff_hunk: "@@ -1,3 +1,4 @@\n context\n-old line\n+new line",
     created_at: "2024-01-01T00:00:00Z",
     html_url: "https://github.com/owner/repo/pull/42#discussion_r100",
     side: "RIGHT",
@@ -101,64 +101,72 @@ function stubHappyPath(
 describe("loadPr — happy path", () => {
   it("sets prSource with correct metadata", async () => {
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
+    const { changeSet } = await loadPr(COORDS, TOKEN);
 
-    expect(cs.prSource).toBeDefined();
-    expect(cs.prSource!.host).toBe("github.com");
-    expect(cs.prSource!.owner).toBe("owner");
-    expect(cs.prSource!.repo).toBe("repo");
-    expect(cs.prSource!.number).toBe(42);
-    expect(cs.prSource!.state).toBe("open");
-    expect(cs.prSource!.title).toBe("Fix the bug");
-    expect(cs.prSource!.headSha).toBe("headsha");
-    expect(cs.prSource!.baseSha).toBe("basesha");
-    expect(cs.prSource!.baseRef).toBe("main");
-    expect(cs.prSource!.headRef).toBe("fix-branch");
-    expect(cs.prSource!.htmlUrl).toBe("https://github.com/owner/repo/pull/42");
-    expect(typeof cs.prSource!.lastFetchedAt).toBe("string");
+    expect(changeSet.prSource).toBeDefined();
+    expect(changeSet.prSource!.host).toBe("github.com");
+    expect(changeSet.prSource!.owner).toBe("owner");
+    expect(changeSet.prSource!.repo).toBe("repo");
+    expect(changeSet.prSource!.number).toBe(42);
+    expect(changeSet.prSource!.state).toBe("open");
+    expect(changeSet.prSource!.title).toBe("Fix the bug");
+    expect(changeSet.prSource!.headSha).toBe("headsha");
+    expect(changeSet.prSource!.baseSha).toBe("basesha");
+    expect(changeSet.prSource!.baseRef).toBe("main");
+    expect(changeSet.prSource!.headRef).toBe("fix-branch");
+    expect(changeSet.prSource!.htmlUrl).toBe("https://github.com/owner/repo/pull/42");
+    expect(typeof changeSet.prSource!.lastFetchedAt).toBe("string");
   });
 
   it("id is deterministic pr:<host>:<owner>:<repo>:<number>", async () => {
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.id).toBe("pr:github.com:owner:repo:42");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.id).toBe("pr:github.com:owner:repo:42");
   });
 
   it("parses both files into ChangeSet.files", async () => {
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.files).toHaveLength(2);
-    const paths = cs.files.map((f) => f.path);
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.files).toHaveLength(2);
+    const paths = changeSet.files.map((f) => f.path);
     expect(paths).toContain("src/foo.ts");
     expect(paths).toContain("src/bar.ts");
   });
 
-  it("attaches line comment to the correct DiffLine", async () => {
+  it("attaches a single-line review comment as a Reply under userCommentKey", async () => {
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
+    const { changeSet, prReplies, prDetached } = await loadPr(COORDS, TOKEN);
 
-    const fooFile = cs.files.find((f) => f.path === "src/foo.ts")!;
-    expect(fooFile).toBeDefined();
+    expect(prDetached).toEqual([]);
+    const keys = Object.keys(prReplies);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^user:/);
 
-    // Find any DiffLine with prReviewComments
-    const commentedLine = fooFile.hunks
-      .flatMap((h) => h.lines)
-      .find((l) => l.prReviewComments && l.prReviewComments.length > 0);
-
-    expect(commentedLine).toBeDefined();
-    expect(commentedLine!.prReviewComments![0]).toMatchObject({
-      id: 100,
+    const replies = prReplies[keys[0]];
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatchObject({
+      id: "pr-comment:100",
       author: "reviewer",
       body: "This is a comment",
+      external: {
+        source: "pr",
+        htmlUrl: "https://github.com/owner/repo/pull/42#discussion_r100",
+      },
     });
+
+    // The key encodes a hunk that exists on src/foo.ts.
+    const fooFile = changeSet.files.find((f) => f.path === "src/foo.ts")!;
+    const hunkIds = fooFile.hunks.map((h) => h.id);
+    const keyHunkId = keys[0].split(":").slice(1, -1).join(":");
+    expect(hunkIds).toContain(keyHunkId);
   });
 
   it("populates prConversation from issue comments", async () => {
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
+    const { changeSet } = await loadPr(COORDS, TOKEN);
 
-    expect(cs.prConversation).toHaveLength(1);
-    expect(cs.prConversation![0]).toMatchObject({
+    expect(changeSet.prConversation).toHaveLength(1);
+    expect(changeSet.prConversation![0]).toMatchObject({
       id: 200,
       author: "author",
       body: "Great PR!",
@@ -167,38 +175,95 @@ describe("loadPr — happy path", () => {
 });
 
 describe("loadPr — multi-line comment", () => {
-  it("sets lineSpan on multi-line comment and attaches to hi line", async () => {
+  it("routes a multi-line comment to a blockCommentKey when start and end share a hunk", async () => {
     const multiLineComment = {
       id: 101,
       user: { login: "reviewer" },
       body: "Multi-line comment",
       path: "src/foo.ts",
-      line: 4,           // hi line
+      line: 4,
       original_line: 4,
-      start_line: 2,     // lo line
+      start_line: 2,
+      original_commit_id: "headsha",
+      diff_hunk: "@@ -1,3 +1,4 @@\n context\n-old line\n+new line\n+added line",
       created_at: "2024-01-01T00:00:00Z",
       html_url: "https://github.com/owner/repo/pull/42#discussion_r101",
       side: "RIGHT",
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     stubHappyPath(PR_FILES, [multiLineComment as any], ISSUE_COMMENTS);
-    const cs = await loadPr(COORDS, TOKEN);
+    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
 
-    const fooFile = cs.files.find((f) => f.path === "src/foo.ts")!;
-    const commentedLines = fooFile.hunks
-      .flatMap((h) => h.lines)
-      .filter((l) => l.prReviewComments && l.prReviewComments.length > 0);
+    expect(prDetached).toEqual([]);
+    const keys = Object.keys(prReplies);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toMatch(/^block:/);
+  });
+});
 
-    // Should attach to the hi (line 4) line only
-    expect(commentedLines).toHaveLength(1);
-    const comment = commentedLines[0].prReviewComments![0];
-    expect(comment.lineSpan).toEqual({ lo: 2, hi: 4 });
+describe("loadPr — outdated comments become DetachedReply", () => {
+  it("comment with line: null becomes a detached entry with anchorContext", async () => {
+    const outdated = {
+      id: 102,
+      user: { login: "reviewer" },
+      body: "stale thought",
+      path: "src/foo.ts",
+      line: null,
+      original_line: 7,
+      start_line: null,
+      original_commit_id: "oldsha1",
+      diff_hunk: "@@ -5,3 +5,3 @@\n surrounding\n-removed in old version\n+added in old version",
+      created_at: "2024-01-01T00:00:00Z",
+      html_url: "https://github.com/owner/repo/pull/42#discussion_r102",
+      side: "RIGHT",
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    stubHappyPath(PR_FILES, [outdated as any], ISSUE_COMMENTS);
+    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+
+    expect(prReplies).toEqual({});
+    expect(prDetached).toHaveLength(1);
+    const d = prDetached[0];
+    expect(d.threadKey).toBe("pr-detached:102");
+    expect(d.reply.anchorPath).toBe("src/foo.ts");
+    expect(d.reply.anchorLineNo).toBe(7);
+    expect(d.reply.originType).toBe("committed");
+    expect(d.reply.originSha).toBe("oldsha1");
+    expect(d.reply.external).toEqual({
+      source: "pr",
+      htmlUrl: "https://github.com/owner/repo/pull/42#discussion_r102",
+    });
+    expect(d.reply.anchorContext).toBeDefined();
+    expect(d.reply.anchorContext!.length).toBeGreaterThan(0);
+  });
+
+  it("comment whose line is no longer in the diff becomes detached too", async () => {
+    const offPatch = {
+      id: 103,
+      user: { login: "reviewer" },
+      body: "lines 50–52",
+      path: "src/foo.ts",
+      line: 50,
+      original_line: 50,
+      start_line: null,
+      original_commit_id: "oldsha2",
+      diff_hunk: "@@ -50,1 +50,1 @@\n distant",
+      created_at: "2024-01-01T00:00:00Z",
+      html_url: "https://github.com/owner/repo/pull/42#discussion_r103",
+      side: "RIGHT",
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    stubHappyPath(PR_FILES, [offPatch as any], ISSUE_COMMENTS);
+    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+
+    expect(prReplies).toEqual({});
+    expect(prDetached).toHaveLength(1);
+    expect(prDetached[0].reply.anchorLineNo).toBe(50);
   });
 });
 
 describe("loadPr — truncation", () => {
   it("sets prSource.truncation when files.length < meta.changed_files", async () => {
-    // GitHub says the PR has 5 files but only returns 3 (simulating truncation).
     const truncatedMeta = { ...PR_META, changed_files: 5 };
     const threeFiles = Array.from({ length: 3 }, (_, i) => ({
       filename: `src/file${i}.ts`,
@@ -215,24 +280,23 @@ describe("loadPr — truncation", () => {
         return makePage({});
       }),
     );
-    const cs = await loadPr(COORDS, TOKEN);
+    const { changeSet } = await loadPr(COORDS, TOKEN);
 
-    expect(cs.prSource!.truncation).toBeDefined();
-    expect(cs.prSource!.truncation!.kind).toBe("files");
-    expect(cs.prSource!.truncation!.reason).toContain("3");
-    expect(cs.prSource!.truncation!.reason).toContain("5");
+    expect(changeSet.prSource!.truncation).toBeDefined();
+    expect(changeSet.prSource!.truncation!.kind).toBe("files");
+    expect(changeSet.prSource!.truncation!.reason).toContain("3");
+    expect(changeSet.prSource!.truncation!.reason).toContain("5");
   });
 
   it("does not set truncation when files.length equals meta.changed_files", async () => {
-    // PR_META has changed_files: 2, and PR_FILES has 2 files — no truncation.
     stubHappyPath();
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.prSource!.truncation).toBeUndefined();
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.prSource!.truncation).toBeUndefined();
   });
 });
 
-describe("loadPr — comment silently dropped when path/line not in diff", () => {
-  it("drops comment with unknown path", async () => {
+describe("loadPr — comment dropped (path missing) becomes detached", () => {
+  it("comment whose path is not in the diff becomes a detached entry", async () => {
     const unknownPathComment = {
       id: 999,
       user: { login: "reviewer" },
@@ -241,46 +305,18 @@ describe("loadPr — comment silently dropped when path/line not in diff", () =>
       line: 1,
       original_line: 1,
       start_line: null,
+      original_commit_id: "oldsha3",
+      diff_hunk: "@@ -1,1 +1,1 @@\n nothing",
       created_at: "2024-01-01T00:00:00Z",
       html_url: "https://github.com/owner/repo/pull/42#discussion_r999",
       side: "RIGHT" as const,
     };
     stubHappyPath(PR_FILES, [unknownPathComment], ISSUE_COMMENTS);
-    const cs = await loadPr(COORDS, TOKEN);
+    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
 
-    // No DiffLine across any file should have prReviewComments
-    const allLines = cs.files.flatMap((f) =>
-      f.hunks.flatMap((h) => h.lines),
-    );
-    const withComments = allLines.filter(
-      (l) => l.prReviewComments && l.prReviewComments.length > 0,
-    );
-    expect(withComments).toHaveLength(0);
-  });
-
-  it("drops comment with a line number not in the diff", async () => {
-    const outOfRangeComment = {
-      id: 998,
-      user: { login: "reviewer" },
-      body: "Comment on context line not in diff",
-      path: "src/foo.ts",
-      line: 999, // no such line in the diff
-      original_line: 999,
-      start_line: null,
-      created_at: "2024-01-01T00:00:00Z",
-      html_url: "https://github.com/owner/repo/pull/42#discussion_r998",
-      side: "RIGHT" as const,
-    };
-    stubHappyPath(PR_FILES, [outOfRangeComment], ISSUE_COMMENTS);
-    const cs = await loadPr(COORDS, TOKEN);
-
-    const allLines = cs.files.flatMap((f) =>
-      f.hunks.flatMap((h) => h.lines),
-    );
-    const withComments = allLines.filter(
-      (l) => l.prReviewComments && l.prReviewComments.length > 0,
-    );
-    expect(withComments).toHaveLength(0);
+    expect(prReplies).toEqual({});
+    expect(prDetached).toHaveLength(1);
+    expect(prDetached[0].reply.anchorPath).toBe("src/nonexistent.ts");
   });
 });
 
@@ -306,10 +342,10 @@ describe("loadPr — file status synthesis", () => {
         patch: "@@ -0,0 +1,2 @@\n+line1\n+line2",
       },
     ]);
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.files).toHaveLength(1);
-    expect(cs.files[0].status).toBe("added");
-    expect(cs.files[0].path).toBe("src/new.ts");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.files).toHaveLength(1);
+    expect(changeSet.files[0].status).toBe("added");
+    expect(changeSet.files[0].path).toBe("src/new.ts");
   });
 
   it("removed file results in DiffFile.status === 'deleted'", async () => {
@@ -320,10 +356,10 @@ describe("loadPr — file status synthesis", () => {
         patch: "@@ -1,2 +0,0 @@\n-line1\n-line2",
       },
     ]);
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.files).toHaveLength(1);
-    expect(cs.files[0].status).toBe("deleted");
-    expect(cs.files[0].path).toBe("src/gone.ts");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.files).toHaveLength(1);
+    expect(changeSet.files[0].status).toBe("deleted");
+    expect(changeSet.files[0].path).toBe("src/gone.ts");
   });
 
   it("renamed file results in DiffFile.status === 'renamed' with new path", async () => {
@@ -335,17 +371,17 @@ describe("loadPr — file status synthesis", () => {
         patch: "@@ -1,2 +1,2 @@\n context\n-old\n+new",
       },
     ]);
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.files).toHaveLength(1);
-    expect(cs.files[0].status).toBe("renamed");
-    expect(cs.files[0].path).toBe("src/new-name.ts");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.files).toHaveLength(1);
+    expect(changeSet.files[0].status).toBe("renamed");
+    expect(changeSet.files[0].path).toBe("src/new-name.ts");
   });
 
   it("modified file results in DiffFile.status === 'modified'", async () => {
     stubWithFiles([PR_FILES[0]]);
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.files).toHaveLength(1);
-    expect(cs.files[0].status).toBe("modified");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.files).toHaveLength(1);
+    expect(changeSet.files[0].status).toBe("modified");
   });
 });
 
@@ -362,8 +398,8 @@ describe("loadPr — state mapping", () => {
         return makePage({});
       }),
     );
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.prSource!.state).toBe("merged");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.prSource!.state).toBe("merged");
   });
 
   it("maps closed+not merged to 'closed'", async () => {
@@ -378,7 +414,7 @@ describe("loadPr — state mapping", () => {
         return makePage({});
       }),
     );
-    const cs = await loadPr(COORDS, TOKEN);
-    expect(cs.prSource!.state).toBe("closed");
+    const { changeSet } = await loadPr(COORDS, TOKEN);
+    expect(changeSet.prSource!.state).toBe("closed");
   });
 });

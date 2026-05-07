@@ -10,16 +10,17 @@ import {
 import { captureAnchorContext } from "./anchor";
 import type {
   ChangeSet,
+  DetachedReply,
   DiffFile,
   DiffLine,
   Hunk,
   PrConversationItem,
-  PrReviewComment,
   PrSource,
+  Reply,
   ReviewState,
   WorktreeSource,
 } from "./types";
-import { noteKey } from "./types";
+import { noteKey, userCommentKey } from "./types";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 // Tiny hand-built ChangeSets keep these tests isolated from the gallery
@@ -1381,58 +1382,18 @@ const MOCK_WORKTREE_SOURCE: WorktreeSource = {
 
 describe("MERGE_PR_OVERLAY", () => {
   function makeWorktreeChangeset(): ChangeSet {
-    // cs1/f1.ts file has lines with newNo 1, 2, 3 (h1) and 1, 2, 3 (h2)
     const cs = defaultChangeset();
     return { ...cs, worktreeSource: MOCK_WORKTREE_SOURCE };
-  }
-
-  /** Build a minimal PR ChangeSet carrying prSource and prConversation. */
-  function makePrChangeset(
-    prReviewCommentsByPath: Record<string, { lineNo: number; comment: PrReviewComment }[]> = {},
-  ): ChangeSet {
-    const files = Object.entries(prReviewCommentsByPath).map(([filePath, entries]) => {
-      const linesByNo = new Map<number, PrReviewComment[]>();
-      for (const { lineNo, comment } of entries) {
-        const arr = linesByNo.get(lineNo) ?? [];
-        arr.push(comment);
-        linesByNo.set(lineNo, arr);
-      }
-      return makeFile(
-        filePath.replace(".ts", ""),
-        [
-          {
-            id: `${filePath}-h`,
-            header: "@@ -1,3 +1,3 @@",
-            oldStart: 1,
-            oldCount: 3,
-            newStart: 1,
-            newCount: 3,
-            lines: Array.from({ length: 3 }, (_, i) => ({
-              kind: "context" as const,
-              text: `l${i}`,
-              oldNo: i + 1,
-              newNo: i + 1,
-              prReviewComments: linesByNo.get(i + 1) ?? [],
-            })).map((l) => (l.prReviewComments?.length === 0 ? { ...l, prReviewComments: undefined } : l)),
-          },
-        ],
-      );
-    });
-    return {
-      ...makeChangeset("pr-cs", files),
-      prSource: MOCK_PR_SOURCE,
-      prConversation: MOCK_PR_CONVERSATION,
-    };
   }
 
   it("sets prSource and prConversation on the target changeset", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
-    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prChangeSet,
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
     });
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
     expect(nextCs.prSource).toEqual(MOCK_PR_SOURCE);
@@ -1442,57 +1403,24 @@ describe("MERGE_PR_OVERLAY", () => {
   it("preserves worktreeSource on the changeset", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
-    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prChangeSet,
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
     });
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
     expect(nextCs.worktreeSource).toEqual(MOCK_WORKTREE_SOURCE);
   });
 
-  it("attaches prReviewComments to matching lines and leaves non-matching lines untouched", () => {
-    const cs = makeWorktreeChangeset();
-    const state = initialState([cs]);
-
-    const comment: PrReviewComment = {
-      id: 100,
-      author: "reviewer",
-      createdAt: "2026-04-30T00:00:00Z",
-      body: "Nice work",
-      htmlUrl: "https://github.com/owner/repo/pull/42#comment-100",
-    };
-
-    // The worktree changeset has cs1/f1.ts, so the PR ChangeSet must match that path.
-    const prChangeSet = makePrChangeset({ "cs1/f1.ts": [{ lineNo: 2, comment }] });
-    const next = reducer(state, {
-      type: "MERGE_PR_OVERLAY",
-      changesetId: "cs1",
-      prChangeSet,
-    });
-    const nextCs = next.changesets.find((c) => c.id === "cs1")!;
-    const f1 = nextCs.files.find((f) => f.id === "cs1/f1")!;
-
-    // Line with newNo 2 should have the comment attached
-    const allLines = f1.hunks.flatMap((h) => h.lines);
-    const commentedLine = allLines.find((l) => l.newNo === 2);
-    expect(commentedLine?.prReviewComments).toHaveLength(1);
-    expect(commentedLine?.prReviewComments![0].id).toBe(100);
-
-    // Other lines should be untouched
-    const uncommentedLine = allLines.find((l) => l.newNo === 1);
-    expect(uncommentedLine?.prReviewComments).toBeUndefined();
-  });
-
   it("preserves the diff structure (files/hunks/lines count unchanged)", () => {
     const cs = makeWorktreeChangeset();
     const state = initialState([cs]);
-    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "cs1",
-      prChangeSet,
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
     });
     const origCs = state.changesets.find((c) => c.id === "cs1")!;
     const nextCs = next.changesets.find((c) => c.id === "cs1")!;
@@ -1509,12 +1437,117 @@ describe("MERGE_PR_OVERLAY", () => {
 
   it("is a no-op for an unknown changesetId", () => {
     const state = initialState([defaultChangeset()]);
-    const prChangeSet = makePrChangeset();
     const next = reducer(state, {
       type: "MERGE_PR_OVERLAY",
       changesetId: "nonexistent",
-      prChangeSet,
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
     });
     expect(next).toBe(state);
+  });
+});
+
+// ── MERGE_PR_REPLIES ───────────────────────────────────────────────────────
+
+describe("MERGE_PR_REPLIES", () => {
+  function makePrReply(id: string, body = "external"): Reply {
+    return {
+      id,
+      author: "external-reviewer",
+      body,
+      createdAt: "2026-05-06T00:00:00.000Z",
+      external: { source: "pr", htmlUrl: `https://github.com/x/y/pull/1#${id}` },
+    };
+  }
+
+  it("installs new external replies under the given keys", () => {
+    const state = initialState([defaultChangeset()]);
+    const key = userCommentKey("cs1/f1#h1", 0);
+    const next = reducer(state, {
+      type: "MERGE_PR_REPLIES",
+      changesetId: "cs1",
+      prReplies: { [key]: [makePrReply("pr-comment:1")] },
+      prDetached: [],
+    });
+    expect(next.replies[key]).toHaveLength(1);
+    expect(next.replies[key][0].id).toBe("pr-comment:1");
+  });
+
+  it("preserves user replies on the same key", () => {
+    const cs = defaultChangeset();
+    const key = userCommentKey("cs1/f1#h1", 0);
+    const userReply: Reply = {
+      id: "u1",
+      author: "luiz",
+      body: "mine",
+      createdAt: "2026-05-06T00:00:00.000Z",
+    };
+    const state = { ...initialState([cs]), replies: { [key]: [userReply] } };
+    const next = reducer(state, {
+      type: "MERGE_PR_REPLIES",
+      changesetId: "cs1",
+      prReplies: { [key]: [makePrReply("pr-comment:1")] },
+      prDetached: [],
+    });
+    expect(next.replies[key]).toHaveLength(2);
+    expect(next.replies[key].map((r) => r.id)).toEqual(["u1", "pr-comment:1"]);
+  });
+
+  it("removes prior PR-sourced replies before installing new ones (refresh idempotent)", () => {
+    const cs = defaultChangeset();
+    const key = userCommentKey("cs1/f1#h1", 0);
+    const stale = makePrReply("pr-comment:OLD", "stale upstream comment");
+    const state = { ...initialState([cs]), replies: { [key]: [stale] } };
+    const next = reducer(state, {
+      type: "MERGE_PR_REPLIES",
+      changesetId: "cs1",
+      prReplies: { [key]: [makePrReply("pr-comment:NEW")] },
+      prDetached: [],
+    });
+    expect(next.replies[key]).toHaveLength(1);
+    expect(next.replies[key][0].id).toBe("pr-comment:NEW");
+  });
+
+  it("merges in detached replies and strips prior PR-sourced detached entries", () => {
+    const cs = defaultChangeset();
+    const stalePrDetached: DetachedReply = {
+      reply: makePrReply("pr-comment:STALE"),
+      threadKey: "pr-detached:STALE",
+    };
+    const userDetached: DetachedReply = {
+      reply: {
+        id: "u-d",
+        author: "luiz",
+        body: "stranded",
+        createdAt: "2026-05-06T00:00:00.000Z",
+      },
+      threadKey: "user:cs1/f1#h1:0",
+    };
+    const state = {
+      ...initialState([cs]),
+      detachedReplies: [stalePrDetached, userDetached],
+    };
+    const newPrDetached: DetachedReply = {
+      reply: {
+        ...makePrReply("pr-comment:NEW"),
+        anchorPath: "src/foo.ts",
+        anchorLineNo: 10,
+        anchorContext: [],
+        originType: "committed",
+      },
+      threadKey: "pr-detached:NEW",
+    };
+    const next = reducer(state, {
+      type: "MERGE_PR_REPLIES",
+      changesetId: "cs1",
+      prReplies: {},
+      prDetached: [newPrDetached],
+    });
+    // User detached preserved, stale PR-detached removed, new PR-detached installed.
+    expect(next.detachedReplies).toHaveLength(2);
+    const ids = next.detachedReplies.map((d) => d.reply.id);
+    expect(ids).toContain("u-d");
+    expect(ids).toContain("pr-comment:NEW");
+    expect(ids).not.toContain("pr-comment:STALE");
   });
 });

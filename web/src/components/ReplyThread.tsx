@@ -87,59 +87,76 @@ export function ReplyThread({
           const deleteTitle = isDelivered
             ? "the agent already saw this; deleting only removes it from your view."
             : "delete reply";
+          const isExternal = r.external?.source === "pr";
           return (
           <li key={r.id} className="reply">
             <div className="reply__head">
               <span className="reply__author">@{r.author}</span>
               <span className="reply__sep">·</span>
               <span className="reply__time">{timeAgo(r.createdAt)}</span>
-              <ReplyPip
-                reply={r}
-                deliveredById={deliveredById}
-                onRetry={onRetryReply ? () => onRetryReply(r.id) : undefined}
-              />
-              {r.author === "you" && (
-                armedDeleteId === r.id ? (
-                  <span className="reply__confirm" role="group" aria-label="confirm delete">
-                    <span className="reply__confirm-q">delete?</span>
-                    <button
-                      type="button"
-                      className="reply__confirm-yes"
-                      onClick={() => {
-                        setArmedDeleteId(null);
-                        onDeleteReply(r.id);
-                      }}
-                      autoFocus
-                    >
-                      yes
-                    </button>
-                    <button
-                      type="button"
-                      className="reply__confirm-no"
-                      onClick={() => setArmedDeleteId(null)}
-                    >
-                      cancel
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    className="reply__delete"
-                    onClick={() => setArmedDeleteId(r.id)}
-                    title={deleteTitle}
-                  >
-                    × delete
-                  </button>
-                )
+              {isExternal ? (
+                <a
+                  className="reply__external"
+                  href={r.external!.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Open on GitHub"
+                >
+                  ↗ GitHub
+                </a>
+              ) : (
+                <>
+                  <ReplyPip
+                    reply={r}
+                    deliveredById={deliveredById}
+                    onRetry={onRetryReply ? () => onRetryReply(r.id) : undefined}
+                  />
+                  {r.author === "you" && (
+                    armedDeleteId === r.id ? (
+                      <span className="reply__confirm" role="group" aria-label="confirm delete">
+                        <span className="reply__confirm-q">delete?</span>
+                        <button
+                          type="button"
+                          className="reply__confirm-yes"
+                          onClick={() => {
+                            setArmedDeleteId(null);
+                            onDeleteReply(r.id);
+                          }}
+                          autoFocus
+                        >
+                          yes
+                        </button>
+                        <button
+                          type="button"
+                          className="reply__confirm-no"
+                          onClick={() => setArmedDeleteId(null)}
+                        >
+                          cancel
+                        </button>
+                      </span>
+                    ) : (
+                      <button
+                        className="reply__delete"
+                        onClick={() => setArmedDeleteId(r.id)}
+                        title={deleteTitle}
+                      >
+                        × delete
+                      </button>
+                    )
+                  )}
+                </>
               )}
             </div>
             <div className="reply__body">
               <RichText text={r.body} symbols={symbols} onJump={onJump} />
             </div>
-            <AgentRepliesList
-              entries={r.agentReplies ?? []}
-              symbols={symbols}
-              onJump={onJump}
-            />
+            {!isExternal && (
+              <AgentRepliesList
+                entries={r.agentReplies ?? []}
+                symbols={symbols}
+                onJump={onJump}
+              />
+            )}
           </li>
           );
         })}

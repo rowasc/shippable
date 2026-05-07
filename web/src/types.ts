@@ -6,8 +6,6 @@ export interface DiffLine {
   oldNo?: number;
   newNo?: number;
   aiNote?: AiNote;
-  /** Read-only line-anchored PR review comments loaded from GitHub. */
-  prReviewComments?: PrReviewComment[];
 }
 
 export type AiNoteSeverity = "info" | "question" | "warning";
@@ -216,6 +214,13 @@ export interface Reply {
    * field render the historical file from the top.
    */
   anchorLineNo?: number;
+  /**
+   * Marks a reply as sourced from an upstream system (today: GitHub PRs).
+   * Drives the small "open on GitHub" link in ReplyThread, suppresses the
+   * local enqueue / agent-reply affordances, and tells the persist layer
+   * to skip the entry on save (it re-arrives with the next pr/load).
+   */
+  external?: { source: "pr"; htmlUrl: string };
 }
 
 /**
@@ -506,21 +511,6 @@ export interface PrConversationItem {
   createdAt: string;
   body: string;
   htmlUrl: string;
-}
-
-/**
- * Line-anchored PR review comment loaded from GitHub. Attached to
- * `DiffLine.prReviewComments`; read-only annotations — not persisted in
- * `ReviewState`, re-fetched with the diff on each load.
- */
-export interface PrReviewComment {
-  id: number;
-  author: string;
-  createdAt: string;
-  body: string;
-  htmlUrl: string;
-  /** Present for multi-line comments; absent for single-line. */
-  lineSpan?: { lo: number; hi: number };
 }
 
 export function noteKey(hunkId: string, lineIdx: number): string {

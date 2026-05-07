@@ -75,10 +75,13 @@ function renderModal(onLoad = vi.fn(), onClose = vi.fn()) {
   return render(<LoadModal onLoad={onLoad} onClose={onClose} />);
 }
 
-describe("LoadModal — GitHub PR section", () => {
-  it("renders the 'From a GitHub PR' section", () => {
+describe("LoadModal — unified URL field (PR + diff URL)", () => {
+  it("renders a single 'From URL' section with a unified URL field", () => {
     renderModal();
-    expect(screen.getByText(/from a github pr/i)).toBeTruthy();
+    expect(screen.getByText(/from url/i)).toBeTruthy();
+    expect(
+      screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i),
+    ).toBeTruthy();
   });
 
   it("calls loadGithubPr with the entered URL on submit", async () => {
@@ -87,7 +90,11 @@ describe("LoadModal — GitHub PR section", () => {
       title: "Fix bug",
       files: [],
     };
-    loadGithubPrMock.mockResolvedValue(fakeCs);
+    loadGithubPrMock.mockResolvedValue({
+      changeSet: fakeCs,
+      prReplies: {},
+      prDetached: [],
+    });
     const onLoad = vi.fn();
 
     renderModal(onLoad);
@@ -99,7 +106,7 @@ describe("LoadModal — GitHub PR section", () => {
       target: { value: "https://github.com/owner/repo/pull/1" },
     });
 
-    const button = screen.getByRole("button", { name: /load pr/i });
+    const button = screen.getByRole("button", { name: /^load$/i });
     fireEvent.click(button);
 
     await waitFor(() =>
@@ -111,6 +118,7 @@ describe("LoadModal — GitHub PR section", () => {
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         expect.objectContaining({ kind: "pr" }),
+        { prReplies: {}, prDetached: [] },
       ),
     );
   });
@@ -129,7 +137,7 @@ describe("LoadModal — GitHub PR section", () => {
     fireEvent.change(input, {
       target: { value: "https://github.com/owner/repo/pull/1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/needs a GitHub Personal Access Token/i)).toBeTruthy(),
@@ -145,7 +153,11 @@ describe("LoadModal — GitHub PR section", () => {
       .mockRejectedValueOnce(
         new GithubFetchError("github_token_required", "github_token_required", "github.com"),
       )
-      .mockResolvedValueOnce(fakeCs);
+      .mockResolvedValueOnce({
+        changeSet: fakeCs,
+        prReplies: {},
+        prDetached: [],
+      });
     isTauriMock.mockReturnValue(true);
     keychainGetMock.mockResolvedValue("ghp_cached_token");
 
@@ -154,13 +166,14 @@ describe("LoadModal — GitHub PR section", () => {
 
     const input = screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i);
     fireEvent.change(input, { target: { value: "https://github.com/owner/repo/pull/1" } });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     // Token modal must NOT appear — the rehydrate path should skip it.
     await waitFor(() =>
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         expect.objectContaining({ kind: "pr" }),
+        { prReplies: {}, prDetached: [] },
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();
@@ -179,7 +192,7 @@ describe("LoadModal — GitHub PR section", () => {
 
     const input = screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i);
     fireEvent.change(input, { target: { value: "https://github.com/owner/repo/pull/1" } });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/needs a GitHub Personal Access Token/i)).toBeTruthy(),
@@ -200,7 +213,7 @@ describe("LoadModal — GitHub PR section", () => {
     fireEvent.change(input, {
       target: { value: "https://github.com/owner/repo/pull/1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/was rejected/i)).toBeTruthy(),
@@ -221,7 +234,7 @@ describe("LoadModal — GitHub PR section", () => {
     fireEvent.change(input, {
       target: { value: "https://github.com/owner/repo/pull/9999" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText("PR not found.")).toBeTruthy(),

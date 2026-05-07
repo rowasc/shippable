@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { Inspector } from "./Inspector";
-import type { PrReviewComment, PrConversationItem, WorktreeSource, PrSource } from "../types";
+import type { PrConversationItem, WorktreeSource, PrSource } from "../types";
 
 afterEach(cleanup);
 
@@ -84,65 +84,6 @@ function renderInspector(
     />,
   );
 }
-
-describe("Inspector — prReviewComments", () => {
-  it("renders the PR review comments section with the correct count", () => {
-    const comments: PrReviewComment[] = [
-      {
-        id: 1,
-        author: "alice",
-        createdAt: new Date(Date.now() - 5 * 60000).toISOString(),
-        body: "Consider using a const here.",
-        htmlUrl: "https://github.com/owner/repo/pull/1#comment-1",
-      },
-      {
-        id: 2,
-        author: "bob",
-        createdAt: new Date(Date.now() - 10 * 60000).toISOString(),
-        body: "Looks good to me.",
-        htmlUrl: "https://github.com/owner/repo/pull/1#comment-2",
-        lineSpan: { lo: 5, hi: 8 },
-      },
-    ];
-
-    renderInspector({ prReviewComments: comments });
-
-    // Section header with count
-    expect(screen.getByText(/PR review comments/i)).toBeTruthy();
-    expect(screen.getByText("2")).toBeTruthy();
-
-    // Author names
-    expect(screen.getByText("@alice")).toBeTruthy();
-    expect(screen.getByText("@bob")).toBeTruthy();
-
-    // Comment bodies
-    expect(screen.getByText("Consider using a const here.")).toBeTruthy();
-
-    // lineSpan hint
-    expect(screen.getByText(/spans L5–8/)).toBeTruthy();
-
-    // External links
-    const links = screen.getAllByRole("link", { name: "↗" });
-    expect(links.length).toBe(2);
-    expect(links[0].getAttribute("href")).toBe(
-      "https://github.com/owner/repo/pull/1#comment-1",
-    );
-  });
-
-  it("does not render the section when prReviewComments is empty", () => {
-    renderInspector({ prReviewComments: [] });
-    expect(
-      document.querySelector(".inspector__sec-h")?.textContent,
-    ).not.toContain("PR review comments");
-  });
-
-  it("does not render the section when prReviewComments is absent", () => {
-    renderInspector();
-    const allSections = document.querySelectorAll(".inspector__sec-h");
-    const texts = Array.from(allSections).map((el) => el.textContent ?? "");
-    expect(texts.some((t) => t.includes("PR review comments"))).toBe(false);
-  });
-});
 
 describe("Inspector — prConversation", () => {
   it("renders the PR conversation disclosure with item count", () => {
@@ -357,12 +298,33 @@ describe("Inspector — PR pill", () => {
       },
     });
 
+    const fakePrSource = {
+      host: "github.com",
+      owner: "owner",
+      repo: "repo",
+      number: 42,
+      htmlUrl: "https://github.com/owner/repo/pull/42",
+      headSha: "h",
+      baseSha: "b",
+      state: "open" as const,
+      title: "My feature",
+      body: "",
+      baseRef: "main",
+      headRef: "feat/branch",
+      lastFetchedAt: "2026-05-07T00:00:00Z",
+    };
     const fakePrCs = {
       id: "pr:github.com:owner:repo:42",
       title: "My feature",
       files: [],
+      prSource: fakePrSource,
+      prConversation: [],
     };
-    (mockLoad as ReturnType<typeof vi.fn>).mockResolvedValue(fakePrCs);
+    (mockLoad as ReturnType<typeof vi.fn>).mockResolvedValue({
+      changeSet: fakePrCs,
+      prReplies: {},
+      prDetached: [],
+    });
 
     const onMergePrOverlay = vi.fn();
     renderInspector({
@@ -379,7 +341,13 @@ describe("Inspector — PR pill", () => {
       expect(mockLoad).toHaveBeenCalledWith(
         "https://github.com/owner/repo/pull/42",
       );
-      expect(onMergePrOverlay).toHaveBeenCalledWith("wt:test", fakePrCs);
+      expect(onMergePrOverlay).toHaveBeenCalledWith(
+        "wt:test",
+        fakePrSource,
+        [],
+        {},
+        [],
+      );
     });
   });
 });

@@ -926,6 +926,8 @@ describe("POST /api/github/pr/load", () => {
     expect(r.body.changeSet.prSource.state).toBe("open");
     expect(r.body.changeSet.files).toHaveLength(1);
     expect(r.body.changeSet.prConversation).toEqual([]);
+    expect(r.body.prReplies).toEqual({});
+    expect(r.body.prDetached).toEqual([]);
   });
 
   it("returns 403 github_auth_failed on upstream 403 rate-limit", async () => {

@@ -1,11 +1,13 @@
 import { parseDiff } from "../../../web/src/parseDiff.ts";
 import type {
   ChangeSet,
+  DetachedReply,
   DiffLine,
   PrConversationItem,
-  PrReviewComment,
   PrSource,
+  Reply,
 } from "../../../web/src/types.ts";
+import { blockCommentKey, userCommentKey } from "../../../web/src/types.ts";
 import { githubFetch, githubFetchAll } from "./api-client.ts";
 import type { PrCoords } from "./url.ts";
 
@@ -33,12 +35,18 @@ interface GhLineComment {
   user: { login: string };
   body: string;
   path: string;
-  /** The line in the file at the end of the comment range. */
-  line: number;
-  /** Original line (pre-rebase). We use `line` for matching. */
+  /** Current new-file line. `null` when the comment is outdated. */
+  line: number | null;
+  /** Original line at the time the comment was made. */
   original_line: number;
   /** First line of a multi-line comment; null for single-line. */
   start_line: number | null;
+  /** Original first line at the time the comment was made; null for single-line. */
+  original_start_line?: number | null;
+  /** Commit sha the comment was originally written against. Drives "view at <sha7>". */
+  original_commit_id: string;
+  /** Unified-diff hunk fragment GitHub stores on the comment for context. */
+  diff_hunk: string;
   created_at: string;
   html_url: string;
   side: "LEFT" | "RIGHT";
@@ -50,6 +58,14 @@ interface GhIssueComment {
   body: string;
   created_at: string;
   html_url: string;
+}
+
+export interface PrLoadResult {
+  changeSet: ChangeSet;
+  /** PR review comments that anchor to a line in the current diff. */
+  prReplies: Record<string, Reply[]>;
+  /** PR review comments that no longer anchor (outdated, or moved off the patch view). */
+  prDetached: DetachedReply[];
 }
 
 function fileHeaders(f: GhPrFile): string {
@@ -76,36 +92,55 @@ function assembleDiffText(files: GhPrFile[]): string {
     .join("\n");
 }
 
-/** Build a lookup: path → (lineNo → DiffLine) for fast comment matching. */
-function buildLineIndex(
+/**
+ * Build a per-path lookup from file-line-number to (hunkId, lineIdx). Indexed
+ * by `newNo` for context/added lines and `oldNo` for deleted lines so we can
+ * resolve both RIGHT- and LEFT-side PR comments.
+ */
+function buildPositionIndex(
   cs: ChangeSet,
-): Map<string, Map<number, DiffLine>> {
-  const index = new Map<string, Map<number, DiffLine>>();
+): Map<string, Map<number, { hunkId: string; lineIdx: number; side: "RIGHT" | "LEFT" }>> {
+  const index = new Map<
+    string,
+    Map<number, { hunkId: string; lineIdx: number; side: "RIGHT" | "LEFT" }>
+  >();
   for (const file of cs.files) {
-    const lineMap = new Map<number, DiffLine>();
+    const map = new Map<number, { hunkId: string; lineIdx: number; side: "RIGHT" | "LEFT" }>();
     for (const hunk of file.hunks) {
-      for (const line of hunk.lines) {
-        // For add/context lines, match on newNo; for del lines, match on oldNo.
-        const no = line.newNo ?? line.oldNo;
-        if (no !== undefined) {
-          lineMap.set(no, line);
+      hunk.lines.forEach((line, lineIdx) => {
+        if (line.kind === "del" && line.oldNo !== undefined) {
+          map.set(line.oldNo, { hunkId: hunk.id, lineIdx, side: "LEFT" });
+        } else if (line.newNo !== undefined) {
+          map.set(line.newNo, { hunkId: hunk.id, lineIdx, side: "RIGHT" });
         }
-      }
+      });
     }
-    index.set(file.path, lineMap);
+    index.set(file.path, map);
   }
   return index;
+}
+
+/**
+ * Parse a GitHub `diff_hunk` string (a single unified-diff hunk fragment) into
+ * `DiffLine[]` so it can ride on a DetachedReply's `anchorContext`. Reuses the
+ * shared diff parser by wrapping the fragment as a minimal valid diff.
+ */
+function parseDiffHunkLines(diffHunk: string, path: string): DiffLine[] {
+  const wrapped = `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${diffHunk}`;
+  const cs = parseDiff(wrapped, { id: "anchor", title: "anchor" });
+  const file = cs.files[0];
+  if (!file || file.hunks.length === 0) return [];
+  return file.hunks[0].lines;
 }
 
 export async function loadPr(
   coords: PrCoords,
   token: string,
-): Promise<ChangeSet> {
+): Promise<PrLoadResult> {
   const { host, owner, repo, number, apiBaseUrl } = coords;
   const opts = { token, host };
   const repoBase = `/repos/${owner}/${repo}`;
 
-  // Fan out four parallel GitHub requests.
   const [meta, files, lineComments, issueComments] = await Promise.all([
     githubFetch(apiBaseUrl, `${repoBase}/pulls/${number}`, opts).then(
       (r) => r.json as GhPrMeta,
@@ -157,46 +192,11 @@ export async function loadPr(
     lastFetchedAt: new Date().toISOString(),
   };
 
-  // Detect GitHub-level truncation: compare the files we fetched against the
-  // authoritative changed_files count from the PR metadata. If they differ,
-  // GitHub truncated the file listing before we could paginate all of them.
   if (files.length < meta.changed_files) {
     prSource.truncation = {
       kind: "files",
       reason: `Fetched ${files.length} of ${meta.changed_files} files; GitHub limits the file-list response.`,
     };
-  }
-
-  // Walk line comments and attach to matching DiffLines.
-  const lineIndex = buildLineIndex(cs);
-
-  // LEFT-side comments anchored on context lines may be silently dropped:
-  // our index keys by newNo for context lines, while LEFT-side comments
-  // reference the base-side line number. Acceptable as best-effort for v0.
-  for (const comment of lineComments) {
-    const lineMap = lineIndex.get(comment.path);
-    if (!lineMap) continue; // file not in diff
-
-    const targetLine = comment.line;
-    const diffLine = lineMap.get(targetLine);
-    if (!diffLine) continue; // line not in diff — silently drop
-
-    const prComment: PrReviewComment = {
-      id: comment.id,
-      author: comment.user.login,
-      createdAt: comment.created_at,
-      body: comment.body,
-      htmlUrl: comment.html_url,
-    };
-
-    if (comment.start_line !== null && comment.start_line !== comment.line) {
-      prComment.lineSpan = { lo: comment.start_line, hi: comment.line };
-    }
-
-    if (!diffLine.prReviewComments) {
-      diffLine.prReviewComments = [];
-    }
-    diffLine.prReviewComments.push(prComment);
   }
 
   const prConversation: PrConversationItem[] = issueComments.map((c) => ({
@@ -207,10 +207,70 @@ export async function loadPr(
     htmlUrl: c.html_url,
   }));
 
+  const positionIndex = buildPositionIndex(cs);
+
+  const prReplies: Record<string, Reply[]> = {};
+  const prDetached: DetachedReply[] = [];
+
+  for (const c of lineComments) {
+    const baseReply: Reply = {
+      id: `pr-comment:${c.id}`,
+      author: c.user.login,
+      body: c.body,
+      createdAt: c.created_at,
+      external: { source: "pr", htmlUrl: c.html_url },
+    };
+
+    const fileMap = positionIndex.get(c.path);
+    const hit = c.line !== null ? fileMap?.get(c.line) : undefined;
+
+    if (!hit) {
+      // Outdated (line === null) or anchor moved off the patch view —
+      // render as a DetachedReply so the user sees the original context.
+      const anchorContext = c.diff_hunk ? parseDiffHunkLines(c.diff_hunk, c.path) : [];
+      const detachedReply: Reply = {
+        ...baseReply,
+        anchorPath: c.path,
+        anchorLineNo: c.original_line,
+        anchorContext,
+        originType: "committed",
+        originSha: c.original_commit_id,
+      };
+      prDetached.push({
+        reply: detachedReply,
+        threadKey: `pr-detached:${c.id}`,
+      });
+      continue;
+    }
+
+    // Anchored. Single-line vs multi-line determines the reply-key namespace.
+    const isMultiLine =
+      c.start_line !== null &&
+      c.start_line !== undefined &&
+      c.start_line !== c.line;
+
+    let key: string;
+    if (isMultiLine) {
+      const startHit = fileMap?.get(c.start_line as number);
+      if (startHit && startHit.hunkId === hit.hunkId) {
+        const lo = Math.min(startHit.lineIdx, hit.lineIdx);
+        const hi = Math.max(startHit.lineIdx, hit.lineIdx);
+        key = blockCommentKey(hit.hunkId, lo, hi);
+      } else {
+        // Span crosses hunks (rare) — fall back to single-line on the end line.
+        key = userCommentKey(hit.hunkId, hit.lineIdx);
+      }
+    } else {
+      key = userCommentKey(hit.hunkId, hit.lineIdx);
+    }
+
+    if (!prReplies[key]) prReplies[key] = [];
+    prReplies[key].push(baseReply);
+  }
+
   return {
-    ...cs,
-    prSource,
-    prConversation,
+    changeSet: { ...cs, prSource, prConversation },
+    prReplies,
+    prDetached,
   };
 }
-

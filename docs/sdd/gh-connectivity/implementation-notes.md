@@ -1,6 +1,8 @@
-# Implementation Notes — gh-connectivity v0
+# Implementation Notes — gh-connectivity v0 (+ Slice 6 cleanup)
 
 Implementation followed the spec closely. A handful of small deviations and surprises worth recording for future readers and for the eventual push-back SDD.
+
+> **Slice 6 (post-v0 cleanup)** added: PR review comments now render through the same `Reply` / `DetachedReply` surface as user comments and AI-note replies (replacing the v0 line-annotation channel); HTTPS proxy support; unified URL field shared by Welcome and LoadModal via `useGithubPrLoad`. Notes specific to that slice are tagged **[Slice 6]** below.
 
 ## Deviations from spec
 
@@ -89,3 +91,45 @@ These are documented in the spec § Out of Scope and / or surfaced by reviewers 
 - **Shared `humanAgo` / `timeAgo`.** Now duplicated in `Inspector.tsx`, `AgentContextSection.tsx`, and `ReplyThread.tsx`. Cleanup target.
 - **Rate-limit visualization.** A "rate limit: 4321/5000" pill is on the spec's follow-up list.
 - **`onLoad` signature drift between Welcome and LoadModal.** `Welcome.tsx` calls `onLoad(cs, replies, source)` (3 args); `LoadModal.tsx` calls `onLoad(cs, source)` (2 args). The Welcome PR-ingest fix matched the existing Welcome shape correctly, but the inconsistency is real and worth aligning when next touching either file.
+
+## Slice 6 deviations + decisions
+
+### `useGithubPrLoad` hook (not `useLoadSurface`)
+
+- **Spec said:** extract a single `useLoadSurface()` hook consolidating *every* load handler — URL, file drop, paste, worktree, GitHub PR — used by Welcome and LoadModal.
+- **Implementation does:** extracted a narrower `useGithubPrLoad()` hook that captures only the GitHub PR + token-modal flow (the most-duplicated piece, formerly in three places). The URL / file / paste handlers stay per-component because their UI presentation diverges enough that a shared hook would force-fit two different layouts. Diff-URL submission and PR-URL submission now share one input field with server-side detection (`isGithubPrUrl`).
+- **Reason:** AGENTS.md "no premature abstraction" — the GH-PR + token-modal flow had genuine 3× duplication (Welcome / LoadModal / ReviewWorkspace's refresh path) and was the source of two slice-3 bugs. The URL/file/paste handlers had only 2× duplication (Welcome / LoadModal), and Welcome's flow weaves through its hero / drop-zone chrome in ways that don't survive a hook extraction cleanly. Net: slice 6f delivers one hook + one URL field, which is the user-visible win. The "fully unify Welcome and LoadModal" framing is logged as a follow-up.
+- **Impact:** the spec's `web/src/loadSurface.ts` becomes `web/src/useGithubPrLoad.ts`. Spec table updated implicitly by this note.
+
+### ReviewWorkspace's PR-refresh path stays separate
+
+- **Spec said:** "Replace `ReviewWorkspace.tsx` PR-refresh: same hook."
+- **Implementation does:** Welcome and LoadModal use `useGithubPrLoad()`. The refresh path in `ReviewWorkspace.tsx` (topbar Refresh button, after a PR is already loaded) keeps its own `prRefreshBusy` / `prAuthRejected` / `prRefreshTokenModal` state and its own copy of the keychain rehydrate logic.
+- **Reason:** the refresh flow has genuinely different UX from the load flow — auth rejection surfaces as a **dismissable inline banner** above the diff (with a "re-enter token" link) rather than the modal that the load flow opens immediately. Folding it into the same hook would either require `useGithubPrLoad` to grow an `onAuthRejected` callback (and lose the encapsulation it just gained) or force the refresh path to switch to the same modal-first UX, which would be a regression.
+- **Impact:** ~50 lines of duplicated keychain-rehydrate boilerplate remain in `ReviewWorkspace.tsx`. A future round can collapse it once the auth-rejected banner UX is generalized into the hook.
+
+### `undici` added to `server/package.json`
+
+- **Spec said:** wire `undici.ProxyAgent` for outbound `fetch()` calls. The plan briefed the subagent that `undici` is "a Node built-in" and not to install it.
+- **Implementation does:** added `undici@^7.25.0` as a runtime dep on `server/package.json`. Node 20 *does* bundle undici internally for its built-in `fetch`, but it does not expose `ProxyAgent` via `node:undici` or any other public path; `import { ProxyAgent } from "undici"` does require the npm package.
+- **Reason:** the alternatives — relying on internal Node bindings, shelling out, or rolling our own proxy `Dispatcher` — are all worse than a 200-line npm dep that's already in node_modules transitively (most HTTP libs depend on undici).
+- **Impact:** one new direct dep on the server. No bundle-size impact (server runs Node, not a bundle).
+
+### PR comment `(spans X–Y)` hint dropped
+
+- **Spec said (v0):** multi-line PR comments render under the highest-numbered line with a "(spans X-Y)" hint.
+- **Implementation does (Slice 6):** multi-line PR comments use `blockCommentKey(hunkId, lo, hi)` and render through the existing block-comment thread. The reply-thread surface doesn't surface a "(spans X-Y)" hint because the block-comment key already encodes the range, and the existing `block:` thread UI shows the line range visually via the gutter selection rendering.
+- **Reason:** the v0 hint existed because `prReviewComments` lived on a single `DiffLine` and lost its range. With `blockCommentKey`, the range is the key itself; no hint needed.
+- **Impact:** if users find the line range non-obvious in the new rendering, we can render a small `(L<lo>–L<hi>)` next to the author name in `ReplyThread`. Logged as a follow-up.
+
+### LEFT-side / context-line dual-keying
+
+- **Spec said:** dual-key the line index — `newNo` for RIGHT, `oldNo` for LEFT — so LEFT-side comments anchored on context lines stop being silently dropped.
+- **Implementation does:** the new `buildPositionIndex` keys deleted lines by `oldNo` and everything else by `newNo`. This is a strict improvement over v0 (which only keyed by `newNo`), but it does **not** yet branch on `comment.side` — a LEFT-side comment on a context line is still keyed on its `newNo` field rather than the file's pre-change line number. Most LEFT-side comments are on `-` lines and now match correctly; LEFT-side comments on context lines may still drop or anchor incorrectly.
+- **Reason:** the user dropped a previous attempt at LEFT-side dual-keying ("not sure it was correct"). Slice 6 addresses the more common case (deleted lines) without re-litigating the context-line edge case. If real-world testing surfaces drops, the fix is well-localized in `buildPositionIndex`.
+- **Impact:** a comment dropped from the matched bucket falls into the detached bucket via the existing fallback, so users see the comment in the Sidebar's Detached section with its original-line context — degraded but not invisible.
+
+### Test count after Slice 6
+
+- Server: 238 passing (was 229 pre-Slice-6; +9 net for proxy + dispatcher coverage and the reshaped pr-load assertions).
+- Web: 368 passing (was 367 pre-Slice-6; +1 net for the persist-filter test pair, after deletions for the now-irrelevant per-line-comment Inspector tests).

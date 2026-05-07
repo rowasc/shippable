@@ -2,12 +2,10 @@ import "./Inspector.css";
 import type {
   AgentContextSlice,
   AgentSessionRef,
-  ChangeSet,
   Cursor,
   DeliveredComment,
   LineSelection,
   PrConversationItem,
-  PrReviewComment,
   PrSource,
   Reply,
   WorktreeSource,
@@ -144,10 +142,17 @@ interface Props {
    */
   prSource?: PrSource | null;
   /**
-   * Dispatch handler for applying the PR overlay. Receives the PR ChangeSet
-   * loaded from GitHub so the parent can dispatch MERGE_PR_OVERLAY.
+   * Dispatch handler for applying the PR overlay. Receives the metadata
+   * (prSource, prConversation) and the bucketed PR-sourced replies so the
+   * parent can dispatch MERGE_PR_OVERLAY + MERGE_PR_REPLIES.
    */
-  onMergePrOverlay?: (changesetId: string, prCs: ChangeSet) => void;
+  onMergePrOverlay?: (
+    changesetId: string,
+    prSource: PrSource,
+    prConversation: PrConversationItem[],
+    prReplies: Record<string, Reply[]>,
+    prDetached: import("../types").DetachedReply[],
+  ) => void;
   /**
    * Called when the pill click fails with a GitHub auth error. The parent
    * opens the token modal for the given host+reason and re-runs the retry
@@ -163,11 +168,6 @@ interface Props {
    * target id for MERGE_PR_OVERLAY dispatch.
    */
   changesetId?: string;
-  /**
-   * Line-anchored PR review comments for the current cursor line. Populated
-   * when the changeset was loaded from a GitHub PR; absent/empty otherwise.
-   */
-  prReviewComments?: PrReviewComment[];
   /**
    * Issue-level PR conversation items. Populated when the changeset was loaded
    * from a GitHub PR; absent/empty otherwise.
@@ -190,7 +190,6 @@ export function Inspector({
   onRetryReply,
   onVerifyAiNote,
   agentContext,
-  prReviewComments,
   prConversation,
   worktreeSource,
   prSource,
@@ -259,9 +258,15 @@ export function Inspector({
     setPillBusy(true);
     setPillError(null);
     try {
-      const prCs = await loadGithubPr(pillMatch.htmlUrl);
+      const result = await loadGithubPr(pillMatch.htmlUrl);
       setPillBusy(false);
-      onMergePrOverlay(changesetId, prCs);
+      onMergePrOverlay(
+        changesetId,
+        result.changeSet.prSource!,
+        result.changeSet.prConversation ?? [],
+        result.prReplies,
+        result.prDetached,
+      );
     } catch (err) {
       setPillBusy(false);
       if (err instanceof GithubFetchError) {
@@ -393,10 +398,6 @@ export function Inspector({
           </ul>
         )}
       </section>
-
-      {prReviewComments && prReviewComments.length > 0 && (
-        <PrReviewCommentsSection comments={prReviewComments} />
-      )}
 
       {vm.aiSummary !== null && vm.aiSummaryReplyKey !== null && (
         <HunkSummarySection
@@ -870,48 +871,6 @@ function TeammateSection({
           deliveredById={deliveredById}
         />
       </div>
-    </section>
-  );
-}
-
-// ── PR review comments (line-anchored, read-only) ─────────────────────────────
-
-function PrReviewCommentsSection({ comments }: { comments: PrReviewComment[] }) {
-  return (
-    <section className="inspector__sec">
-      <div className="inspector__sec-h">
-        PR review comments
-        <span className="inspector__sec-count">{comments.length}</span>
-      </div>
-      <ul className="notes">
-        {comments.map((c) => (
-          <li key={c.id} className="ainote ainote--info">
-            <div className="ainote__head">
-              <span className="ainote__sev">@{c.author}</span>
-              <span className="ainote__summary ainote__summary--muted">
-                {c.lineSpan
-                  ? `(spans L${c.lineSpan.lo}–${c.lineSpan.hi}) `
-                  : ""}
-                <time dateTime={c.createdAt} title={c.createdAt}>
-                  {humanAgo(c.createdAt)}
-                </time>
-              </span>
-              <span className="ainote__actions">
-                <a
-                  href={c.htmlUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ainote__ack"
-                  title="Open on GitHub"
-                >
-                  ↗
-                </a>
-              </span>
-            </div>
-            <div className="ainote__detail">{c.body}</div>
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }

@@ -191,6 +191,8 @@ The web app never holds the token in `localStorage` or across page reloads — i
 
 **First use:** open LoadModal → "From a GitHub PR", paste a PR URL, and submit. Shippable will prompt for the token if one isn't already stored for that host. Enter it once; the desktop app writes it to Keychain automatically.
 
+**Behind a corporate proxy?** Set `HTTPS_PROXY` (or `https_proxy`) before starting the server and Shippable will route GitHub API calls through it. `NO_PROXY` is honored as a comma-separated list of hostnames (exact or `.suffix` match).
+
 Remove a stored token:
 
 ```

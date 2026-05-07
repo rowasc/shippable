@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { Welcome } from "./Welcome";
 
-afterEach(() => {
+beforeEach(() => {
   cleanup();
   isTauriMock.mockReturnValue(false);
   keychainGetMock.mockResolvedValue(null);
@@ -15,31 +15,17 @@ const { loadGithubPrMock, setGithubTokenMock } = vi.hoisted(() => ({
   setGithubTokenMock: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("../githubPrClient", () => ({
-  loadGithubPr: loadGithubPrMock,
-  setGithubToken: setGithubTokenMock,
-  GithubFetchError: class GithubFetchError extends Error {
-    discriminator: string;
-    host?: string;
-    hint?: string;
-    constructor(discriminator: string, message: string, host?: string, hint?: string) {
-      super(message);
-      this.name = "GithubFetchError";
-      this.discriminator = discriminator;
-      this.host = host;
-      this.hint = hint;
-    }
-  },
-  GH_ERROR_MESSAGES: {
-    github_pr_not_found: "PR not found.",
-    github_upstream: "GitHub returned an error. Try again.",
-    invalid_pr_url: "That doesn't look like a valid PR URL.",
-    unknown: "Something went wrong loading the PR.",
-  },
-}));
+vi.mock("../githubPrClient", async () => {
+  const actual = await vi.importActual<typeof import("../githubPrClient")>("../githubPrClient");
+  return {
+    ...actual,
+    loadGithubPr: loadGithubPrMock,
+    setGithubToken: setGithubTokenMock,
+  };
+});
 
 const { isTauriMock, keychainGetMock } = vi.hoisted(() => ({
-  isTauriMock: vi.fn(() => false),
+  isTauriMock: vi.fn().mockReturnValue(false),
   keychainGetMock: vi.fn<() => Promise<string | null>>().mockResolvedValue(null),
 }));
 
@@ -49,35 +35,35 @@ vi.mock("../keychain", () => ({
   keychainSet: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Disable worktree / server-backed sections for cleaner tests.
 vi.mock("../useWorktreeLoader", () => ({
   useWorktreeLoader: () => ({
     serverAvailable: false,
     wtDir: "",
-    setWtDir: vi.fn(),
-    wtBusy: false,
+    setWtDir: () => {},
+    showManualPath: false,
+    setShowManualPath: () => {},
+    pickDirectory: () => {},
     wtPickerBusy: false,
+    scanWorktrees: () => {},
+    wtBusy: false,
     wtList: null,
     wtLoadingPath: null,
+    loadFromWorktree: () => {},
     err: null,
-    showManualPath: false,
-    setShowManualPath: vi.fn(),
-    pickDirectory: vi.fn(),
-    scanWorktrees: vi.fn(),
-    loadFromWorktree: vi.fn(),
   }),
 }));
 
-function renderWelcome(onLoad = vi.fn(), onRecentsChange = vi.fn()) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderWelcome(onLoad: any = vi.fn()) {
   return render(
-    <Welcome recents={[]} onLoad={onLoad} onRecentsChange={onRecentsChange} />,
+    <Welcome recents={[]} onLoad={onLoad} onRecentsChange={() => {}} />,
   );
 }
 
-describe("Welcome — GitHub PR section", () => {
-  it("renders the 'From a GitHub PR' section", () => {
+describe("Welcome — unified URL field (PR + diff URL)", () => {
+  it("renders the 'From a URL' section with a single URL field", () => {
     renderWelcome();
-    expect(screen.getByText(/from a github pr/i)).toBeTruthy();
+    expect(screen.getByText(/from a url/i)).toBeTruthy();
     expect(
       screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i),
     ).toBeTruthy();
@@ -89,7 +75,11 @@ describe("Welcome — GitHub PR section", () => {
       title: "Fix bug",
       files: [],
     };
-    loadGithubPrMock.mockResolvedValue(fakeCs);
+    loadGithubPrMock.mockResolvedValue({
+      changeSet: fakeCs,
+      prReplies: {},
+      prDetached: [],
+    });
     const onLoad = vi.fn();
 
     renderWelcome(onLoad);
@@ -101,7 +91,7 @@ describe("Welcome — GitHub PR section", () => {
       target: { value: "https://github.com/owner/repo/pull/1" },
     });
 
-    const button = screen.getByRole("button", { name: /load pr/i });
+    const button = screen.getByRole("button", { name: /^load$/i });
     fireEvent.click(button);
 
     await waitFor(() =>
@@ -114,6 +104,7 @@ describe("Welcome — GitHub PR section", () => {
         fakeCs,
         {},
         expect.objectContaining({ kind: "pr", prUrl: "https://github.com/owner/repo/pull/1" }),
+        { prReplies: {}, prDetached: [] },
       ),
     );
   });
@@ -132,7 +123,7 @@ describe("Welcome — GitHub PR section", () => {
     fireEvent.change(input, {
       target: { value: "https://github.com/owner/repo/pull/1" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText(/needs a GitHub Personal Access Token/i)).toBeTruthy(),
@@ -145,7 +136,11 @@ describe("Welcome — GitHub PR section", () => {
       title: "My PR",
       files: [{ path: "foo.ts", hunks: [] }],
     };
-    loadGithubPrMock.mockResolvedValue(fakeCs);
+    loadGithubPrMock.mockResolvedValue({
+      changeSet: fakeCs,
+      prReplies: {},
+      prDetached: [],
+    });
     const onLoad = vi.fn();
 
     renderWelcome(onLoad);
@@ -154,13 +149,14 @@ describe("Welcome — GitHub PR section", () => {
       screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i),
       { target: { value: "https://github.com/owner/repo/pull/42" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         {},
         { kind: "pr", prUrl: "https://github.com/owner/repo/pull/42" },
+        { prReplies: {}, prDetached: [] },
       ),
     );
   });
@@ -172,7 +168,11 @@ describe("Welcome — GitHub PR section", () => {
       .mockRejectedValueOnce(
         new GithubFetchError("github_token_required", "github_token_required", "github.com"),
       )
-      .mockResolvedValueOnce(fakeCs);
+      .mockResolvedValueOnce({
+        changeSet: fakeCs,
+        prReplies: {},
+        prDetached: [],
+      });
     isTauriMock.mockReturnValue(true);
     keychainGetMock.mockResolvedValue("ghp_cached_token");
 
@@ -181,13 +181,14 @@ describe("Welcome — GitHub PR section", () => {
 
     const input = screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i);
     fireEvent.change(input, { target: { value: "https://github.com/owner/repo/pull/1" } });
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         {},
         expect.objectContaining({ kind: "pr" }),
+        { prReplies: {}, prDetached: [] },
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();
@@ -206,7 +207,7 @@ describe("Welcome — GitHub PR section", () => {
       screen.getByPlaceholderText(/github\.com\/owner\/repo\/pull\/123$/i),
       { target: { value: "https://github.com/owner/repo/pull/9999" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: /load pr/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
       expect(screen.getByText("PR not found.")).toBeTruthy(),

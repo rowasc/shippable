@@ -71,6 +71,15 @@
 .reply__time {
   color: var(--fg-mute);
 }
+.reply__external {
+  margin-left: 6px;
+  font-size: 10.5px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.reply__external:hover {
+  text-decoration: underline;
+}
 .reply__pip {
   margin-left: 6px;
   font-size: 10.5px;
