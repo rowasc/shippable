@@ -111,11 +111,11 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
 
   return (
     <div className="welcome">
-      <div className="welcome__top">
+      <header className="welcome__top">
         <span className="welcome__brand">shippable</span>
         <span className="welcome__sep">│</span>
-        <span className="welcome__sub">prototype — review a diff to get started</span>
-      </div>
+        <span className="welcome__sub">an AI-assisted code review prototype</span>
+      </header>
 
       <div className="welcome__body">
         {recents.length > 0 && (
@@ -335,7 +335,9 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
 
         {STUBS.length > 0 && (
           <section className="welcome__samples">
-            <span>Try a sample:</span>
+            <span className="welcome__samples-label">
+              Or explore with a built-in sample:
+            </span>
             {STUBS.map((s) => (
               <button
                 key={s.code}
