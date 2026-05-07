@@ -58,7 +58,7 @@ Click-through definition at a minimum
 
 ## Coming right after
 
-**GitHub ingest, prototype.** Paste a `.diff` URL or a PR URL and it loads. Read-only at this stage — we don't post anything back. Cheapest unlock we have for reviewing work that isn't on your laptop.
+**GitHub ingest, prototype — v0 shipped.** Paste a PR URL and it loads: diff, metadata, line-anchored review comments, PR conversation. Works with github.com and GHE; per-host PAT; read-only on this pass. See `docs/sdd/gh-connectivity/spec.md`. Follow-ups: push-back to GitHub (posting review comments), expand-context for remote PR files, worktree-backed clone ingest.
 
 **Coverage markers.** A section is "covered" when both you and an AI have looked at it. We already track each separately; this is mostly UI plus the small bit of state that joins them.
 

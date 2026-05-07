@@ -12,6 +12,7 @@ Grouped by feature. Full request/response shapes live in `web/src/types.ts` and 
 - **Prompt library.** `GET /api/library/prompts`, `POST /api/library/refresh` (admin-token-gated).
 - **Worktree ingest.** `POST /api/worktrees/{list, changeset, graph, sessions, agent-context, pick-directory}`, `GET /api/worktrees/mcp-status`. POST-with-body is deliberate — paths in URLs cross-platform are a mess.
 - **Agent comment queue.** `POST /api/agent/{enqueue, pull, unenqueue}`, `GET /api/agent/delivered?path=…`. Drives the MCP server's `shippable_check_review_comments` tool.
+- **GitHub PR ingest.** `POST /api/github/auth/{set, clear, has}` — per-host PAT store (server-memory, one entry per host). `POST /api/github/pr/load` — accepts a PR URL, fetches diff + metadata + review comments from GitHub (or GHE), returns a complete `ChangeSet` with `prSource` provenance. `POST /api/github/pr/branch-lookup` — resolves a worktree's current branch to an open upstream PR, enabling the worktree↔PR overlay pill. All five endpoints plug into the same `classifyRequestOrigin` + opaque-origin denial path as every other endpoint. Design rationale: `docs/sdd/gh-connectivity/spec.md`.
 
 ## Properties worth knowing
 

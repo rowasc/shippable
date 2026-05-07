@@ -173,6 +173,30 @@ Remove a saved key with:
 security delete-generic-password -s shippable -a ANTHROPIC_API_KEY
 ```
 
+### GitHub Personal Access Token (for PR ingest)
+
+To load a PR by URL, Shippable needs a PAT for each GitHub host you review from.
+
+**Create a token:**
+- github.com: `https://github.com/settings/tokens`
+- GitHub Enterprise: `https://<your-host>/settings/tokens`
+
+**Required scopes:** `repo` for private repositories. Public PRs work with any valid token — Shippable uses eager-auth (token required before the first API call for a host, even for public repos).
+
+**How it's stored:**
+- **Desktop app (Tauri):** macOS Keychain, one entry per host — `service=shippable, account=GITHUB_TOKEN:<host>` (e.g. `GITHUB_TOKEN:github.com`). Persists across restarts.
+- **Browser dev mode:** server process memory only. Re-enter the token whenever the server restarts.
+
+The web app never holds the token in `localStorage` or across page reloads — it pushes the token to the local server once, and the server uses it for all GitHub API calls in that session.
+
+**First use:** open LoadModal → "From a GitHub PR", paste a PR URL, and submit. Shippable will prompt for the token if one isn't already stored for that host. Enter it once; the desktop app writes it to Keychain automatically.
+
+Remove a stored token:
+
+```
+security delete-generic-password -s shippable -a GITHUB_TOKEN:github.com
+```
+
 ### Iterating
 
 For quick iteration on the Rust shell or the frontend, `npm run desktop:dev` runs the React app via Vite in a native window with hot reload. The pre-dev hook in `src-tauri/tauri.conf.json` compiles the bundled sidecar first, so you don't need to remember a separate `bun run build:sidecar` step.

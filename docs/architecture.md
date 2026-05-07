@@ -31,6 +31,16 @@ macOS Keychain at `service=shippable, account=ANTHROPIC_API_KEY`. Same entry ser
 - `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, acked notes, replies, expand levels, line selection.
 - Persistence: localStorage.
 
+## Ingest paths
+
+A `ChangeSet` can enter the app five ways:
+
+1. **URL** — paste a `.diff` URL; the server fetches and parses it.
+2. **File upload** — drag a `.diff` or `.patch` into LoadModal; parsed client-side.
+3. **Paste** — raw unified diff text; parsed client-side.
+4. **Worktree** — `POST /api/worktrees/changeset` diffs HEAD against the working tree on disk.
+5. **GitHub PR by URL** — paste a PR URL (`https://<host>/<owner>/<repo>/pull/<n>`); the server authenticates with a per-host PAT, fetches diff + metadata + review comments from the GitHub API, and assembles a `ChangeSet` with `prSource` provenance. Worktrees whose branch resolves to an open upstream PR surface an opt-in overlay pill that merges `prSource` and PR comments into the existing local-diff `ChangeSet` without displacing `worktreeSource` — both fields can be set simultaneously. See `docs/sdd/gh-connectivity/spec.md` for the full design.
+
 ## In-browser code runner
 
 `web/src/runner/` runs JS/TS and PHP hunks in web workers. AI notes can hand a snippet to the runner for one-click verify.
