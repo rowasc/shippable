@@ -171,6 +171,23 @@ Same as the parent worktrees feature — only modes that already support worktre
 
 - **Merges / detached HEAD / interactive rebases.** A worktree being rewritten under us will produce wild dirty hashes and HEAD jumps. The model should handle it — comments either content-match into the new state or detach. Worth confirming once we test against a real agent loop. No action needed in MVP.
 
+## Findings (slices a–e, shipped)
+
+What landed, where the implementation diverged from the plan's leans, and the small follow-ups it left behind. Add to this section as the feature evolves.
+
+- **Slice ordering reversed.** Slice (c) — content-anchored comments — landed before slice (a) — polling. The (c) branch added a debug **↻ reload** button and a manual **dirty** toggle to the review topbar so the anchoring pass could be exercised without polling. Both are still in `ReviewWorkspace.tsx` with `TODO(slice-a): remove…` markers; cleanup never happened when (a) shipped. Worth removing in a small follow-up.
+- **Polling cadence:** 3s, as the lean predicted. No reports of request volume being objectionable.
+- **Edit debounce:** none, as the lean predicted. The user-gated banner click is the debounce.
+- **Anchor windows:** 5 lines for the hash, 10 lines for the display snippet — both as the leans predicted.
+- **Hash function:** FNV-1a-32 (documented in `docs/features/anchored-comments.md`). Non-cryptographic — we only need a deterministic fingerprint of a short text window, not collision resistance.
+- **Cursor preservation:** "same file if available, else file 0," as the lean predicted.
+- **Worktree identity for the toggle key:** absolute path, as the lean predicted. Will need to revisit when slice (c) of the parent `worktrees.md` plan lands a real per-worktree identity scheme.
+- **`originSha` for dirty comments:** stored as `dirty:<dirtyHash>`, the same synthesized id used for the changeset itself. The "view at" affordance is suppressed for dirty-origin entries — there's no commit to fetch back.
+- **Persisted state version:** snapshot v2. Replies authored before this feature landed have no anchor fields and fall back to in-place hashing on reload. Acceptable.
+- **Slice (f) — push updates.** Still deferred. Polling at 3s has been adequate; we'll revisit if request volume or perceived latency become user-visible. Not removed from the plan in case the situation changes.
+
+Per-feature surfaces are documented at [`docs/features/worktree-live-reload.md`](../features/worktree-live-reload.md) and [`docs/features/anchored-comments.md`](../features/anchored-comments.md).
+
 ## What's deliberately out of scope (for now)
 
 - Cross-tab coordination (multiple Shippable tabs on the same worktree). One tab polls, the others don't.
