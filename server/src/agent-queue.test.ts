@@ -8,6 +8,8 @@ import {
   enqueue,
   pullAndAck,
   listDelivered,
+  postReply,
+  listReplies,
   unenqueue,
   formatPayload,
   resetForTests,
@@ -56,24 +58,12 @@ describe("enqueue / pullAndAck round trip", () => {
 });
 
 describe("sort order", () => {
-  it("sorts by file path asc, then line lower-bound asc; freeform last in send order", () => {
+  it("sorts by file path asc, then line lower-bound asc", () => {
     enqueue(WT, [
       { ...makeBase(), file: "src/b.ts", lines: "10" },
       { ...makeBase(), file: "src/a.ts", lines: "100" },
       { ...makeBase(), file: "src/a.ts", lines: "72-79" },
       { ...makeBase(), file: "src/a.ts", lines: "20" },
-    ]);
-    // small delay simulation: enqueue a freeform first then a second freeform
-    enqueue(WT, [
-      { kind: "freeform", body: "first free", commitSha: "x", supersedes: null },
-    ]);
-    enqueue(WT, [
-      {
-        kind: "freeform",
-        body: "second free",
-        commitSha: "x",
-        supersedes: null,
-      },
     ]);
 
     const pulled = pullAndAck(WT);
@@ -92,11 +82,7 @@ describe("sort order", () => {
       "src/a.ts:72-79",
       "src/a.ts:100",
       "src/b.ts:10",
-      "<free>:-",
-      "<free>:-",
     ]);
-    expect(order[4].body).toBe("first free");
-    expect(order[5].body).toBe("second free");
   });
 
   it("parses '72-79' to lower bound 72 (less than 100)", () => {
@@ -167,6 +153,55 @@ describe("unenqueue", () => {
 
   it("is a no-op for an unknown id", () => {
     expect(unenqueue(WT, "no-such-id")).toBe(false);
+  });
+});
+
+describe("postReply / listReplies", () => {
+  it("postReply assigns id + postedAt and appends to the worktree's reply list", () => {
+    const id = postReply(WT, {
+      commentId: "c1",
+      body: "fixed it",
+      outcome: "addressed",
+    });
+    expect(id).toBeTruthy();
+    const replies = listReplies(WT);
+    expect(replies).toHaveLength(1);
+    expect(replies[0].id).toBe(id);
+    expect(replies[0].commentId).toBe("c1");
+    expect(replies[0].body).toBe("fixed it");
+    expect(replies[0].outcome).toBe("addressed");
+    expect(replies[0].postedAt).toBeTruthy();
+  });
+
+  it("appends rather than overwrites repeated replies to the same commentId", () => {
+    postReply(WT, { commentId: "c1", body: "first", outcome: "noted" });
+    postReply(WT, { commentId: "c1", body: "second", outcome: "addressed" });
+    const replies = listReplies(WT);
+    expect(replies).toHaveLength(2);
+    expect(replies.map((r) => r.body)).toEqual(["first", "second"]);
+  });
+
+  it("returns entries sorted by postedAt ascending", async () => {
+    postReply(WT, { commentId: "c1", body: "a", outcome: "noted" });
+    // Force a measurable timestamp gap so the ascending order is observable
+    // even on machines where two consecutive Date.now() calls collapse.
+    await new Promise((r) => setTimeout(r, 5));
+    postReply(WT, { commentId: "c2", body: "b", outcome: "noted" });
+    const replies = listReplies(WT);
+    expect(replies.map((r) => r.body)).toEqual(["a", "b"]);
+    expect(
+      replies[0].postedAt.localeCompare(replies[1].postedAt),
+    ).toBeLessThanOrEqual(0);
+  });
+
+  it("listReplies returns [] for an unknown worktree", () => {
+    expect(listReplies("/tmp/no-such-worktree")).toEqual([]);
+  });
+
+  it("resetForTests clears replies", () => {
+    postReply(WT, { commentId: "c1", body: "x", outcome: "addressed" });
+    resetForTests();
+    expect(listReplies(WT)).toEqual([]);
   });
 });
 
@@ -268,21 +303,6 @@ describe("formatPayload", () => {
     expect(out).toContain(`file="has&quot;quote&amp;amp.ts"`);
   });
 
-  it("omits file/lines for freeform comments", () => {
-    const c: Comment = {
-      id: "1",
-      kind: "freeform",
-      body: "free",
-      commitSha: "sha",
-      supersedes: null,
-      enqueuedAt: "2025-01-01T00:00:00Z",
-    };
-    const out = formatPayload([c], "sha");
-    expect(out).not.toContain("file=");
-    expect(out).not.toContain("lines=");
-    expect(out).toContain('kind="freeform"');
-  });
-
   it("omits supersedes when null and includes it when set", () => {
     const a: Comment = {
       id: "1",
@@ -327,5 +347,26 @@ describe("formatPayload", () => {
       /^<reviewer-feedback from="shippable" commit="deadbeef">/,
     );
     expect(out).toMatch(/<\/reviewer-feedback>$/);
+  });
+
+  it("emits an id attribute on each <comment> so the agent can post replies", () => {
+    // The agent-reply flow needs the comment id surfaced in the envelope —
+    // pull-and-ack drains the queue, so this is the agent's only chance to
+    // capture the id. Regression test for an early bug where the id was
+    // server-internal only.
+    const c: Comment = {
+      id: "comment-id-abc-123",
+      kind: "block",
+      file: "a.ts",
+      lines: "1",
+      body: "x",
+      commitSha: "sha",
+      supersedes: null,
+      enqueuedAt: "2025-01-01T00:00:00Z",
+    };
+    const out = formatPayload([c], "sha");
+    expect(out).toContain('id="comment-id-abc-123"');
+    // id is the first attribute so the agent reads it before the body.
+    expect(out).toMatch(/<comment id="comment-id-abc-123" file=/);
   });
 });

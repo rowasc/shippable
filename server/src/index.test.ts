@@ -279,6 +279,123 @@ describe("GET /api/worktrees/mcp-status (slice 5)", () => {
   });
 });
 
+describe("POST /api/agent/replies", () => {
+  it("rejects an invalid JSON body", async () => {
+    const res = await fetch(`${baseUrl}/api/agent/replies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects when worktreePath is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      commentId: "c1",
+      body: "x",
+      outcome: "addressed",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects when worktreePath is not a git dir", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath: "/tmp/this-does-not-exist-xyz-456",
+      commentId: "c1",
+      body: "x",
+      outcome: "addressed",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects an invalid outcome", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: "c1",
+      body: "x",
+      outcome: "made-up",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects an empty body", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: "c1",
+      body: "",
+      outcome: "addressed",
+    });
+    expect(r.status).toBe(400);
+  });
+
+  it("returns { id } on success and persists via GET", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: "c1",
+      body: "fixed it",
+      outcome: "addressed",
+    });
+    expect(r.status).toBe(200);
+    expect(typeof r.body.id).toBe("string");
+    expect(r.body.id.length).toBeGreaterThan(0);
+
+    const list = await getJson(
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+    );
+    expect(list.status).toBe(200);
+    expect(list.body.replies).toHaveLength(1);
+    expect(list.body.replies[0].id).toBe(r.body.id);
+    expect(list.body.replies[0].outcome).toBe("addressed");
+    expect(list.body.replies[0].commentId).toBe("c1");
+    expect(list.body.replies[0].body).toBe("fixed it");
+  });
+
+  it("appends multiple replies to the same commentId", async () => {
+    await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: "c1",
+      body: "first",
+      outcome: "noted",
+    });
+    await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: "c1",
+      body: "second",
+      outcome: "addressed",
+    });
+    const list = await getJson(
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+    );
+    expect(list.body.replies).toHaveLength(2);
+    expect(list.body.replies.map((r: { body: string }) => r.body)).toEqual([
+      "first",
+      "second",
+    ]);
+  });
+});
+
+describe("GET /api/agent/replies", () => {
+  it("rejects requests without ?worktreePath=", async () => {
+    const r = await getJson(`${baseUrl}/api/agent/replies`);
+    expect(r.status).toBe(400);
+  });
+
+  it("rejects when worktreePath is not a git dir", async () => {
+    const r = await getJson(
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent("/tmp/nope-xyz")}`,
+    );
+    expect(r.status).toBe(400);
+  });
+
+  it("returns { replies: [] } for a worktree with none", async () => {
+    const r = await getJson(
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+    );
+    expect(r.status).toBe(200);
+    expect(r.body.replies).toEqual([]);
+  });
+});
+
 describe("POST /api/agent/unenqueue", () => {
   it("drops a pending comment", async () => {
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {

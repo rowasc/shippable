@@ -102,6 +102,16 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/agent/unenqueue") {
       return handleAgentUnenqueue(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/agent/replies") {
+      return handleAgentPostReply(req, res, origin);
+    }
+    if (
+      req.method === "GET" &&
+      req.url &&
+      req.url.startsWith("/api/agent/replies")
+    ) {
+      return handleAgentListReplies(req, res, origin);
+    }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -596,8 +606,16 @@ const COMMENT_KINDS: readonly CommentKind[] = [
   "reply-to-ai-note",
   "reply-to-teammate",
   "reply-to-hunk-summary",
-  "freeform",
 ];
+
+const OUTCOMES: readonly agentQueue.Outcome[] = ["addressed", "declined", "noted"];
+
+function isOutcome(value: unknown): value is agentQueue.Outcome {
+  return (
+    typeof value === "string" &&
+    OUTCOMES.includes(value as agentQueue.Outcome)
+  );
+}
 
 function isCommentKind(value: unknown): value is CommentKind {
   return (
@@ -669,8 +687,18 @@ async function handleAgentEnqueue(
     res.end(JSON.stringify({ error: message }));
     return;
   }
+  if (
+    typeof commentInput.file !== "string" ||
+    commentInput.file.length === 0
+  ) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "comment.file must be a non-empty string" }));
+    return;
+  }
   const comment: Omit<Comment, "id" | "enqueuedAt"> = {
     kind: commentInput.kind,
+    file: commentInput.file,
     body: commentInput.body,
     commitSha,
     supersedes:
@@ -678,9 +706,6 @@ async function handleAgentEnqueue(
         ? commentInput.supersedes
         : null,
   };
-  if (typeof commentInput.file === "string" && commentInput.file.length > 0) {
-    comment.file = commentInput.file;
-  }
   if (typeof commentInput.lines === "string" && commentInput.lines.length > 0) {
     comment.lines = commentInput.lines;
   }
@@ -765,6 +790,100 @@ async function handleAgentDelivered(
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ delivered }));
+}
+
+async function handleAgentPostReply(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: {
+    worktreePath?: unknown;
+    commentId?: unknown;
+    body?: unknown;
+    outcome?: unknown;
+    agentLabel?: unknown;
+  };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath =
+    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
+  const commentId =
+    typeof parsed.commentId === "string" ? parsed.commentId : "";
+  const replyBody = typeof parsed.body === "string" ? parsed.body : "";
+  if (!wtPath || !commentId || replyBody.length === 0) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "expected { worktreePath: string, commentId: string, body: string, outcome: 'addressed' | 'declined' | 'noted' }",
+      }),
+    );
+    return;
+  }
+  if (!isOutcome(parsed.outcome)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid outcome" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const id = agentQueue.postReply(wtPath, {
+    commentId,
+    body: replyBody,
+    outcome: parsed.outcome,
+    agentLabel:
+      typeof parsed.agentLabel === "string" && parsed.agentLabel.length > 0
+        ? parsed.agentLabel
+        : undefined,
+  });
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ id }));
+}
+
+async function handleAgentListReplies(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const url = new URL(req.url ?? "", "http://localhost");
+  const wtPath = url.searchParams.get("worktreePath") ?? "";
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected ?worktreePath=<worktreePath>" }));
+    return;
+  }
+  try {
+    await assertGitDir(wtPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  const replies = agentQueue.listReplies(wtPath);
+  writeCorsHeaders(res, origin);
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ replies }));
 }
 
 async function handleAgentUnenqueue(

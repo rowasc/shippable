@@ -8,18 +8,14 @@ export type CommentKind =
   | "block"
   | "reply-to-ai-note"
   | "reply-to-teammate"
-  | "reply-to-hunk-summary"
-  | "freeform";
+  | "reply-to-hunk-summary";
 
 export interface Comment {
   id: string;
   kind: CommentKind;
-  /** Repo-relative path. Omitted (undefined) for `freeform`. */
-  file?: string;
-  /**
-   * String, not number — `"118"` and `"72-79"` both fit. Omitted for
-   * `freeform`.
-   */
+  /** Repo-relative path. */
+  file: string;
+  /** String, not number — `"118"` and `"72-79"` both fit. */
   lines?: string;
   body: string;
   commitSha: string;
@@ -34,6 +30,20 @@ export interface DeliveredComment extends Comment {
   deliveredAt: string;
 }
 
+export type Outcome = "addressed" | "declined" | "noted";
+
+export interface AgentReply {
+  id: string;
+  /** The delivered comment id this reply answers. */
+  commentId: string;
+  body: string;
+  outcome: Outcome;
+  /** ISO timestamp stamped at post time. */
+  postedAt: string;
+  /** Optional generic identity surface; reserved for future per-harness label. */
+  agentLabel?: string;
+}
+
 interface QueueEntry {
   pending: Comment[];
   delivered: DeliveredComment[];
@@ -42,6 +52,7 @@ interface QueueEntry {
 const DELIVERED_HISTORY_CAP = 200;
 
 const queues = new Map<string, QueueEntry>();
+const replyStore = new Map<string, AgentReply[]>();
 
 function getOrCreate(worktreePath: string): QueueEntry {
   let entry = queues.get(worktreePath);
@@ -112,9 +123,38 @@ export function unenqueue(worktreePath: string, id: string): boolean {
   return true;
 }
 
+export function postReply(
+  worktreePath: string,
+  payload: { commentId: string; body: string; outcome: Outcome; agentLabel?: string },
+): string {
+  const id = randomUUID();
+  const reply: AgentReply = {
+    id,
+    commentId: payload.commentId,
+    body: payload.body,
+    outcome: payload.outcome,
+    postedAt: new Date().toISOString(),
+  };
+  if (payload.agentLabel !== undefined) reply.agentLabel = payload.agentLabel;
+  let list = replyStore.get(worktreePath);
+  if (!list) {
+    list = [];
+    replyStore.set(worktreePath, list);
+  }
+  list.push(reply);
+  return id;
+}
+
+export function listReplies(worktreePath: string): AgentReply[] {
+  const list = replyStore.get(worktreePath);
+  if (!list) return [];
+  return list.slice();
+}
+
 /** Test-only: clear all queues. */
 export function resetForTests(): void {
   queues.clear();
+  replyStore.clear();
 }
 
 function resolveSupersessions(pending: Comment[]): Comment[] {
@@ -137,18 +177,9 @@ function lowerLineBound(lines: string | undefined): number {
 }
 
 function sortForPayload(comments: Comment[]): Comment[] {
-  // File path ascending, then line lower-bound ascending. Freeform comments
-  // (no file) sink to the end and order among themselves by `enqueuedAt`
-  // ascending — preserves send order for the user's free-form notes.
+  // File path ascending, then line lower-bound ascending.
   return comments.slice().sort((a, b) => {
-    const aFree = a.kind === "freeform" || !a.file;
-    const bFree = b.kind === "freeform" || !b.file;
-    if (aFree && bFree) {
-      return a.enqueuedAt.localeCompare(b.enqueuedAt);
-    }
-    if (aFree) return 1;
-    if (bFree) return -1;
-    const fileCmp = (a.file ?? "").localeCompare(b.file ?? "");
+    const fileCmp = a.file.localeCompare(b.file);
     if (fileCmp !== 0) return fileCmp;
     return lowerLineBound(a.lines) - lowerLineBound(b.lines);
   });
@@ -181,11 +212,14 @@ export function formatPayload(
 }
 
 function renderComment(c: Comment): string {
-  const attrs: string[] = [];
-  if (c.kind !== "freeform" && c.file) {
-    attrs.push(`file="${escapeXmlAttr(c.file)}"`);
-  }
-  if (c.kind !== "freeform" && c.lines) {
+  // `id` is first so the agent sees it before the body — needed to call
+  // `shippable_post_review_reply`. Pull-and-ack drains the queue, so this
+  // is the only chance the agent has to read the id.
+  const attrs: string[] = [
+    `id="${escapeXmlAttr(c.id)}"`,
+    `file="${escapeXmlAttr(c.file)}"`,
+  ];
+  if (c.lines) {
     attrs.push(`lines="${escapeXmlAttr(c.lines)}"`);
   }
   attrs.push(`kind="${escapeXmlAttr(c.kind)}"`);
