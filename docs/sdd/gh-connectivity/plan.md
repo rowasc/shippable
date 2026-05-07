@@ -4,7 +4,9 @@ Based on: docs/sdd/gh-connectivity/spec.md
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan slice-by-slice. Within each slice, follow superpowers:test-driven-development for the subtasks.
 
-Five slices. Each slice ends in a verifiable, demonstrable state. Subtasks within a slice are TDD-shaped and can land in separate commits or be bundled per the conventional commit style in `git log`.
+Six slices. Each slice ends in a verifiable, demonstrable state. Subtasks within a slice are TDD-shaped and can land in separate commits or be bundled per the conventional commit style in `git log`.
+
+> **Slices 1–5 are shipped (v0).** Slice 6 is the post-v0 cleanup driven by real-world testing: PR review comments rendered as first-class `Reply` / `DetachedReply` entries (replacing the v0 line-annotation surface), HTTPS proxy support for outbound GitHub calls, and unification of the Welcome + LoadModal load surfaces. The spec has been updated in place to reflect the chosen design; this plan adds Slice 6 alongside the earlier slices for traceability.
 
 ## Slice 1: GitHub URL parsing + per-host auth foundation
 
@@ -173,6 +175,73 @@ Five slices. Each slice ends in a verifiable, demonstrable state. Subtasks withi
 2. Run `npm run build` in `web/`; visually verify the feature doc renders.
 3. Commit.
 
+## Slice 6: Replies-and-detached, proxy, unified loader (post-v0)
+
+*Outcome: PR review comments render through the same surface as user comments and AI-note replies. Outdated PR comments use the existing detached-comments feature. The server honors `HTTPS_PROXY`. Welcome and LoadModal share a single load implementation, and the diff-URL and PR-URL inputs are merged into one.*
+
+This slice rewrites the v0 PR-comment surface (`DiffLine.prReviewComments` + `PrReviewCommentsSection` + gutter glyph) and folds three duplicated load implementations into one. The data-on-the-wire from `pr/load` changes shape (returning a `{ changeSet, prReplies, prDetached }` triple) but the endpoint name, auth flow, and overall feature behavior are stable.
+
+- **Files (slice):**
+  - Server: `server/src/proxy.ts` (new), `server/src/proxy.test.ts` (new), `server/src/github/api-client.ts` (modify), `server/src/github/api-client.test.ts` (modify), `server/src/github/pr-load.ts` (modify), `server/src/github/pr-load.test.ts` (modify), `server/src/index.ts` (modify, response shape), `server/src/index.test.ts` (modify).
+  - Web: `web/src/types.ts` (drop `PrReviewComment` + `prReviewComments`; add `Reply.external`), `web/src/loadSurface.ts` (new hook), `web/src/components/Welcome.tsx` (modify), `web/src/components/LoadModal.tsx` (modify), `web/src/components/ReviewWorkspace.tsx` (refresh path uses the hook), `web/src/components/Inspector.tsx` (drop `PrReviewCommentsSection`), `web/src/components/DiffView.tsx` (drop `line--has-pr-comment`), `web/src/components/ReplyThread.tsx` (modify, "open on GitHub" + suppress local affordances), `web/src/state.ts` (rework `MERGE_PR_OVERLAY`, add `MERGE_PR_REPLIES`, drop `prReviewComments` walks), `web/src/persist.ts` (filter `external` replies on save), `web/src/githubPrClient.ts` (modify, new response shape), `web/src/view.ts` (drop `prCommentCount`).
+  - Docs: `docs/sdd/gh-connectivity/implementation-notes.md` (cross-link the rewrite), `README.md` (`HTTPS_PROXY` note), `docs/features/github-pr-ingest.md` (refresh).
+- **Verify (slice end):** end-to-end on a PR with line comments, multi-line comments, and at least one outdated comment: matched comments appear under hunks via `ReplyThread` (with the "↗ open on GitHub" link and no enqueue affordance), outdated comments appear in the Sidebar "Detached" section with their original-line context, refreshing the PR doesn't accumulate duplicates. With `HTTPS_PROXY=http://…` set, the server reaches a GHE PR. Welcome and LoadModal render the same loader behavior; pasting a `pull/<n>` URL into the unified field routes through `pr/load`, pasting a `.diff` URL fetches directly. `npm run lint && npm run typecheck && npm run test && npm run build` clean.
+
+### Subtasks
+
+**6a. Proxy plumbing.**
+1. Write tests in `server/src/proxy.test.ts`: returns `undefined` when env vars unset; returns a `ProxyAgent` for valid `HTTPS_PROXY`; case-insensitive (`https_proxy` works); malformed URL logs once and returns `undefined` (no throw).
+2. Implement `server/src/proxy.ts` with `getDispatcher()` (memoized after first call). Use `undici`'s `ProxyAgent`.
+3. Wire `dispatcher: getDispatcher()` into the `fetch()` call inside `server/src/github/api-client.ts`. Add a unit test in `api-client.test.ts` that asserts the dispatcher is forwarded to fetch (mock `fetch`, inspect options).
+4. README: short `HTTPS_PROXY` paragraph in the PAT-setup section.
+5. Commit.
+
+**6b. `Reply.external` field + persist filter.**
+1. Tests in `web/src/persist.test.ts`: a snapshot containing replies tagged `external.source === "pr"` (in both `replies` and `detachedReplies`) round-trips through save→load with those entries dropped on save; non-external replies survive.
+2. Add the optional `external?: { source: "pr"; htmlUrl: string }` field to `Reply` in `web/src/types.ts`.
+3. Update the persist layer's serializer to filter external replies. The `ReviewState` shape in memory can still hold them; persistence drops them.
+4. Verify tests pass.
+5. Commit.
+
+**6c. `pr/load` server response shape: `{ changeSet, prReplies, prDetached }`.**
+1. Update `server/src/github/pr-load.test.ts` to assert the new shape: matched single-line comment → `Reply` keyed `user:<hunkId>:<lineIdx>` with `external` set; matched multi-line → keyed `block:<hunkId>:<lo>-<hi>`; outdated comment (`line: null`) → `DetachedReply` with `anchorPath`, `anchorLineNo = original_line`, `anchorContext` from `comment.diff_hunk` (parsed into `DiffLine[]`), `originType: "committed"`, `originSha = comment.original_commit_id`. No `prReviewComments` walks; the loader does not write to `DiffLine`.
+2. Reshape `loadPr` in `server/src/github/pr-load.ts` to compute `prReplies` / `prDetached` directly. Reuse the existing line-index helper for the matched bucket; skip when `comment.line === null` and route to the detached bucket. Helper to parse `diff_hunk` strings into `DiffLine[]` (the same format `parseDiff` consumes).
+3. Update `server/src/index.ts` `pr/load` to return `{ changeSet, prReplies, prDetached }` instead of just `{ changeSet }`. Update `server/src/index.test.ts` accordingly.
+4. Verify tests pass; smoke-test against a real PR with at least one outdated comment.
+5. Commit.
+
+**6d. Web side: `MERGE_PR_REPLIES` reducer + Inspector cleanup.**
+1. Tests in `web/src/state.test.ts` for `MERGE_PR_REPLIES`: installs new external replies; preserves user replies; refresh-with-different-comments removes prior external entries and installs the new set; idempotent under double-dispatch.
+2. Implement `MERGE_PR_REPLIES` in `web/src/state.ts`. Update `MERGE_PR_OVERLAY` to only carry `prSource` + `prConversation` (no reply walking).
+3. Update `web/src/githubPrClient.ts` to surface `prReplies` / `prDetached` from the new `pr/load` response.
+4. Update `web/src/components/Inspector.tsx` to remove the `PrReviewCommentsSection` import and the `prReviewComments` prop. Verify `prConversation` rendering survives.
+5. Update `web/src/components/DiffView.tsx` to remove `line--has-pr-comment` and the count glyph; the existing `hasUserComment` glyph already lights up because PR replies live under the same line key.
+6. Drop `prCommentCount` from `web/src/view.ts`.
+7. Drop the `prReviewComments?: PrReviewComment[]` field on `DiffLine` and the `PrReviewComment` interface from `web/src/types.ts`.
+8. Verify `npm run typecheck && npm run lint && npm run test` pass; visually confirm matched + outdated comments render correctly.
+9. Commit.
+
+**6e. `ReplyThread` "open on GitHub" + suppressed local affordances.**
+1. Tests in `web/src/components/ReplyThread.test.tsx`: a reply with `external?.source === "pr"` shows an "↗ open on GitHub" link pointing at `external.htmlUrl`, suppresses the enqueue / agent-reply UI, and is non-deletable. Non-external replies are unchanged.
+2. Implement the conditional in `ReplyThread.tsx`.
+3. Verify tests pass; visually confirm.
+4. Commit.
+
+**6f. Unified `useLoadSurface()` hook + Welcome/LoadModal merge.**
+1. Tests in `web/src/loadSurface.test.tsx`: render the hook in a probe component; cover URL detection (`pull/<n>` → `loadGithubPr`; `.diff` → direct `fetch`); GitHub-PR token-required flow (Tauri keychain rehydrate + retry; non-Tauri prompt + retry); auth-rejected re-prompt path.
+2. Extract `web/src/loadSurface.ts` consolidating the load handlers + state from `Welcome.tsx`, `LoadModal.tsx`, and `ReviewWorkspace.tsx`'s PR-refresh path.
+3. Replace the Welcome implementation: render the hook's affordances (URL field, file drop, paste, worktree picker, GitHub PR — but the PR input is folded into the URL field). Keep the empty-state chrome (recents, samples, hero) at the Welcome level only.
+4. Replace the LoadModal implementation: same hook, modal chrome.
+5. Replace `ReviewWorkspace.tsx` PR-refresh: same hook.
+6. Test plan: open Welcome, paste a `pull/<n>` URL, confirm the GH flow runs; paste a `.diff` URL, confirm direct fetch runs. Open LoadModal from inside the workspace, repeat. Refresh a loaded PR, confirm it goes through the hook.
+7. Commit.
+
+**6g. Wrap-up.**
+1. Update `docs/sdd/gh-connectivity/implementation-notes.md` describing the v0→Slice-6 pivot (replies-and-detached, why we replaced the annotation surface).
+2. Refresh `docs/features/github-pr-ingest.md` to describe the current behavior.
+3. Final `npm run lint && npm run typecheck && npm run test && npm run build` across both packages.
+4. Commit.
+
 ---
 
 ## Dependencies (DAG)
@@ -186,6 +255,15 @@ Five slices. Each slice ends in a verifiable, demonstrable state. Subtasks withi
                                                       4d
 1a, 1c ──────> 2d                              4a ──> 4b ──┘
                               5a, 5b, 5c, 5d (after 4d)
+
+  Slice 6 (post-v0, after slices 1–5 land):
+    6a (proxy)            ──┐
+    6b (Reply.external)   ──┤
+    6c (server response)  ──┼──> 6d (web reducer + Inspector cleanup) ──> 6e (ReplyThread external)
+                            │                                              │
+                            └──> 6f (unified loader, depends on 6d) ───────┘
+                                                  │
+                                                 6g (wrap-up docs)
 ```
 
 ## Verification Checklist (apply at slice boundaries)
@@ -195,3 +273,4 @@ Five slices. Each slice ends in a verifiable, demonstrable state. Subtasks withi
 - After Slice 3: browser dev-mode end-to-end: paste, prompt, load, refresh, auth-rejected re-prompt.
 - After Slice 4: worktree-with-PR end-to-end: pill, overlay, `worktreeSource` + `prSource` co-exist.
 - After Slice 5: `npm run lint && npm run typecheck && npm run test && npm run build` in both packages.
+- After Slice 6: end-to-end on a PR with matched single-line, multi-line, and outdated comments — matched threads render through `ReplyThread`, outdated entries land in the Sidebar "Detached" section, refresh is idempotent. With `HTTPS_PROXY` set, a GHE PR loads. Welcome and LoadModal present the same loader behavior; one URL field handles both `pull/<n>` and `.diff` inputs. Lint/typecheck/test/build green.

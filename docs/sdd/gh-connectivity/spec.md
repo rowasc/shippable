@@ -27,7 +27,16 @@ Each new piece mirrors something already in the codebase:
 - **Endpoints:** a small `/api/github/*` REST surface added to `server/src/index.ts`, wired into the same origin-classification path everything else uses. One bundled `pr/load` endpoint produces a complete ChangeSet from a single request. A separate `pr/branch-lookup` endpoint serves the worktree↔PR pill. A small auth trio (`auth/set`, `auth/clear`, `auth/has`) manages the server-memory token store.
 - **Token model:** **two-tier active/durable** — Tauri Keychain holds tokens persistently (one entry per host), the server holds them in process memory (`Map<host, token>`) for the lifetime of the process. The web app moves tokens between the two: on first need it tries `auth/has`; if absent, it `keychain_get`s and `auth/set`s, then retries; if not in Keychain either, it prompts the user, writes both, and retries. Dev mode (browser, no Tauri) skips the Keychain leg — tokens live only in server memory and are re-prompted on server restart. This mirrors how the Anthropic key relates to the sidecar today (Keychain durable, env active) but adapts to per-host dynamism.
 - **Server state:** an in-memory `Map<host, token>` next to the existing per-worktree maps in `server/src/`. Same persistence posture (lost on restart). No PR-data caching server-side — every load re-fetches from GitHub; the web app's `ReviewState`/`changesets` already handles cross-reload identity.
-- **PR comments — read-only annotations, not Replies.** Line-anchored review comments attach as a new `prReviewComments?: PrReviewComment[]` field on `DiffLine` (sibling of `aiNote`). Issue-level conversation comments attach as a new `prConversation?: PrConversationItem[]` field on `ChangeSet`. Neither flows into `ReviewState.replies` — that map stays reserved for the reviewer's own and AI/teammate replies. Keeping PR comments out of `replies` avoids a discriminator question (where would re-rendering distinguish "from-GitHub" from teammate?) and keeps the persistence layer untouched: PR comments re-fetch with the diff and don't need rehydration.
+- **PR comments — first-class Replies (matched) + DetachedReplies (outdated).** Line-anchored PR review comments are merged into the existing `ReviewState.replies` map under the same reply-key namespace user comments use:
+  - **Single-line** PR review comment → `Reply` under `userCommentKey(hunkId, lineIdx)` (or, if a thread already exists at the line, appended to it).
+  - **Multi-line** PR review comment (has `start_line`/`line`) → `Reply` under `blockCommentKey(hunkId, lo, hi)`.
+  - **Outdated** PR review comment (GitHub returns `line: null`) → `DetachedReply` in `ReviewState.detachedReplies`. The reply carries `originType: "committed"`, `anchorPath = comment.path`, `anchorLineNo = comment.original_line`, and `anchorContext` derived from `comment.diff_hunk` (already in the GitHub payload, currently discarded). The Sidebar's "Detached" section renders these the same as our own detached replies — same "view at <sha7>" affordance.
+  - Each external `Reply` has a deterministic id derived from `comment.id` so dedupe across reloads / refreshes is automatic. A new optional `external?: { source: "pr"; htmlUrl: string }` field on `Reply` marks them as upstream — drives the small "↗ open on GitHub" link, suppresses the local enqueue / agent-reply affordances, and lets the persist layer skip them on save (they re-arrive with the next `pr/load`). All other fields (`author`, `body`, `createdAt`) match what the existing `ReplyThread` already renders.
+  - Issue-level conversation comments still attach as a new `prConversation?: PrConversationItem[]` field on `ChangeSet`, surfaced in the changeset-header overview disclosure.
+  - The PR-load reducer step (`MERGE_PR_REPLIES`, called from both `LOAD_CHANGESET` for PR-source loads and from `MERGE_PR_OVERLAY` for the worktree overlay) is responsible for:
+    1. Removing all prior `external.source === "pr"` entries from `replies` and `detachedReplies` for the target ChangeSet (so refreshes reconcile cleanly).
+    2. Bucketing the new PR comments by anchor: matched → `replies`, outdated → `detachedReplies`.
+  - This replaces the v0 design's `prReviewComments?: PrReviewComment[]` field on `DiffLine`. That field, the corresponding `PrReviewCommentsSection` Inspector component, and the `line--has-pr-comment` gutter glyph in `DiffView` are removed — the regular reply-thread rendering and the existing user-comment glyph cover the same UX without parallel surfaces.
 - **Provenance:** `ChangeSet` gains a `prSource?: PrSource` field alongside the existing `worktreeSource?`. Both can co-exist on a worktree↔PR overlay — the diff still came from the worktree (so `worktreeSource` is set), but the metadata + PR comments came from upstream (so `prSource` is set too).
 - **Data flow into UI:** the existing `Inspector.tsx` rendering for line-anchored notes is the natural shape for `prReviewComments`. Changeset header gains a small "PR" surface (title, state, last-fetched, Refresh, conversation comments) gated on `prSource`.
 - **Worktree↔PR pill:** opt-in. The server's `branch-lookup` endpoint reads the worktree's `origin` remote (and any other GitHub-shaped remote) via the existing `worktree-validation.ts` helpers, parses host/owner/repo, then `GET /repos/<owner>/<repo>/pulls?head=<owner>:<branch>&state=open` against the host. UI surfaces a pill on first match; click triggers `pr/load` and merges the response into the live ChangeSet (writes `prSource`, `prConversation`, and per-line `prReviewComments`; leaves the diff untouched).
@@ -144,8 +153,10 @@ Localhost-bound, same security posture as today; tokens travel only on the local
 - `server/src/github/api-client.ts` (new)
   - `githubFetch(apiBaseUrl, path, { token, method?, body? })`. Sets `Authorization: Bearer <token>`, `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`. Handles pagination (`Link: rel="next"`) for list endpoints. Normalizes errors into the discriminator shape used by the endpoints.
 - `server/src/github/pr-load.ts` (new)
-  - `loadPr({ host, owner, repo, number }, token)`: the four-fetch fan-out + assembly. Uses the existing diff parser via the `web/src/parseDiff.ts` shape — server-side. Returns `ChangeSet`.
+  - `loadPr({ host, owner, repo, number }, token)`: the four-fetch fan-out + assembly. Uses the existing diff parser via the `web/src/parseDiff.ts` shape — server-side. Returns `{ changeSet, prReplies, prDetached }` — the changeset carries `prSource` + `prConversation`; the two reply collections feed the merge step on the web side. Single-line and multi-line PR comments that match a `(file, line)` in the parsed diff become `Reply` entries in `prReplies` keyed by their would-be reply key (`user:<hunkId>:<lineIdx>` or `block:<hunkId>:<lo>-<hi>`); outdated comments (`line: null`) become `DetachedReply` entries in `prDetached` with `anchorPath`, `anchorLineNo = original_line`, `anchorContext` derived from `comment.diff_hunk`, and `originType: "committed"`.
   - Truncation: when GitHub flags the diff as truncated (response `incomplete_results: true` on `/files`, or files-list shorter than the response total), the assembled `ChangeSet` carries a new `prSource.truncation: { kind: "files" | "patch", reason: string }` field; the UI renders a banner.
+- `server/src/proxy.ts` (new)
+  - `getDispatcher()`: reads `HTTPS_PROXY` / `https_proxy` (and `NO_PROXY` for exclusions) once on first call; returns an `undici.ProxyAgent` configured for the resolved URL, or `undefined` when no proxy env var is set. The api-client passes `dispatcher: getDispatcher()` on every `fetch()` call to GitHub. Node's built-in `fetch` (undici) does not consult these env vars by default; this module is the fix. Errors during dispatcher construction (malformed URL) log once and fall through to direct `fetch` rather than blocking the call.
 - `server/src/github/branch-lookup.ts` (new)
   - `lookupPrForBranch(worktreePath)`: validates path via `worktree-validation.ts` `assertGitDir`; runs `git remote get-url origin` (and other remotes if needed) via `execFile`; identifies a GitHub-shaped remote; runs the `pulls?head=…` query; returns the first open match.
 - `server/src/index.ts`
@@ -164,28 +175,37 @@ Localhost-bound, same security posture as today; tokens travel only on the local
   - Add `PrSource` interface: `{ host, owner, repo, number, htmlUrl, headSha, baseSha, state: "open" | "closed" | "merged", title, body, baseRef, headRef, lastFetchedAt, truncation?: { kind, reason } }`.
   - Extend `ChangeSet` with `prSource?: PrSource` and `prConversation?: PrConversationItem[]`.
   - Add `PrConversationItem`: `{ id, author, createdAt, body, htmlUrl }`.
-  - Add `PrReviewComment`: `{ id, author, createdAt, body, htmlUrl, lineSpan?: { lo, hi } }`. Extend `DiffLine` with optional `prReviewComments?: PrReviewComment[]`.
-  - All new fields are optional; existing fixtures and persisted ReviewState rehydrate cleanly without migration.
+  - Extend `Reply` with an optional `external?: { source: "pr"; htmlUrl: string }` field. Drives the "open on GitHub" affordance, suppresses the local enqueue/agent-reply paths, and tells the persist layer to skip these on save (they re-arrive with the next `pr/load`).
+  - **Removed from earlier v0:** the `PrReviewComment` interface and the `prReviewComments?: PrReviewComment[]` field on `DiffLine`. PR comments now travel through the existing `Reply` shape.
+  - All new/changed fields are optional; existing fixtures and persisted ReviewState rehydrate cleanly without migration.
 - `web/src/persist.ts`
-  - No schema bump required (all additions are optional, on the immutable fetched-from-server side of the boundary; nothing in `ReviewState` itself changes).
-  - Confirm `ReviewState.changesets[]` round-trip preserves new fields (it should — the persist layer JSON-roundtrips the array as-is).
+  - On save: filter out any `Reply` with `external?.source === "pr"` from `replies` and from `detachedReplies` before serializing. PR-sourced replies live entirely in memory; they re-arrive on next `pr/load`. This keeps localStorage from accumulating stale upstream copies and avoids any rehydration ordering question (PR fetch may not have completed by the time the persisted state hydrates).
+  - No schema bump required for the changeset side (all additions are optional, on the immutable fetched-from-server side of the boundary).
+- **Unified load surface (`web/src/loadSurface.ts` or co-located hook).**
+  - Today the GitHub-PR load flow exists in three near-duplicate copies (`Welcome.tsx`, `LoadModal.tsx`, `ReviewWorkspace.tsx`'s refresh path), and the URL/file/paste flows are duplicated across `Welcome` and `LoadModal`. Extract a single hook (`useLoadSurface()`) returning the load handlers + state (`onPasteUrl`, `onPasteDiff`, `onFile`, `onWorktree`, `onGithubPr`, `tokenModalProps`, `error`, `busy`). Both `Welcome.tsx` and `LoadModal.tsx` consume it; presentation chrome differs, behavior is identical.
+  - The "From a URL" and "From a GitHub PR" inputs collapse into one URL input. Detection: a regex against `(/.*/(pulls?|pull)/\d+(/.*)?$)` routes through `loadGithubPr`; otherwise the existing direct-`fetch` path applies. Single text field, single submit; the loader picks the route.
+  - This refactor lands in the new slice (Slice 6) — the v0 implementation kept three copies for ship-speed; the slice is the cleanup.
 - `web/src/components/LoadModal.tsx`
-  - Add a "From a GitHub PR" tab next to URL/upload/paste. Single input: PR URL. Submit → calls `apiUrl()`-prefixed `POST /api/github/pr/load`.
+  - Consumes `useLoadSurface()`. Renders the unified URL field (no separate "From a GitHub PR" tab).
   - Handles the `github_token_required` error path: triggers `GitHubTokenModal`, then retries.
 - `web/src/components/GitHubTokenModal.tsx` (new)
   - Captures token; on submit calls `keychain_set` (Tauri only) and `auth/set`.
   - Doc/help link about creating a PAT (the README addition handles the canonical reference).
 - `web/src/components/Inspector.tsx`
-  - For each `DiffLine.prReviewComments`, render a small "PR review" subsection alongside any `aiNote`. Read-only; clicking the comment author/htmlUrl opens upstream in a new tab.
+  - **No PR-specific rendering.** PR review comments arrive as regular `Reply` entries in `replies` and render through the existing `ReplyThread`. The only PR-specific affordance is the small "↗ open on GitHub" link gated on `reply.external?.source === "pr"` (and suppressing the enqueue / agent-reply UI for the same condition) — both inside `ReplyThread`, not in Inspector itself.
   - When `prConversation` is present, surface a "PR conversation (N)" disclosure in the existing changeset-header overview area, expanding to a chronological list of comment items.
+  - **Removed from earlier v0:** the standalone `PrReviewCommentsSection` component. Its job is covered by the existing reply-thread rendering.
+- `web/src/components/DiffView.tsx`
+  - **Removed from earlier v0:** the `line--has-pr-comment` class + count glyph in the gutter. The existing `hasUserComment` glyph already lights up because PR replies live in `replies` under the same line key — no new gutter affordance is needed.
 - `web/src/components/ChangesetHeader.tsx` (or wherever the header lives — confirm at impl time)
   - When `prSource` present: show title, state badge, base→head ref, "Last fetched HH:MM", `Refresh` button. Refresh re-runs `pr/load`.
   - When `prSource.truncation` present: render a banner ("Diff truncated by GitHub at N files. Some changes are not shown.").
 - Worktree↔PR pill (location TBD at implementation time — likely `Inspector.tsx`'s existing worktree-source surface)
-  - On worktree-source mount: `POST /api/github/pr/branch-lookup { worktreePath }`. On `{ matched }`: render the pill. Click → `pr/load` → reducer merges (`prSource`, `prConversation`, per-line `prReviewComments`). The diff/files arrays are not touched.
+  - On worktree-source mount: `POST /api/github/pr/branch-lookup { worktreePath }`. On `{ matched }`: render the pill. Click → `pr/load` → reducer merges (`prSource`, `prConversation`, plus the new `prReplies`/`prDetached` collections). The diff/files arrays are not touched.
 - `web/src/apiUrl.ts` / state reducers
-  - `loadGithubPr(prUrl)` async thunk / handler: makes the `pr/load` call, dispatches a `LOAD_CHANGESET` action with the response. On `github_token_required`, opens the modal and chains a retry.
-  - `mergePrOverlay(matched)`: applied when the worktree-source path resolves a matching PR; calls `pr/load` and merges into the active ChangeSet without dropping `worktreeSource`.
+  - `loadGithubPr(prUrl)` async thunk / handler: makes the `pr/load` call, dispatches `LOAD_CHANGESET` with the response, then dispatches `MERGE_PR_REPLIES` to install the PR-sourced `Reply` / `DetachedReply` entries. On `github_token_required`, opens the modal and chains a retry.
+  - `mergePrOverlay(matched)`: applied when the worktree-source path resolves a matching PR; calls `pr/load`, dispatches `MERGE_PR_OVERLAY` (sets `prSource` + `prConversation` on the worktree ChangeSet) and `MERGE_PR_REPLIES` (installs replies/detached) without dropping `worktreeSource`.
+  - `MERGE_PR_REPLIES` reducer contract: (a) remove every existing `Reply` with `external?.source === "pr"` from `state.replies` and every `DetachedReply` whose nested `reply.external?.source === "pr"` from `state.detachedReplies` for the target ChangeSet; (b) merge the new entries in. Idempotent across refresh / overlay re-clicks.
 
 **Auth flow plumbing (Tauri shell)**
 
@@ -217,14 +237,18 @@ Localhost-bound, same security posture as today; tokens travel only on the local
 | `server/src/github/branch-lookup.test.ts` | new | Tmpdir worktree fixtures. |
 | `server/src/index.ts` | modify | Register the five new endpoints in the existing origin-classification path. |
 | `server/src/index.test.ts` | modify | Endpoint coverage for `auth/*`, `pr/load`, `pr/branch-lookup`. |
-| `web/src/types.ts` | modify | Add `PrSource`, `PrReviewComment`, `PrConversationItem`; extend `ChangeSet` and `DiffLine`. |
-| `web/src/components/LoadModal.tsx` | modify | New "From a GitHub PR" tab; submit calls `pr/load`; handles `github_token_required`. |
+| `web/src/types.ts` | modify | Add `PrSource`, `PrConversationItem`; extend `ChangeSet`; add optional `external` field on `Reply`. (No `PrReviewComment` / no `prReviewComments` on `DiffLine` — those land in v0 and are removed in Slice 6.) |
+| `web/src/components/LoadModal.tsx` | modify | Consume `useLoadSurface()`; render unified URL field (PR + diff URL detection on the server). |
+| `web/src/components/Welcome.tsx` | modify | Consume the same `useLoadSurface()`; remove duplicate load logic. |
+| `web/src/loadSurface.ts` | new | Shared `useLoadSurface()` hook used by Welcome + LoadModal + ReviewWorkspace refresh path. |
 | `web/src/components/GitHubTokenModal.tsx` | new | PAT capture; `keychain_set` + `auth/set` on submit. |
-| `web/src/components/Inspector.tsx` | modify | Render `prReviewComments` under hunks; render `prConversation` in the header overview; render the worktree↔PR pill when `branch-lookup` matches. |
+| `web/src/components/Inspector.tsx` | modify | Render `prConversation` in the header overview; render the worktree↔PR pill when `branch-lookup` matches. (No PR-specific reply rendering — `ReplyThread` covers it.) |
+| `web/src/components/ReplyThread.tsx` | modify | Render the small "↗ open on GitHub" link when `reply.external?.source === "pr"`; suppress local enqueue / agent-reply affordances for the same condition. |
 | `web/src/components/ChangesetHeader.tsx` | modify | PR title/state/refresh/last-fetched/truncation banner when `prSource`. (Confirm exact file at impl time.) |
-| `web/src/state.ts` (or wherever `ReviewState` reducers live) | modify | `loadGithubPr` action; `mergePrOverlay` reducer for the worktree↔PR pill. |
+| `web/src/state.ts` (or wherever `ReviewState` reducers live) | modify | `loadGithubPr` action; `MERGE_PR_OVERLAY` reducer (overlay metadata only); `MERGE_PR_REPLIES` reducer (installs PR-sourced replies + detached, idempotent on refresh). |
 | `web/src/apiUrl.ts` (or sibling network helper) | modify | Wrappers for the five new endpoints. |
-| `web/src/persist.ts` | modify | Confirm round-trip of new optional fields. No schema bump. |
+| `web/src/persist.ts` | modify | On save, filter out `Reply.external?.source === "pr"` from `replies` and `detachedReplies`. No schema bump. |
+| `server/src/proxy.ts` | new | `getDispatcher()` returning a `ProxyAgent` from `HTTPS_PROXY` / `https_proxy` (with `NO_PROXY` exclusions), or `undefined` when unset. |
 | `docs/concepts/server-api-boundary.md` | modify | List `/api/github/*`. |
 | `docs/architecture.md` | modify | PRs as a fourth ingest path. |
 | `docs/ROADMAP.md` | modify | Flip GitHub-ingest-prototype to v0.2.0 in-progress; cross-link. |
@@ -252,7 +276,7 @@ Localhost-bound, same security posture as today; tokens travel only on the local
 ## Open Questions Resolved
 
 - **Server-side cache shape** → no server-side PR-data cache; every load is a fresh fetch. Web app's existing `ReviewState.changesets[]` and `localStorage` round-trip are sufficient. The only server state is the per-host token map.
-- **PR review comment surface choice** → new line-level annotation on `DiffLine` (read-only), not a `Reply` kind. Issue-level conversation lives at `ChangeSet.prConversation`. Keeps `ReviewState.replies` reserved for the reviewer's own state and avoids a persistence migration.
+- **PR review comment surface choice** → **revised after v0.** Render PR review comments through the existing `Reply` / `ReplyThread` path — same surface as user comments and AI-note replies — keyed under `userCommentKey`/`blockCommentKey`. Outdated PR comments (`line: null`) become `DetachedReply` entries with their original-line `anchorContext` derived from `comment.diff_hunk`, rendered in the existing Sidebar "Detached" section. PR-sourced replies are tagged via `Reply.external = { source: "pr", htmlUrl }`; the persist layer drops them on save (they re-arrive with the next `pr/load`). Issue-level conversation still lives at `ChangeSet.prConversation`. The earlier "new line-level annotation on `DiffLine`" choice (`prReviewComments` field, `PrReviewCommentsSection`, gutter glyph) is retired in Slice 6 — it forced parallel rendering surfaces that the existing reply system already covers, and it had no good answer for outdated comments. The "external context" framing concern from the original alternatives is preserved by the `external` flag (drives the "open on GitHub" affordance + persistence skip) without forking a parallel surface.
 - **Diff truncation handling** → `ChangeSet.prSource.truncation` carrier; UI shows a banner; partial ChangeSet still renders. No fancy fallback in v0.
 - **Token error UX after configuration** → server returns a discriminator (`github_auth_failed` / `github_token_required` / `github_pr_not_found` / `github_upstream`); UI shows a banner with a "Re-enter token" affordance for auth-class errors that re-opens the token modal.
 - **Endpoint naming** → body keys standardize on `host`, `prUrl`, `worktreePath`, `token`. No `path` (per the existing `worktreePath` convention in `/api/agent/*`). Endpoint paths are `/api/github/{auth/set, auth/clear, auth/has, pr/load, pr/branch-lookup}`.
@@ -261,3 +285,5 @@ Localhost-bound, same security posture as today; tokens travel only on the local
 - **Token model — eager vs. lazy rehydrate from Keychain** → lazy, per-host, on first need. Avoids enumerating Keychain at boot and avoids any "load all tokens" round-trip.
 - **PR comment line-anchoring across multi-line GH comments** → store `lineSpan: { lo, hi }` on the comment; render under the highest-numbered line with a "(spans X-Y)" hint. Multi-line comments are uncommon enough that v0 doesn't need richer span rendering.
 - **`prSource` + `worktreeSource` co-existence** → both fields are independent; both can be set on the same ChangeSet. The diff is whatever was loaded first; the overlay only adds metadata + comments.
+- **HTTPS proxy support** → wired via `server/src/proxy.ts` building an `undici.ProxyAgent` from the standard env vars (`HTTPS_PROXY` / `https_proxy` + `NO_PROXY`), passed as `dispatcher` on every GitHub `fetch()`. No env var → no dispatcher → direct fetch (today's behavior). Documented in the README's PAT setup section.
+- **Welcome ⊆ LoadModal unification** → both surfaces consume a single `useLoadSurface()` hook; load logic lives in one place. Welcome wraps it in empty-state chrome (recents, samples, hero); LoadModal wraps it in the modal frame. The "From a URL" and "From a GitHub PR" inputs collapse into one URL field with detection (`pull/<n>` HTML URL → `/api/github/pr/load`; everything else → existing direct-fetch path). The third copy in `ReviewWorkspace.tsx` (the PR-refresh path) is folded into the same hook.
