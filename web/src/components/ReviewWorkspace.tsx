@@ -38,6 +38,7 @@ import type {
   ChangeSet,
   Cursor,
   EvidenceRef,
+  PrReviewComment,
   PrSource,
   ReviewState,
   Reply,
@@ -169,7 +170,10 @@ export function ReviewWorkspace({
   } | null>(null);
   const [prRefreshTokenModal, setPrRefreshTokenModal] = useState<{
     host: string;
+    reason: "first-time" | "rejected";
     pendingHtmlUrl: string;
+    /** When set, runs instead of re-fetching pendingHtmlUrl after token entry. */
+    pendingAction?: () => Promise<void>;
   } | null>(null);
 
   // MCP-install status with retry+backoff. The dev server's port briefly
@@ -311,9 +315,14 @@ export function ReviewWorkspace({
     }
     await setGithubToken(host, token);
     const pendingUrl = prRefreshTokenModal?.pendingHtmlUrl ?? "";
+    const pendingAction = prRefreshTokenModal?.pendingAction;
     setPrRefreshTokenModal(null);
     setPrAuthRejected(null);
-    if (pendingUrl) await handlePrRefresh(pendingUrl);
+    if (pendingAction) {
+      await pendingAction();
+    } else if (pendingUrl) {
+      await handlePrRefresh(pendingUrl);
+    }
   }
 
   const suggestion = maybeSuggest(cs, state);
@@ -957,6 +966,7 @@ export function ReviewWorkspace({
             onClick={() =>
               setPrRefreshTokenModal({
                 host: prAuthRejected.host,
+                reason: "rejected",
                 pendingHtmlUrl: cs.prSource?.htmlUrl ?? "",
               })
             }
@@ -969,7 +979,7 @@ export function ReviewWorkspace({
       {prRefreshTokenModal && (
         <GitHubTokenModal
           host={prRefreshTokenModal.host}
-          reason="rejected"
+          reason={prRefreshTokenModal.reason}
           onSubmit={handlePrRefreshTokenSubmit}
           onCancel={() => setPrRefreshTokenModal(null)}
         />
@@ -1288,6 +1298,41 @@ export function ReviewWorkspace({
             }
             prReviewComments={line?.prReviewComments}
             prConversation={cs.prConversation}
+            worktreeSource={activeWorktreeSource ?? undefined}
+            prSource={cs.prSource}
+            changesetId={cs.id}
+            onMergePrOverlay={(csId, prCs) => {
+              // Extract per-line comments from the PR ChangeSet into the
+              // Map shape the reducer expects.
+              const lineComments = new Map<string, Map<number, PrReviewComment[]>>();
+              for (const f of prCs.files) {
+                const lineMap = new Map<number, PrReviewComment[]>();
+                for (const h of f.hunks) {
+                  for (const ln of h.lines) {
+                    if (ln.prReviewComments && ln.prReviewComments.length > 0) {
+                      const no = ln.newNo ?? ln.oldNo;
+                      if (no !== undefined) lineMap.set(no, ln.prReviewComments);
+                    }
+                  }
+                }
+                if (lineMap.size > 0) lineComments.set(f.path, lineMap);
+              }
+              dispatch({
+                type: "MERGE_PR_OVERLAY",
+                changesetId: csId,
+                prSource: prCs.prSource!,
+                prConversation: prCs.prConversation ?? [],
+                lineComments,
+              });
+            }}
+            onAuthError={(host, reason, retry) => {
+              setPrRefreshTokenModal({
+                host,
+                reason,
+                pendingHtmlUrl: "",
+                pendingAction: retry,
+              });
+            }}
           />
         )}
       </div>

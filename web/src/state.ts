@@ -7,6 +7,9 @@ import type {
   DiffFile,
   Hunk,
   LineSelection,
+  PrConversationItem,
+  PrReviewComment,
+  PrSource,
   Reply,
   ReviewState,
 } from "./types";
@@ -188,6 +191,20 @@ export type Action =
       hunkId: string;
       loLineIdx: number;
       hiLineIdx: number;
+    }
+  | {
+      /**
+       * Overlay PR metadata onto an existing worktree-loaded ChangeSet. The
+       * diff structure (files/hunks) is untouched; we only set `prSource`,
+       * `prConversation`, and attach `prReviewComments` to matching lines.
+       * `worktreeSource` is preserved.
+       */
+      type: "MERGE_PR_OVERLAY";
+      changesetId: string;
+      prSource: PrSource;
+      prConversation: PrConversationItem[];
+      /** filePath → lineNo → comments */
+      lineComments: Map<string, Map<number, PrReviewComment[]>>;
     };
 
 export function reducer(state: ReviewState, action: Action): ReviewState {
@@ -408,6 +425,36 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       if (set.size === 0) delete next[action.hunkId];
       else next[action.hunkId] = set;
       return { ...state, readLines: next };
+    }
+    case "MERGE_PR_OVERLAY": {
+      const csIdx = state.changesets.findIndex((c) => c.id === action.changesetId);
+      if (csIdx < 0) return state;
+      const cs = state.changesets[csIdx];
+      const nextFiles = cs.files.map((file) => {
+        const lineMap = action.lineComments.get(file.path);
+        if (!lineMap) return file;
+        const nextHunks = file.hunks.map((hunk) => {
+          const nextLines = hunk.lines.map((line) => {
+            const no = line.newNo ?? line.oldNo;
+            if (no === undefined) return line;
+            const comments = lineMap.get(no);
+            if (!comments || comments.length === 0) return line;
+            return { ...line, prReviewComments: comments };
+          });
+          return { ...hunk, lines: nextLines };
+        });
+        return { ...file, hunks: nextHunks };
+      });
+      const nextCs: ChangeSet = {
+        ...cs,
+        files: nextFiles,
+        prSource: action.prSource,
+        prConversation: action.prConversation,
+      };
+      const nextChangesets = state.changesets.map((c, i) =>
+        i === csIdx ? nextCs : c,
+      );
+      return { ...state, changesets: nextChangesets };
     }
   }
 }

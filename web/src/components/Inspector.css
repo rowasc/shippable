@@ -253,6 +253,41 @@
   line-height: 1.55;
 }
 
+/* Matching-PR pill — one-line affordance to overlay PR comments on a
+   worktree-loaded ChangeSet. Hides itself once the overlay is applied. */
+.inspector__pr-pill {
+  padding: 6px 12px;
+  border-bottom: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inspector__pr-pill-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.inspector__pr-pill-btn:hover:not(:disabled) {
+  background: rgba(137, 180, 250, 0.12);
+}
+.inspector__pr-pill-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.inspector__pr-pill-err {
+  color: var(--red);
+  font-size: 11px;
+}
+
 /* PR conversation disclosure section */
 .inspector__pr-conv {
   /* reuses inspector__sec padding/border */

@@ -997,3 +997,132 @@ describe("POST /api/github/pr/load", () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe("POST /api/github/pr/branch-lookup", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function setGithubToken() {
+    await postJson(`${baseUrl}/api/github/auth/set`, {
+      host: "github.com",
+      token: "ghp_branch_lookup_test",
+    });
+  }
+
+  it("returns { matched: null } when no remotes are configured", async () => {
+    await setGithubToken();
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch(() =>
+        ({ ok: true, status: 200, headers: new Headers(), json: () => Promise.resolve([]) } as unknown as Response),
+      ),
+    );
+    const r = await postJson(`${baseUrl}/api/github/pr/branch-lookup`, {
+      worktreePath,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.matched).toBeNull();
+  });
+
+  it("returns { matched: PrMatch } for a worktree with a GitHub remote and open PR", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "shippable-bl-int-"));
+    try {
+      await execFileAsync("git", ["init"], { cwd: dir });
+      await execFileAsync("git", ["config", "user.email", "t@t.com"], { cwd: dir });
+      await execFileAsync("git", ["config", "user.name", "T"], { cwd: dir });
+      await fs.writeFile(path.join(dir, "a.txt"), "hello");
+      await execFileAsync("git", ["add", "."], { cwd: dir });
+      await execFileAsync("git", ["commit", "-m", "init"], { cwd: dir });
+      await execFileAsync(
+        "git",
+        ["remote", "add", "origin", "https://github.com/owner/repo.git"],
+        { cwd: dir },
+      );
+
+      await setGithubToken();
+      vi.stubGlobal(
+        "fetch",
+        makeSelectiveFetch(() =>
+          ({
+            ok: true,
+            status: 200,
+            headers: new Headers(),
+            json: () =>
+              Promise.resolve([
+                {
+                  number: 7,
+                  title: "My PR",
+                  state: "open",
+                  merged: false,
+                  html_url: "https://github.com/owner/repo/pull/7",
+                },
+              ]),
+          } as unknown as Response),
+        ),
+      );
+
+      const r = await postJson(`${baseUrl}/api/github/pr/branch-lookup`, {
+        worktreePath: dir,
+      });
+      expect(r.status).toBe(200);
+      expect(r.body.matched).not.toBeNull();
+      expect(r.body.matched.number).toBe(7);
+      expect(r.body.matched.title).toBe("My PR");
+      expect(r.body.matched.host).toBe("github.com");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 401 github_token_required when no token is stored", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "shippable-bl-int-"));
+    try {
+      await execFileAsync("git", ["init"], { cwd: dir });
+      await execFileAsync("git", ["config", "user.email", "t@t.com"], { cwd: dir });
+      await execFileAsync("git", ["config", "user.name", "T"], { cwd: dir });
+      await fs.writeFile(path.join(dir, "a.txt"), "hello");
+      await execFileAsync("git", ["add", "."], { cwd: dir });
+      await execFileAsync("git", ["commit", "-m", "init"], { cwd: dir });
+      await execFileAsync(
+        "git",
+        ["remote", "add", "origin", "https://github.com/owner/repo.git"],
+        { cwd: dir },
+      );
+
+      // Ensure no token is set (resetAuthStore was called in beforeEach)
+      const r = await postJson(`${baseUrl}/api/github/pr/branch-lookup`, {
+        worktreePath: dir,
+      });
+      expect(r.status).toBe(401);
+      expect(r.body.error).toBe("github_token_required");
+      expect(r.body.host).toBe("github.com");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns 400 and an error when worktreePath is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/branch-lookup`, {});
+    expect(r.status).toBe(400);
+    expect(typeof r.body.error).toBe("string");
+  });
+
+  it("returns 400 for an invalid JSON body", async () => {
+    const res = await fetch(`${baseUrl}/api/github/pr/branch-lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("denies requests with an opaque origin", async () => {
+    const res = await fetch(`${baseUrl}/api/github/pr/branch-lookup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "null" },
+      body: JSON.stringify({ worktreePath }),
+    });
+    expect(res.status).toBe(403);
+  });
+});

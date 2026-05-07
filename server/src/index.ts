@@ -14,6 +14,7 @@ import * as authStore from "./github/auth-store.ts";
 import { parsePrUrl } from "./github/url.ts";
 import { loadPr } from "./github/pr-load.ts";
 import { GithubApiError } from "./github/api-client.ts";
+import { lookupPrForBranch } from "./github/branch-lookup.ts";
 import { assertGitDir } from "./worktree-validation.ts";
 import type { ChangeSet } from "../../web/src/types.ts";
 import type { DefinitionRequest } from "../../web/src/definitionTypes.ts";
@@ -114,6 +115,9 @@ export function createApp(): Server {
     }
     if (req.method === "POST" && req.url === "/api/github/pr/load") {
       return await handleGithubPrLoad(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/github/pr/branch-lookup") {
+      return await handleGithubPrBranchLookup(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/enqueue") {
       return await handleAgentEnqueue(req, res, origin);
@@ -1001,6 +1005,56 @@ async function handleGithubPrLoad(
       }
     }
     throw err;
+  }
+}
+
+async function handleGithubPrBranchLookup(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { worktreePath?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+
+  if (typeof parsed.worktreePath !== "string" || !parsed.worktreePath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "expected { worktreePath: string }" }));
+    return;
+  }
+
+  try {
+    const result = await lookupPrForBranch(
+      parsed.worktreePath,
+      authStore.getToken,
+    );
+    if ("tokenRequiredForHost" in result) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "github_token_required",
+          host: result.tokenRequiredForHost,
+        }),
+      );
+      return;
+    }
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ matched: result.matched }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
   }
 }
 

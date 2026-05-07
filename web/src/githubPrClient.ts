@@ -7,6 +7,16 @@
 import { apiUrl } from "./apiUrl";
 import type { ChangeSet } from "./types";
 
+export interface PrMatch {
+  host: string;
+  owner: string;
+  repo: string;
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  htmlUrl: string;
+}
+
 export class GithubFetchError extends Error {
   discriminator: string;
   host?: string;
@@ -91,4 +101,33 @@ export async function loadGithubPr(prUrl: string): Promise<ChangeSet> {
   }
 
   return json.changeSet as ChangeSet;
+}
+
+export async function lookupPrForBranch(
+  worktreePath: string,
+): Promise<{ matched: PrMatch | null }> {
+  let res: Response;
+  try {
+    res = await fetch(await apiUrl("/api/github/pr/branch-lookup"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ worktreePath }),
+    });
+  } catch (err) {
+    throw new GithubFetchError(
+      "unknown",
+      err instanceof Error ? err.message : "Network error",
+    );
+  }
+
+  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (!res.ok) {
+    const discriminator =
+      typeof json.error === "string" ? json.error : "unknown";
+    const host = typeof json.host === "string" ? json.host : undefined;
+    throw new GithubFetchError(discriminator, discriminator, host);
+  }
+
+  return { matched: (json.matched ?? null) as PrMatch | null };
 }

@@ -8,7 +8,17 @@ import {
   reviewedFilesCount,
 } from "./state";
 import { captureAnchorContext } from "./anchor";
-import type { ChangeSet, DiffFile, DiffLine, Hunk, ReviewState } from "./types";
+import type {
+  ChangeSet,
+  DiffFile,
+  DiffLine,
+  Hunk,
+  PrConversationItem,
+  PrReviewComment,
+  PrSource,
+  ReviewState,
+  WorktreeSource,
+} from "./types";
 import { noteKey } from "./types";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -1291,5 +1301,148 @@ describe("charRange invariants under existing actions", () => {
     });
     const after = reducer(seeded, { type: "COLLAPSE_SELECTION" });
     expect(after.selection).toBeNull();
+  });
+});
+
+// ── MERGE_PR_OVERLAY ───────────────────────────────────────────────────────
+
+const MOCK_PR_SOURCE: PrSource = {
+  host: "github.com",
+  owner: "owner",
+  repo: "repo",
+  number: 42,
+  htmlUrl: "https://github.com/owner/repo/pull/42",
+  headSha: "headsha",
+  baseSha: "basesha",
+  state: "open",
+  title: "My PR",
+  body: "",
+  baseRef: "main",
+  headRef: "feat/branch",
+  lastFetchedAt: new Date().toISOString(),
+};
+
+const MOCK_PR_CONVERSATION: PrConversationItem[] = [
+  {
+    id: 1,
+    author: "alice",
+    createdAt: "2026-04-30T00:00:00Z",
+    body: "Looks good!",
+    htmlUrl: "https://github.com/owner/repo/pull/42#issuecomment-1",
+  },
+];
+
+const MOCK_WORKTREE_SOURCE: WorktreeSource = {
+  worktreePath: "/workspace/test",
+  commitSha: "abc123",
+  branch: "feat/branch",
+};
+
+describe("MERGE_PR_OVERLAY", () => {
+  function makeWorktreeChangeset(): ChangeSet {
+    // cs1/f1.ts file has lines with newNo 1, 2, 3 (h1) and 1, 2, 3 (h2)
+    const cs = defaultChangeset();
+    return { ...cs, worktreeSource: MOCK_WORKTREE_SOURCE };
+  }
+
+  it("sets prSource and prConversation on the target changeset", () => {
+    const cs = makeWorktreeChangeset();
+    const state = initialState([cs]);
+    const next = reducer(state, {
+      type: "MERGE_PR_OVERLAY",
+      changesetId: "cs1",
+      prSource: MOCK_PR_SOURCE,
+      prConversation: MOCK_PR_CONVERSATION,
+      lineComments: new Map(),
+    });
+    const nextCs = next.changesets.find((c) => c.id === "cs1")!;
+    expect(nextCs.prSource).toEqual(MOCK_PR_SOURCE);
+    expect(nextCs.prConversation).toEqual(MOCK_PR_CONVERSATION);
+  });
+
+  it("preserves worktreeSource on the changeset", () => {
+    const cs = makeWorktreeChangeset();
+    const state = initialState([cs]);
+    const next = reducer(state, {
+      type: "MERGE_PR_OVERLAY",
+      changesetId: "cs1",
+      prSource: MOCK_PR_SOURCE,
+      prConversation: [],
+      lineComments: new Map(),
+    });
+    const nextCs = next.changesets.find((c) => c.id === "cs1")!;
+    expect(nextCs.worktreeSource).toEqual(MOCK_WORKTREE_SOURCE);
+  });
+
+  it("attaches prReviewComments to matching lines and leaves non-matching lines untouched", () => {
+    const cs = makeWorktreeChangeset();
+    const state = initialState([cs]);
+
+    const comment: PrReviewComment = {
+      id: 100,
+      author: "reviewer",
+      createdAt: "2026-04-30T00:00:00Z",
+      body: "Nice work",
+      htmlUrl: "https://github.com/owner/repo/pull/42#comment-100",
+    };
+
+    // cs1/f1.ts has lines with newNo 1,2,3 in hunk h1
+    const lineComments = new Map<string, Map<number, PrReviewComment[]>>();
+    lineComments.set("cs1/f1.ts", new Map([[2, [comment]]]));
+
+    const next = reducer(state, {
+      type: "MERGE_PR_OVERLAY",
+      changesetId: "cs1",
+      prSource: MOCK_PR_SOURCE,
+      prConversation: [],
+      lineComments,
+    });
+    const nextCs = next.changesets.find((c) => c.id === "cs1")!;
+    const f1 = nextCs.files.find((f) => f.id === "cs1/f1")!;
+
+    // Line with newNo 2 should have the comment attached
+    const allLines = f1.hunks.flatMap((h) => h.lines);
+    const commentedLine = allLines.find((l) => l.newNo === 2);
+    expect(commentedLine?.prReviewComments).toHaveLength(1);
+    expect(commentedLine?.prReviewComments![0].id).toBe(100);
+
+    // Other lines should be untouched
+    const uncommentedLine = allLines.find((l) => l.newNo === 1);
+    expect(uncommentedLine?.prReviewComments).toBeUndefined();
+  });
+
+  it("preserves the diff structure (files/hunks/lines count unchanged)", () => {
+    const cs = makeWorktreeChangeset();
+    const state = initialState([cs]);
+    const next = reducer(state, {
+      type: "MERGE_PR_OVERLAY",
+      changesetId: "cs1",
+      prSource: MOCK_PR_SOURCE,
+      prConversation: [],
+      lineComments: new Map(),
+    });
+    const origCs = state.changesets.find((c) => c.id === "cs1")!;
+    const nextCs = next.changesets.find((c) => c.id === "cs1")!;
+    expect(nextCs.files.length).toBe(origCs.files.length);
+    for (let i = 0; i < origCs.files.length; i++) {
+      expect(nextCs.files[i].hunks.length).toBe(origCs.files[i].hunks.length);
+      for (let j = 0; j < origCs.files[i].hunks.length; j++) {
+        expect(nextCs.files[i].hunks[j].lines.length).toBe(
+          origCs.files[i].hunks[j].lines.length,
+        );
+      }
+    }
+  });
+
+  it("is a no-op for an unknown changesetId", () => {
+    const state = initialState([defaultChangeset()]);
+    const next = reducer(state, {
+      type: "MERGE_PR_OVERLAY",
+      changesetId: "nonexistent",
+      prSource: MOCK_PR_SOURCE,
+      prConversation: [],
+      lineComments: new Map(),
+    });
+    expect(next).toBe(state);
   });
 });
