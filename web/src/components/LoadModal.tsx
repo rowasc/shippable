@@ -107,6 +107,9 @@ export function LoadModal({ onLoad, onClose }: Props) {
     <div className="modal" onClick={tryCloseFromBackdrop}>
       <div
         className="modal__box"
+        role="dialog"
+        aria-modal="true"
+        aria-label="load changeset"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           // Global keymap bails out when focus is on an input/textarea, so

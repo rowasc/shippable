@@ -1118,6 +1118,9 @@ export function ReviewWorkspace({
         <div className="planview-overlay" onClick={() => setShowPlan(false)}>
           <div
             className="planview-overlay__box"
+            role="dialog"
+            aria-modal="true"
+            aria-label="review plan"
             onClick={(e) => e.stopPropagation()}
           >
             <ReviewPlanView

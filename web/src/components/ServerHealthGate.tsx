@@ -71,7 +71,12 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
   if (blockedByMissingKey) {
     return (
       <div className="boot-gate">
-        <div className="boot-gate__box">
+        <div
+          className="boot-gate__box"
+          role="dialog"
+          aria-modal="true"
+          aria-label="set up Anthropic API key"
+        >
           <KeySetup
             onSave={apiKey.save}
             onSkip={apiKey.skip}
@@ -86,7 +91,12 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
 
   return (
     <div className="boot-gate">
-      <div className="boot-gate__box">
+      <div
+        className="boot-gate__box"
+        role="dialog"
+        aria-modal="true"
+        aria-label="server status"
+      >
         <div className="boot-gate__label">shippable</div>
         {state === "checking" ? (
           <p className="boot-gate__msg">Checking server…</p>

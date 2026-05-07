@@ -91,9 +91,15 @@ export function HelpOverlay({
 
   return (
     <div className="help" onClick={onClose}>
-      <div className="help__box" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="help__box"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="help-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="help__head">
-          <div className="help__title">keybindings</div>
+          <div className="help__title" id="help-title">keybindings</div>
           <button
             type="button"
             className="help__close"

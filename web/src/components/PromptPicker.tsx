@@ -79,6 +79,9 @@ export function PromptPicker({ context, onClose, onSubmit }: Props) {
     <div className="modal" onClick={onClose}>
       <div
         className="modal__box"
+        role="dialog"
+        aria-modal="true"
+        aria-label={headerLabel}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           // Catch Escape locally — the global keymap handler bails out on

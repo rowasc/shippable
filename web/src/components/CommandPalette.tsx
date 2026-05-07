@@ -120,6 +120,9 @@ export function CommandPalette({ predicates, onClose, onPick }: Props) {
     <div className="modal" onClick={onClose}>
       <div
         className="modal__box cmdpal__box"
+        role="dialog"
+        aria-modal="true"
+        aria-label="command palette"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKey}
       >
