@@ -92,7 +92,17 @@ export function HelpOverlay({
   return (
     <div className="help" onClick={onClose}>
       <div className="help__box" onClick={(e) => e.stopPropagation()}>
-        <div className="help__title">keybindings</div>
+        <div className="help__head">
+          <div className="help__title">keybindings</div>
+          <button
+            type="button"
+            className="help__close"
+            onClick={onClose}
+            aria-label="close help"
+          >
+            × close
+          </button>
+        </div>
         {context && context.rows.length > 0 && (
           <>
             <div className="help__title help__title--sub">{context.title}</div>
@@ -167,6 +177,9 @@ export function HelpOverlay({
         <div className="help__hint">
           Lines you visit are marked as <em>read</em>. Press{" "}
           <kbd>⇧m</kbd> to sign off the current file as reviewed.
+        </div>
+        <div className="help__foot">
+          <kbd>Esc</kbd> to close
         </div>
       </div>
     </div>
