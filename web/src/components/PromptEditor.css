@@ -125,3 +125,37 @@
 .editor__spacer {
   flex: 1;
 }
+.editor__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.editor__confirm-q {
+  color: var(--fg-dim);
+}
+.editor__confirm-yes,
+.editor__confirm-no {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.editor__confirm-yes {
+  color: var(--red);
+  border-color: var(--red);
+}
+.editor__confirm-yes:hover,
+.editor__confirm-yes:focus-visible {
+  background: var(--red-bg);
+}
+.editor__confirm-no:hover,
+.editor__confirm-no:focus-visible {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}

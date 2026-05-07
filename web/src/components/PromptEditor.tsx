@@ -44,6 +44,9 @@ export function PromptEditor({
   );
   const [body, setBody] = useState(initial?.body ?? "");
   const [error, setError] = useState<string | null>(null);
+  // Inline two-step delete: matches the pattern in ReplyThread so we never
+  // pop a native confirm() that breaks focus and looks foreign in the modal.
+  const [armedDelete, setArmedDelete] = useState(false);
   // Edit-in-place when the source is "user". When initial is a library
   // prompt, save creates a user-prompt copy that overrides the library one.
   const isFork = initial?.source === "library";
@@ -116,7 +119,6 @@ export function PromptEditor({
 
   function handleDelete(): void {
     if (!fixedId || !onDeleted) return;
-    if (!confirm(`Delete "${name || fixedId}"?`)) return;
     deleteUserPrompt(fixedId);
     onDeleted(fixedId);
   }
@@ -226,12 +228,51 @@ export function PromptEditor({
 
       <div className="picker__actions">
         {isEditing && onDeleted && (
-          <button className="modal__btn editor__delete" onClick={handleDelete}>
-            delete
-          </button>
+          armedDelete ? (
+            <span
+              className="editor__confirm"
+              role="group"
+              aria-label="confirm delete"
+            >
+              <span className="editor__confirm-q">
+                delete &quot;{name || fixedId}&quot;?
+              </span>
+              <button
+                type="button"
+                className="editor__confirm-yes"
+                onClick={() => {
+                  setArmedDelete(false);
+                  handleDelete();
+                }}
+                autoFocus
+              >
+                yes
+              </button>
+              <button
+                type="button"
+                className="editor__confirm-no"
+                onClick={() => setArmedDelete(false)}
+              >
+                cancel
+              </button>
+            </span>
+          ) : (
+            <button
+              className="modal__btn editor__delete"
+              onClick={() => setArmedDelete(true)}
+            >
+              delete
+            </button>
+          )
         )}
         <span className="editor__spacer" />
-        <button className="modal__btn" onClick={onCancel}>
+        <button
+          className="modal__btn"
+          onClick={() => {
+            setArmedDelete(false);
+            onCancel();
+          }}
+        >
           cancel
         </button>
         <button
