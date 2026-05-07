@@ -127,9 +127,10 @@ export function ReviewWorkspace({
   const [definitionPeek, setDefinitionPeek] = useState<DefinitionPeekState>({
     kind: "idle",
   });
-  // Debug-only: when on, new replies are tagged `originType: "dirty"` so
-  // the detached-pile UX can be exercised before slice (a) lands real
-  // dirty-state polling. Reset on changeset switch.
+  // TODO(slice-a): remove this `debugDirty` toggle once polling lands —
+  // it stamps `originType: "dirty"` on new replies so the detached-pile UX
+  // is reachable from slice (c) alone. Grep `TODO(slice-a)` to find every
+  // call site (state, JSX button, reload-handler branch, anchor builder).
   const [debugDirty, setDebugDirty] = useState(false);
   const [debugReloading, setDebugReloading] = useState(false);
   const [debugReloadError, setDebugReloadError] = useState<string | null>(null);
@@ -764,9 +765,8 @@ export function ReviewWorkspace({
                     path: activeWorktreeSource.worktreePath,
                     branch: activeWorktreeSource.branch,
                   });
-                  // Slice (a) will set `dirty` from the polling probe; the
-                  // debug toggle stamps it manually for now so the dirty
-                  // origin caption is reachable from this slice alone.
+                  // TODO(slice-a): drop this branch — polling will set
+                  // `dirty` from the probe instead of the debug toggle.
                   if (reloaded.worktreeSource && debugDirty) {
                     reloaded.worktreeSource.dirty = true;
                   }
@@ -788,6 +788,7 @@ export function ReviewWorkspace({
                 {debugReloading ? "reloading…" : "↻ reload"}
               </span>
             </button>
+            {/* TODO(slice-a): remove this whole button when polling lands. */}
             <button
               type="button"
               className={`topbar__btn ${debugDirty ? "topbar__btn--on" : ""}`}
@@ -940,6 +941,9 @@ export function ReviewWorkspace({
                   body,
                   createdAt: createdAt.toISOString(),
                   enqueuedCommentId: null,
+                  // TODO(slice-a): replace `debugDirty` with the value
+                  // from the polling probe; this whole `{ dirty }` arg
+                  // can drop the toggle reference.
                   ...buildReplyAnchor(key, cs, { dirty: debugDirty }),
                 },
               });
