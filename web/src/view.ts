@@ -549,7 +549,7 @@ export interface BuildStatusBarViewModelArgs {
 }
 
 const DEFAULT_HINT =
-  "j/k line · ]/[ file · / prompt · c comment · ⇧M sign off · i inspector · p plan · ? help";
+  "? full help · ⌘K commands · j/k line · ]/[ file · c comment · ⇧M sign off";
 
 export function buildStatusBarViewModel({
   totalFiles,
