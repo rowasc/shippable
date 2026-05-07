@@ -105,7 +105,19 @@ export function LoadModal({ onLoad, onClose }: Props) {
 
   return (
     <div className="modal" onClick={tryCloseFromBackdrop}>
-      <div className="modal__box" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal__box"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // Global keymap bails out when focus is on an input/textarea, so
+          // Escape inside this modal's fields would have nowhere to go.
+          // Handle it locally.
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            onClose();
+          }
+        }}
+      >
         <header className="modal__h">
           <span className="modal__h-label">load changeset</span>
           <button className="modal__close" onClick={onClose}>
