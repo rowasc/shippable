@@ -123,27 +123,25 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
             <h2 className="welcome__sec-h">Recent</h2>
             <ul className="welcome__recents-list">
               {recents.map((r) => (
-                <li key={r.id}>
+                <li key={r.id} className="welcome__recent">
                   <button
                     type="button"
-                    className="welcome__recent"
+                    className="welcome__recent-open"
                     onClick={() => loadFromRecent(r)}
                   >
                     <span className="welcome__recent-title">{r.title}</span>
                     <span className="welcome__recent-meta">
                       {sourceLabel(r.source)} · {timeAgo(r.addedAt)}
                     </span>
-                    <span
-                      className="welcome__recent-x"
-                      role="button"
-                      title="forget this entry"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        dismissRecent(r.id);
-                      }}
-                    >
-                      ×
-                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="welcome__recent-x"
+                    aria-label={`forget ${r.title}`}
+                    title="forget this entry"
+                    onClick={() => dismissRecent(r.id)}
+                  >
+                    ×
                   </button>
                 </li>
               ))}
