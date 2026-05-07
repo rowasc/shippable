@@ -15,9 +15,11 @@ We do **not** add a new tab, new column, or a modal. The Inspector's vertical-st
 3. **Plan / todos** (collapsed). The agent's todo state at the end of the slice. Done items struck through, in-progress highlighted, pending plain.
 4. **Transcript tail** (collapsed). Last 3 assistant messages by default; expand to see the full slice. Tool calls render as one-line summaries (`Read web/src/state.ts`, `Edit server/src/worktrees.ts (3 changes)`); click to expand the call's full arguments.
 5. **Cost & duration** (collapsed). One-line: `4 turns · 12.4k input · 1.8k output · 38s · sonnet-4-6`. Pulled from transcript metadata.
-6. **Send to agent** (always at the bottom of the section). Composer + button. See "Send-to-agent affordance" below.
+6. **Delivered (N)** (collapsed). Newest-first list of comments the agent has fetched, with timestamps. Drives the macro view of the queue substrate.
 
 Each section's collapsed/expanded state persists in localStorage per worktree, same shape as the existing review state.
+
+> **Free-form composer is gone.** The earlier "Send to agent" composer was removed by the agent-reply work — see `docs/sdd/agent-reply-support/spec.md`. Reviewer → agent freeform messaging now flows out-of-band into the user-agent chat. Comment-anchored replies (line / block / reply-to-AI etc.) and the new agent → reviewer back-channel cover the structured flow.
 
 ## Symbol links in chat
 
@@ -41,20 +43,23 @@ By default, the panel auto-matches the worktree to a Claude Code session by comp
 
 The dropdown is the recovery path. Users who want to view the panel against a different session, or who ran their session in a sibling directory, can pick from a list of recent sessions. The choice persists per `(repo-root, branch)`.
 
-## Send-to-agent affordance
+## Agent → reviewer back-channel
 
-A composer at the bottom of the section. One textarea, one "Send to agent" button. Optionally, a "+ attach: this hunk / this file / this comment" picker that prepends a quoted snippet to the message. Behavior:
+After the agent fetches comments via `shippable_check_review_comments`, it posts structured per-comment replies via the new `shippable_post_review_reply` tool. Each reply carries `{ commentId, body, outcome }` where `outcome ∈ { addressed, declined, noted }`. The reviewer UI polls `GET /api/agent/replies` while the panel is mounted AND the tab is visible; new replies surface threaded under the original comment, with an outcome icon and a generic "agent" label. Multiple replies to the same comment append.
 
-1. Submit POSTs to `/api/agent/enqueue` with a `freeform` comment kind. The comment lands on the local server's per-worktree queue alongside any line/block/reply comments authored on the diff. See `docs/plans/share-review-comments.md` for the queue substrate.
-2. The composer status indicator returns to idle on success — there is no separate "queued" sub-state on the composer itself. The freeform comment surfaces in the panel's `Delivered (N)` block once the agent fetches via the MCP pull tool.
-3. **Latency model:** the comment is **delivered when the agent calls the MCP tool, typically when prompted with `check shippable`**. We say this in the placeholder copy. We do *not* claim mid-turn delivery — pull means the agent fetches when prompted, not on a timer.
+Pushback / clarification on a `declined` reply does **not** flow back through Shippable — that conversation belongs in the user-agent chat. Shippable's role is to surface what the agent did, not to host a multi-turn debate.
+
+See `docs/sdd/agent-reply-support/spec.md` for the full design.
 
 ## MCP install affordance
 
-The panel renders a prominent install section at the top when no `shippable` MCP entry is detected in the user's Claude Code config (and the user hasn't dismissed it). Two click-to-copy chips:
+The panel renders a prominent install section at the top when no `shippable` MCP entry is detected in the user's Claude Code config (and the user hasn't dismissed it). Three click-to-copy chips:
 
 - **Install:** `claude mcp add shippable -- npx -y @shippable/mcp-server` (Claude Code; per-harness adaptation lands as more harnesses surface real demand). See `mcp-server/README.md` for the full per-harness install matrix (Codex CLI, Cursor / Cline / Claude Desktop / OpenCode).
-- **Then say:** `check shippable` — the magic phrase that triggers the agent to call the tool. The MCP tool description is tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback") but the literal phrase is the reliable fallback.
+- **Pull comments:** `check shippable` — the magic phrase that triggers the agent to call `shippable_check_review_comments`.
+- **Report back:** `report back to shippable` — the fallback phrase that nudges the agent to post per-comment replies via `shippable_post_review_reply` after addressing them.
+
+Both tool descriptions are tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback", "let shippable know what you did"), but the literal phrases are the reliable fallback.
 
 Detection is server-side — `GET /api/worktrees/mcp-status` reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, looks for an entry named `shippable` under `mcpServers` (canonical) or a permissive variant. When present, the affordance collapses to a one-line `✓ MCP installed`. For other harnesses (no programmatic detection) the affordance offers an **"I installed it"** dismiss button persisted per-machine in `localStorage` under `shippable.mcpInstallDismissed`.
 

@@ -6,7 +6,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 
 ## Tasks
 
-### Task 1: Add `AgentReply` type and `Outcome` union to server queue module
+### ✅ Task 1: Add `AgentReply` type and `Outcome` union to server queue module
 - **Files**: `server/src/agent-queue.ts`
 - **Do**:
   1. Add `Outcome` union: `'addressed' | 'declined' | 'noted'`.
@@ -17,7 +17,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: types compile, no test changes required.
 - **Depends on**: none
 
-### Task 2: Add reply store + `postReply` / `listReplies` with tests
+### ✅ Task 2: Add reply store + `postReply` / `listReplies` with tests
 - **Files**: `server/src/agent-queue.ts`, `server/src/agent-queue.test.ts`
 - **Do**:
   1. Write failing tests in `agent-queue.test.ts`: (a) `postReply` appends to the worktree's reply list and returns the assigned id; (b) repeated `postReply` to the same `commentId` appends rather than overwrites; (c) `listReplies` returns entries sorted by `postedAt` ascending; (d) `listReplies` for an unknown worktree returns `[]`; (e) `resetForTests` clears replies.
@@ -28,7 +28,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; existing queue tests still pass.
 - **Depends on**: Task 1
 
-### Task 3: Remove `freeform` `CommentKind` and simplify queue
+### ✅ Task 3: Remove `freeform` `CommentKind` and simplify queue
 - **Files**: `server/src/agent-queue.ts`, `server/src/agent-queue.test.ts`
 - **Do**:
   1. Delete `'freeform'` from the `CommentKind` union.
@@ -39,7 +39,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; `npm run typecheck` passes in `server/`.
 - **Depends on**: Task 2
 
-### Task 4: Add `POST /api/agent/replies` endpoint with tests
+### ✅ Task 4: Add `POST /api/agent/replies` endpoint with tests
 - **Files**: `server/src/index.ts`, `server/src/index.test.ts`
 - **Do**:
   1. Write failing tests in `index.test.ts`: (a) happy-path `POST /api/agent/replies` with `{ worktreePath, commentId, body, outcome }` returns `{ id }` and persists via `listReplies`; (b) invalid `outcome` returns 400; (c) missing `worktreePath` returns 400 (or whichever shape `assertGitDir` already imposes — match the existing `enqueue` endpoint's behavior); (d) bad `worktreePath` (not a git dir) returns the same error shape as enqueue.
@@ -50,7 +50,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; existing endpoint tests still pass.
 - **Depends on**: Task 3
 
-### Task 5: Add `GET /api/agent/replies` endpoint with tests
+### ✅ Task 5: Add `GET /api/agent/replies` endpoint with tests
 - **Files**: `server/src/index.ts`, `server/src/index.test.ts`
 - **Do**:
   1. Write failing tests: (a) `GET /api/agent/replies?worktreePath=...` returns `{ replies: AgentReply[] }` for a worktree with replies; (b) returns `{ replies: [] }` for an unknown worktree; (c) bad `worktreePath` returns the same error shape as the `delivered` endpoint.
@@ -61,7 +61,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes.
 - **Depends on**: Task 4
 
-### Task 6: Drop freeform-specific handling in server endpoints
+### ✅ Task 6: Drop freeform-specific handling in server endpoints
 - **Files**: `server/src/index.ts`, `server/src/index.test.ts`
 - **Do**:
   1. Search `server/src/index.ts` for any references to the freeform comment kind in request validation, payload formatting, or fixtures. Remove them.
@@ -71,7 +71,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes, typecheck passes.
 - **Depends on**: Task 5
 
-### Task 7: Add `handlePostReviewReply` to MCP server with tests
+### ✅ Task 7: Add `handlePostReviewReply` to MCP server with tests
 - **Files**: `mcp-server/src/handler.ts`, `mcp-server/src/handler.test.ts`
 - **Do**:
   1. Write failing tests: (a) happy-path: handler POSTs to `/api/agent/replies` with the input `{ commentId, body, outcome, worktreePath }`, returns a success `ToolResult` containing the assigned id; (b) connection error returns an `isError: true` ToolResult with a clear message; (c) non-OK HTTP response returns `isError: true`; (d) missing `worktreePath` falls back to `cwd()`.
@@ -82,7 +82,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes in `mcp-server/`.
 - **Depends on**: Task 5
 
-### Task 8: Register `shippable_post_review_reply` MCP tool
+### ✅ Task 8: Register `shippable_post_review_reply` MCP tool
 - **Files**: `mcp-server/src/index.ts`
 - **Do**:
   1. Register the new tool next to the existing `shippable_check_review_comments`. Input schema: `{ commentId: string, body: string, outcome: enum('addressed', 'declined', 'noted'), worktreePath?: string }`.
@@ -92,7 +92,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: `npm run build` and `npm run typecheck` both pass in `mcp-server/`.
 - **Depends on**: Task 7
 
-### Task 9: Update `mcp-server/README.md`
+### ✅ Task 9: Update `mcp-server/README.md`
 - **Files**: `mcp-server/README.md`
 - **Do**:
   1. Add a section documenting `shippable_post_review_reply`: input shape, the three outcome values, when the agent should call it.
@@ -101,7 +101,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: README renders correctly.
 - **Depends on**: Task 8
 
-### Task 10: Add `AgentReply` interface and `agentReplies` field to `Reply`
+### ✅ Task 10: Add `AgentReply` interface and `agentReplies` field to `Reply`
 - **Files**: `web/src/types.ts`
 - **Do**:
   1. Add `AgentReply` interface (mirror of the server shape, sans `commentId` since the parent `Reply.enqueuedCommentId` already carries that link): `{ id: string; body: string; outcome: 'addressed' | 'declined' | 'noted'; postedAt: string; agentLabel?: string }`.
@@ -113,7 +113,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: typecheck passes; build passes.
 - **Depends on**: Task 1
 
-### Task 11: Add persist-rehydrate migration for `agentReplies`
+### ✅ Task 11: Add persist-rehydrate migration for `agentReplies`
 - **Files**: persist module under `web/src/` (likely `state.ts` or `persist.ts` — locate via existing `enqueuedCommentId` migration)
 - **Do**:
   1. Locate the existing `Reply` migration logic (the `enqueuedCommentId` JSDoc at `web/src/types.ts:139-145` references a persist-layer migration for replies that pre-date the queue).
@@ -125,7 +125,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; existing persist tests still pass.
 - **Depends on**: Task 10
 
-### Task 12: Add `mergeAgentReplies` reducer with tests
+### ✅ Task 12: Add `mergeAgentReplies` reducer with tests
 - **Files**: `web/src/state.ts` (or wherever `ReviewState` reducers live; same module that owns the existing `delivered` merge), corresponding test file
 - **Do**:
   1. Write failing tests for `mergeAgentReplies(state, polled)`: (a) for a polled `(commentId, AgentReply[])` group, find the Reply in `replies[*]` whose `enqueuedCommentId === commentId` and reconcile its `agentReplies` array — existing ids update in place, new ids append; (b) entries are sorted by `postedAt` ascending after the merge; (c) no-op when no Reply matches the `commentId`; (d) repeated polls of the same data are idempotent (state shape unchanged after the second merge).
@@ -136,7 +136,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes.
 - **Depends on**: Task 11
 
-### Task 13: Replace polling-active predicate with `panelMounted && tabVisible`
+### ✅ Task 13: Replace polling-active predicate with `panelMounted && tabVisible`
 - **Files**: `web/src/state.ts` (or wherever the existing `delivered` polling loop lives), corresponding test file
 - **Do**:
   1. Locate the current polling loop and its active predicate (which checks for queued/delivered pip state).
@@ -148,7 +148,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; existing polling tests still pass (or are updated alongside).
 - **Depends on**: Task 12
 
-### Task 14: Add `fetchAgentReplies` to the poll loop
+### ✅ Task 14: Add `fetchAgentReplies` to the poll loop
 - **Files**: `web/src/state.ts` (or wherever `fetchDelivered` lives)
 - **Do**:
   1. Add `fetchAgentReplies(worktreePath)` calling `GET /api/agent/replies?worktreePath=...`. Returns the parsed array of agent replies grouped by `commentId`.
@@ -158,7 +158,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes; the polled reply appears in state.
 - **Depends on**: Task 13
 
-### Task 15: Remove free-form composer from `AgentContextSection`
+### ✅ Task 15: Remove free-form composer from `AgentContextSection`
 - **Files**: `web/src/components/AgentContextSection.tsx`, any related test/fixture file
 - **Do**:
   1. Locate the free-form composer JSX, its draft-persistence hook(s), submit handler, and any related state.
@@ -169,7 +169,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: lint + typecheck + build all clean.
 - **Depends on**: Task 14
 
-### Task 16: Surface install affordance + both magic phrases
+### ✅ Task 16: Surface install affordance + both magic phrases
 - **Files**: `web/src/components/AgentContextSection.tsx`
 - **Do**:
   1. Verify the existing install affordance still renders correctly (untouched by the freeform removal).
@@ -179,7 +179,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: panel renders with both chips; copy-to-clipboard works (manual smoke OK).
 - **Depends on**: Task 15
 
-### Task 17: Render `agentReplies` in `ReplyThread`
+### ✅ Task 17: Render `agentReplies` in `ReplyThread`
 - **Files**: `web/src/components/ReplyThread.tsx`, corresponding test/snapshot file
 - **Do**:
   1. Write a failing rendering test: a Reply with one `AgentReply` of each `outcome` value renders three nested child blocks below the parent Reply, each with the corresponding outcome icon, the body text, the timestamp, and the generic "agent" label.
@@ -190,7 +190,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: vitest passes.
 - **Depends on**: Task 14
 
-### Task 18: Apply visual treatment to nested agent replies
+### ✅ Task 18: Apply visual treatment to nested agent replies
 - **Files**: `web/src/components/ReplyThread.tsx`, the relevant CSS/theme file (locate via existing reply styling)
 - **Do**:
   1. Add styling for the nested agent-reply block: indent (matches existing nested-content indent in the codebase if there is one), subtle background tint, identity chip with "agent" label, outcome icons (✅ addressed / ⊘ declined / ℹ︎ noted — or whatever fits the existing icon set; check `web/src/` for an existing icon component).
@@ -199,7 +199,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: build + lint clean; visual smoke looks right.
 - **Depends on**: Task 17
 
-### Task 19: Update `docs/concepts/agent-context.md`
+### ✅ Task 19: Update `docs/concepts/agent-context.md`
 - **Files**: `docs/concepts/agent-context.md`
 - **Do**:
   1. Rewrite § Two-way (or whichever section currently describes the pull channel) to cover the new back-channel: agent → reviewer via `shippable_post_review_reply`, structured with `outcome`, threaded under the matching reviewer Reply.
@@ -209,7 +209,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: docs render; cross-links resolve.
 - **Depends on**: Task 18
 
-### Task 20: Update `docs/plans/share-review-comments.md`
+### ✅ Task 20: Update `docs/plans/share-review-comments.md`
 - **Files**: `docs/plans/share-review-comments.md`
 - **Do**:
   1. Update the slice list, behavior section, and state section to reflect the freeform removal (composer gone, `freeform` `CommentKind` gone).
@@ -219,7 +219,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: docs render; cross-links resolve.
 - **Depends on**: Task 19
 
-### Task 21: Update `docs/features/agent-context-panel.md`
+### ✅ Task 21: Update `docs/features/agent-context-panel.md`
 - **Files**: `docs/features/agent-context-panel.md`
 - **Do**:
   1. Update the install/onboarding section: surface both magic phrases (`check shippable`, `report back to shippable`).
@@ -228,7 +228,7 @@ Based on: docs/sdd/agent-reply-support/spec.md
 - **Verify**: docs render.
 - **Depends on**: Task 20
 
-### Task 22: End-to-end verification
+### ✅ Task 22: End-to-end verification
 - **Files**: none — verification only
 - **Do**:
   1. Run `npm run build`, `npm run lint`, `npm run test` in `web/`.

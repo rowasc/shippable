@@ -50,15 +50,23 @@ The panel is collapsed-by-default for everything except Task and Files-touched, 
 
 ## Two-way: feedback back to the agent
 
-The same panel hosts the reverse direction, but the channel is a **pull**: the reviewer authors structured comments (line, block, replies, freeform) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling the `shippable_check_review_comments` MCP tool — typically when prompted with the magic phrase `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment. See `docs/plans/share-review-comments.md` for the full design and § Why pull, not push for the comparison with the earlier hook-based push channel.
+The same panel hosts the reverse direction. There are now **two MCP tools** wiring the loop end-to-end:
+
+1. **Reviewer → agent (pull).** The reviewer authors structured comments (line, block, replies) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling `shippable_check_review_comments` — typically when prompted with `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment.
+2. **Agent → reviewer (post-back).** After addressing each fetched comment, the agent calls `shippable_post_review_reply` with `{ commentId, body, outcome }` where `outcome ∈ { addressed, declined, noted }`. The reply lands in the local server's per-worktree reply store and surfaces threaded under the original reviewer comment in the panel on the next poll. The fallback magic phrase is `report back to shippable`.
+
+The free-form composer and the `freeform` `CommentKind` are gone — reply support is comment-anchored only. Pushback or clarification on a `declined` reply flows out-of-band into the user-agent chat, not back through Shippable.
+
+See `docs/plans/share-review-comments.md` for the original pull design and `docs/sdd/agent-reply-support/spec.md` for the post-back half.
 
 Concretely:
 
-- **Transport:** `POST /api/agent/pull` (server) ← `mcp-server/` shim ← agent's MCP client. The local server binds 127.0.0.1; no LAN exposure, no token in v0.
-- **Latency model:** comments arrive when the agent calls the tool — typically when the user says `check shippable`. We surface that exact phrase in the install affordance. Mid-turn delivery is deliberately not in scope.
-- **Install affordance:** the panel renders the per-harness install line (Claude Code default: `claude mcp add shippable -- npx -y @shippable/mcp-server`) and the magic phrase as click-to-copy chips. The server detects a configured `shippable` MCP entry in `~/.claude/settings.json` / `~/.claude/settings.local.json` and collapses the install affordance to a one-line ✓ when present.
+- **Transport:** `POST /api/agent/pull`, `POST /api/agent/replies`, `GET /api/agent/replies` on the local server ← `mcp-server/` shim ← agent's MCP client. Localhost-only bind; no LAN exposure, no token in v0.
+- **Latency model:** comments arrive when the agent calls the tool — typically when the user says `check shippable`. Replies arrive when the agent calls `shippable_post_review_reply` after addressing each comment, or when prompted with `report back to shippable`. The reviewer UI polls `/api/agent/replies` while the panel is mounted AND the tab is visible; mid-turn delivery is deliberately not in scope, but as soon as the agent posts the reviewer sees it within a poll cycle.
+- **Install affordance:** the panel renders the per-harness install line and the two magic phrases (`check shippable`, `report back to shippable`) as click-to-copy chips. The server detects a configured `shippable` MCP entry in `~/.claude/settings.json` / `~/.claude/settings.local.json` and collapses the install affordance to a one-line ✓ when present.
+- **Threading shape:** one level of nested threading. Each reviewer `Reply` carries an optional `agentReplies: AgentReply[]` array; the merge step keys on `Reply.enqueuedCommentId ↔ AgentReply.commentId` and is idempotent on re-poll. Users cannot reply *to* an agent reply within Shippable; pushback flows out-of-band. The threading limitation is intentional — see the spec for forward-compat notes.
 
-Why pull instead of writing to `CLAUDE.md` or a hook: pull collapses the explicit "Send" gesture into the user's natural next prompt, covers every MCP-speaking harness with one transport, and aligns with Shippable as a passive workspace rather than a tool that wedges itself into the build loop. The earlier hook-based file inbox at `<worktree>/.shippable/inbox.md` was built once on `worktree-agent-context-panel`, kept as a record, and replaced.
+Why pull (and now structured post-back) instead of writing to `CLAUDE.md` or a hook: it collapses the explicit "Send" gesture into the user's natural next prompt, covers every MCP-speaking harness with one transport, and aligns with Shippable as a passive workspace rather than a tool that wedges itself into the build loop. The earlier hook-based file inbox at `<worktree>/.shippable/inbox.md` was built once on `worktree-agent-context-panel`, kept as a record, and replaced.
 
 ## Refresh model
 
@@ -68,7 +76,7 @@ We deliberately do not file-watch the JSONL transcripts themselves. The reviewer
 
 ## What this is not
 
-- **Not a chat client.** No threading, no message reactions, no multi-room. The send-to-agent composer is a single-shot inbox drop.
+- **Not a chat client.** No multi-author threads, no reactions, no multi-room. Agent replies surface as a single nested level under the reviewer Reply they answer; pushback / clarification stays in the user-agent chat.
 - **Not a session manager.** The Claude Code CLI manages sessions; we read what it writes.
 - **Not load-bearing on a sandbox.** It works for any worktree where Claude Code ran with `cwd` inside it — agentic sandbox or hand-driven branch.
 - **Not a substitute for reading the diff.** The agent's narrative is one signal. The diff is the source of truth.

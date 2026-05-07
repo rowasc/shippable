@@ -82,8 +82,8 @@ Localhost-bound, no auth, same security posture as today.
 ### Data Flow
 
 **Posting a reply (agent → reviewer).**
-1. Agent processes a comment fetched via `shippable_check_review_comments`.
-2. Agent calls `shippable_post_review_reply` with `{ commentId, body, outcome }` (worktreePath inferred from `cwd` if absent).
+1. Agent processes a comment fetched via `shippable_check_review_comments`. Each `<comment>` in the returned envelope carries an `id="…"` attribute — the agent must capture it on first read because pull-and-ack drains the queue.
+2. Agent calls `shippable_post_review_reply` with `{ commentId, body, outcome }` where `commentId` is the captured `id` attribute (worktreePath inferred from `cwd` if absent).
 3. MCP server POSTs to `http://127.0.0.1:<port>/api/agent/replies`.
 4. Local server validates `worktreePath` (existing `assertGitDir`), validates the `commentId` belongs to a delivered comment for that worktree (defensive), validates `outcome ∈ { addressed, declined, noted }`, appends to the worktree's reply list.
 5. Tool result returns success (or a clear error if validation failed).
