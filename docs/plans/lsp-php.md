@@ -92,14 +92,40 @@ The discovery error message needs a small change so it points at the right binar
 
 ## Test plan
 
-Real PHP, no mocks (per the project's testing principles):
+Two explicit suites. Both are required to ship; neither silently skips.
 
-1. Fixture diff with a PHP file that calls a function defined in another PHP file in the same worktree.
-2. `it.skip` if neither intelephense nor phpactor is on `PATH` — CI doesn't have one yet, and faking the LSP's responses won't catch the real failure modes (initialize hangs, didOpen ordering, capability mismatches).
-3. Two real-LSP integration tests, one per server, gated on the binary being present:
-   - in-diff jump (target file is also in the changeset)
-   - peek (target file is in the worktree but not in the changeset)
-4. A unit test for the discovery probe order — pure function, no LSP needed.
+### Unit / integration suite (`npm run test`)
+
+Runs against a **stub LSP server** — a small fixture subprocess that speaks the JSON-RPC framing on stdio and answers the methods we use (`initialize`, `initialized`, `textDocument/didOpen`, `textDocument/definition`, `shutdown`) with canned responses. Real subprocess + real framing means the wire-level failure modes (initialize handshake, didOpen ordering, request/response correlation) *are* exercised — what's controlled is the LSP's *answer*, not the protocol. This is consistent with the project's testing principles: we are not mocking our own modules, we are providing a controlled fixture for an external service so the test pays for itself and runs deterministically in CI.
+
+This is a deliberate revision of an earlier "real PHP, no mocks" framing. The deterministic things our code owns — capability gating, fallback when no LSP is available, the `Location` → file/line translation, the discovery probe order — don't need a real PHP indexer to test. They need controlled inputs.
+
+Tests:
+
+1. **In-diff jump.** Stub returns a `Location` pointing at another file in the changeset. Assert the definition endpoint resolves the target and the diff reader scrolls to it.
+2. **Peek (out-of-diff target).** Stub returns a `Location` pointing at a file present in the worktree but not the changeset. Assert the peek payload has the right path and content.
+3. **Capability gating.** Stub reports the language as unavailable on `initialize`; endpoint surfaces the right error and the chip reads `def: JS/TS only`.
+4. **didOpen sequencing.** Stub asserts `didOpen` arrives before `definition` for any file we ask about, and counts duplicates — guards against re-opening already-open documents.
+5. **Discovery probe order.** Pure unit test, no subprocess needed.
+
+### End-to-end suite (`npm run test:e2e`)
+
+Runs against the **real LSP binaries**. This is the suite that catches "intelephense changed its response shape in 1.10.4" — the stub can't model that.
+
+**Never silently skipped.** The suite has a single `beforeAll` that probes for `intelephense` and `phpactor` on `PATH` (or `SHIPPABLE_PHP_LSP`); if neither is found, it **fails the suite** with an explicit message:
+
+> `e2e: no PHP LSP found on PATH. Install one (`composer global require intelephense/intelephense` or `composer global require phpactor/phpactor`) or set SHIPPABLE_PHP_LSP. To run only the unit/integration suite, use `npm run test`.`
+
+There is no `it.skip` path. CI installs at least one binary as a setup step; local devs do too, or run the unit suite. The dev-facing trade-off is explicit: you can run `test` without PHP installed, but `test:e2e` will fail loudly until you install it.
+
+Tests, **once per available server** (intelephense, phpactor), so a regression in either is visible:
+
+E1. One fixture worktree with a PHP function-call diff; assert the response is non-empty and points at a plausible target. Intentionally does not assert exact line numbers — LSP behaviour drifts between versions.
+E2. The same in-diff and peek shapes as the unit suite, but against a real index. Confirms our wiring works against an actual server, not just our stub's idea of one.
+
+If only one of the two binaries is on `PATH`, that one runs; the other reports "binary not present" as a *failure* unless explicitly waived via `SHIPPABLE_E2E_PHP_LSPS=intelephense` (or similar) — silent partial coverage is what we're trying to avoid.
+
+The stub fixture is shared with `lsp-code-graph.md` and any future LSP-backed feature.
 
 ## Risks / open questions
 
@@ -114,3 +140,4 @@ Real PHP, no mocks (per the project's testing principles):
 - Builds on the LSP plumbing already in place from plan-symbols.md Step 2.
 - Does *not* require Step 5 (browser resolvers) or Step 8 (memory-only).
 - Unblocks adding gopls / rust-analyzer / clangd — same LanguageModule shape, different binaries.
+- Reused as a graph edge source by [`lsp-code-graph.md`](lsp-code-graph.md) — second consumer of the same LanguageModule, this time for diagram edges instead of click-through.
