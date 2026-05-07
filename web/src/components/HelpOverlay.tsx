@@ -120,6 +120,31 @@ export function HelpOverlay({
             ))}
           </tbody>
         </table>
+        <div className="help__title help__title--sub">gutter glyphs</div>
+        <table className="help__table help__table--legend">
+          <tbody>
+            <tr>
+              <td><span className="help__glyph help__glyph--warn">!</span></td>
+              <td>AI flagged a warning on this line</td>
+            </tr>
+            <tr>
+              <td><span className="help__glyph help__glyph--question">?</span></td>
+              <td>AI has a question for you on this line</td>
+            </tr>
+            <tr>
+              <td><span className="help__glyph help__glyph--info">i</span></td>
+              <td>AI left an informational note</td>
+            </tr>
+            <tr>
+              <td><span className="help__glyph">✓</span></td>
+              <td>you acked the AI note (press <kbd>a</kbd> to toggle)</td>
+            </tr>
+            <tr>
+              <td><span className="help__glyph">“</span></td>
+              <td>your comment thread is on this line</td>
+            </tr>
+          </tbody>
+        </table>
         <div className="help__title help__title--sub">testing</div>
         <table className="help__table">
           <tbody>

@@ -41,3 +41,23 @@
   margin-top: 12px;
   font-size: 11px;
 }
+.help__table--legend td:first-child {
+  text-align: center;
+  font-size: 13px;
+}
+.help__glyph {
+  display: inline-block;
+  width: 18px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--fg);
+}
+.help__glyph--warn {
+  color: var(--red);
+}
+.help__glyph--question {
+  color: var(--yellow);
+}
+.help__glyph--info {
+  color: var(--accent);
+}
