@@ -41,6 +41,7 @@ Click-through definition at a minimum
 ### Basics
 - A macOS `.dmg` we'd be happy handing to a teammate to use.
 - Tests and CI, so we're not the bottleneck for every release.
+- Local storage of reviews.
 - AI reviewer integration. Initially only Anthropic APIs are supported.
 - Local-only human review workflows, with local storage mechanisms (SQLite)
 - Review any file or diff.
