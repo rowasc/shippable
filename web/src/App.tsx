@@ -232,11 +232,21 @@ export default function App() {
         branch: provenance.branch,
         state: json.state,
       };
-      handleLoadChangeset(newCs, {}, {
+      // RELOAD_CHANGESET (not LOAD_CHANGESET) so the anchoring pass runs:
+      // existing replies re-anchor to the new diff or move into the
+      // Detached pile. LOAD_CHANGESET would silently orphan them.
+      const source: RecentSource = {
         kind: "worktree",
         path: provenance.path,
         branch: provenance.branch,
+      };
+      dispatch({
+        type: "RELOAD_CHANGESET",
+        prevChangesetId: activeCs.id,
+        changeset: newCs,
       });
+      setCurrentSource(source);
+      setRecents(pushRecent(newCs, {}, source));
       setStaleNext(null);
     } catch (err) {
       console.error("[shippable] live-reload reload failed:", err);

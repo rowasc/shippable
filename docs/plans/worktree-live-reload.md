@@ -97,11 +97,11 @@ Implementation notes from the slice (c) landing:
 
 Slices (a)–(d) are the feature. (e) is the next-most-useful follow-up. (f) is an "if we need it."
 
-### Status (2026-05-06)
+### Status (2026-05-07)
 
-- **(a) Polling + banner** — shipped. `POST /api/worktrees/state`, hook, `LiveReloadBar`, `LOAD_CHANGESET` reload via the existing changeset endpoint with `dirty=true` honored.
+- **(a) Polling + banner** — shipped. `POST /api/worktrees/state`, hook, `LiveReloadBar`, reload via the existing changeset endpoint with `dirty=true` honored.
 - **(b) Per-worktree toggle persistence** — shipped. `getLiveReloadEnabled` / `setLiveReloadEnabled` in `web/src/persist.ts`, keyed by absolute path, default-on, in its own localStorage key so `clearSession()` doesn't reset it.
-- **(c) Content-anchored comments + detached sidebar** — separate worktree.
+- **(c) Content-anchored comments + detached sidebar** — shipped. Reducer + Sidebar UI landed earlier; the worktree-reload code path now dispatches `RELOAD_CHANGESET` instead of `LOAD_CHANGESET` so the anchoring pass runs on the existing replies.
 - **(d) Stop polling when the worktree is gone** — shipped. Three-strike error counter in the hook; `onWorktreeGone` fires once.
 - **(e) View at `<sha>`** — shipped. `POST /api/worktrees/file-at` (`git show <sha>:<file>`); inline panel under detached committed entries scrolls to `Reply.anchorLineNo`.
 - **(f)** — not started.
