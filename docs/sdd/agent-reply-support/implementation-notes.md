@@ -20,6 +20,30 @@
 - **Reason**: Task 3's verify step requires `npm run typecheck` to pass, which fails until Task 6's endpoint cleanup happens (the `freeform` literal in `index.ts` references the dropped enum value). Splitting them would mean an intermediate commit with broken typecheck — worse than one cohesive commit. Tasks 4 and 5 were merged because the work was naturally interleaved (router registrations, handlers, tests for both endpoints in the same module).
 - **Impact**: cleaner git history; same code shipped.
 
+### MCP tool input parameter is `replyText`, not `body`
+- **Spec said**: `{ commentId, body, outcome }` for both the wire shape and the MCP tool input (spec §§ Requirements Summary, Architecture, Data Flow).
+- **Implementation does**: the MCP tool's input parameter is `replyText`. The HTTP wire field on `POST /api/agent/replies` and the storage shape (`AgentReply.body`) keep the spec name `body`. The MCP handler maps `replyText → body` when it constructs the HTTP payload.
+- **Reason**: caught during real-world testing. Some model serializers conflate the parameter name `body` with HTML's `<body>` element and emit stray `</body>` close tags into the value; a lenient harness parser then sweeps those characters into the parameter string and the closing-tag text gets posted as part of the reply. Renaming the MCP boundary to `replyText` removes the HTML-element collision and the leakage stops. The wire and storage names stay `body` because no model touches them — only the human reviewer's UI does.
+- **Impact**: the MCP tool's input schema diverges from the spec on one parameter name. Anyone reading the spec should map `body` (spec) → `replyText` (MCP tool input). Documented in `mcp-server/README.md` and the rationale comment lives at `mcp-server/src/handler.ts:101-106`.
+
+### `commentId` defensive validation is implemented (spec was ambiguous)
+- **Spec said**: § Data Flow step 4 reads "validates the `commentId` belongs to a delivered comment for that worktree (defensive)." That sentence was easy to read as either a strict requirement or a "nice to have" — the original implementation skipped it.
+- **Implementation does**: `POST /api/agent/replies` now rejects with 400 when `commentId` doesn't match a previously-delivered comment id for the worktree. Backed by `agentQueue.isDeliveredCommentId`.
+- **Reason**: review feedback flagged the deviation. Without it, a misbehaving agent can post replies anchored to fabricated ids, which the UI merge step then silently drops as orphans (no surface anywhere) — and the unbounded reply store grows on garbage data. Implementing the check turns the silent black hole into a visible 400.
+- **Impact**: stricter contract for the agent. Tests are updated to enqueue + pull a real comment before posting a reply against its id. The check is cheap (linear scan of `delivered`, capped at 200).
+
+### `REPLY_HISTORY_CAP` mirrors `DELIVERED_HISTORY_CAP`
+- **Spec said**: silent on per-worktree reply-list growth.
+- **Implementation does**: caps the per-worktree reply list at 200 entries, dropping the oldest when the cap is hit. Mirrors the existing `DELIVERED_HISTORY_CAP = 200` on the comment side.
+- **Reason**: review feedback (security + architecture) flagged unbounded growth as a slow leak in long-lived processes. Symmetric cap removes the asymmetry.
+- **Impact**: a noisy agent eventually loses its earliest replies; acceptable given the UI merge step uses ids and tolerates missing entries.
+
+### Request-body size cap (1 MiB)
+- **Spec said**: silent on request-body size limits.
+- **Implementation does**: `readBody` sinks remaining chunks once a request crosses `MAX_REQUEST_BODY_BYTES = 1 MiB` and rejects with `RequestBodyTooLargeError` at end-of-body. The server's outer dispatcher recognizes that error class and returns a real `413 Payload Too Large` with the cap in the message; everything else still maps to `500`.
+- **Reason**: review feedback (security) flagged DoS via large bodies. The first cut also caught a latent bug: the server's dispatcher used `return handleX(req, res, origin)` rather than `return await handleX(...)`, so handler rejections bypassed the outer try/catch and became unhandled rejections (no response written, client times out). Fixed in the same change — every dispatcher case now awaits.
+- **Impact**: legitimate review-comment / reply prose well under the cap; a buggy or malicious local caller no longer trivially OOMs the server. Other endpoints that throw on bad input now surface a 500 with logging instead of silently hanging — strictly an improvement.
+
 ### Task 22's manual browser smoke test was not run
 - **Spec said**: plan Task 22 includes a manual smoke step — start `server/` and `web/`, install MCP, type `check shippable`, post replies, observe nesting.
 - **Implementation does**: ran every automated check (typecheck/lint/test/build across `server/`, `mcp-server/`, `web/` — 359 tests total, all green; mcp-server build emits the new tool). Did not start the dev servers and exercise the flow in a real browser.

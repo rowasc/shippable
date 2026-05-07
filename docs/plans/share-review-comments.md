@@ -61,7 +61,7 @@ What we lose:
 
 Each one stands on its own and unblocks the next.
 
-**(1) Queue substrate.** Per-worktree comment queue keyed by `worktreePath`, with atomic pull-and-ack. Three endpoints: `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`. `<reviewer-feedback>` payload formatter. Server-side vitest with the sort/sanitize fixture. *Done when:* enqueue → pull round-trips, second pull is empty, sort order matches the spec.
+**(1) Queue substrate.** Per-worktree comment queue keyed by `worktreePath`, with atomic pull-and-ack. Endpoints: `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. `<reviewer-feedback>` payload formatter. Server-side vitest with the sort/sanitize fixture. *Done when:* enqueue → pull round-trips, second pull is empty, sort order matches the spec. (The agent-reply back-channel adds `POST` and `GET /api/agent/replies` to the same substrate — see `docs/sdd/agent-reply-support/spec.md`.)
 
 **(2) Author = enqueue.** Authoring a thread comment in the UI POSTs to `/api/agent/enqueue` immediately; the response includes the server-assigned comment id, which is stored on `Reply.enqueuedCommentId`. Editing a previously-saved Reply re-enqueues with `supersedes` set to the prior id (§ Behavior § Edit & delete). Drafts (textarea state before submit) stay local — the data model has no "Reply pending submission" state. *Done when:* writing 5 comments produces 5 entries in the queue with ids on the local Replies; editing one produces a sixth entry with the right `supersedes` link. (The earlier free-form composer that enqueued a `freeform` comment kind was removed by the agent-reply work — see `docs/sdd/agent-reply-support/spec.md`.)
 
@@ -228,10 +228,10 @@ User-facing interactions pinned for v0. Alternatives we considered and the reaso
 
 ## Files of interest
 
-- `server/src/agent-queue.ts` — per-worktree queue + payload formatter (slice 1).
+- `server/src/agent-queue.ts` — per-worktree queue + payload formatter (slice 1); also hosts the agent-reply store added by the agent-reply spec.
 - `server/src/worktree-validation.ts` — `assertGitDir` shared helper.
-- `server/src/index.ts` — endpoints `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`.
-- `mcp-server/` (new) — TypeScript MCP server exposing `shippable_check_review_comments` (slice 3). Standalone npm-publish target so users can install it via the harness's `mcp add`-style command; not a workspace dependency consumed by the existing `web/` or `server/` packages.
+- `server/src/index.ts` — endpoints `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. The agent-reply back-channel adds `POST` and `GET /api/agent/replies` to the same router.
+- `mcp-server/` (new) — TypeScript MCP server exposing `shippable_check_review_comments` (slice 3) and `shippable_post_review_reply` (added by the agent-reply spec). Standalone npm-publish target so users can install it via the harness's `mcp add`-style command; not a workspace dependency consumed by the existing `web/` or `server/` packages.
 - `web/src/types.ts` — extends `Reply` with `enqueuedCommentId: string | null`.
 - `web/src/components/AgentContextSection.tsx` — install affordance, magic-phrase copy box, Delivered (N) block.
 - `web/src/components/ReplyThread.tsx` — pip rendering driven by `enqueuedCommentId` + `deliveredIds`.

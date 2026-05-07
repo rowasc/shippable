@@ -125,6 +125,8 @@ Localhost-bound, no auth, same security posture as today.
 - `mcp-server/src/index.ts`
   - Register `shippable_post_review_reply` with input schema `{ commentId: string, body: string, outcome: enum, worktreePath?: string }` and a description tuned for the implicit-trigger flow ("after addressing each comment in the most recent shippable batch, call this tool to report what you did").
 
+  > **Implementation note.** The `body` parameter ships under the name `replyText` at the MCP boundary — see `docs/sdd/agent-reply-support/implementation-notes.md`. Some model serializers conflate the parameter name `body` with HTML's `<body>` element and emit stray close tags into the value. Renaming the MCP boundary fixes the leakage. The HTTP wire field on `POST /api/agent/replies` and the storage shape (`AgentReply.body`) keep the spec name `body`.
+
 - `mcp-server/README.md`
   - Document the new tool, the magic-phrase fallback `report back to shippable`, and the `outcome` values.
 
@@ -187,6 +189,14 @@ Localhost-bound, no auth, same security posture as today.
 - Per-harness agent identity (Claude Code vs Codex vs Cursor). Generic "agent" label only.
 - Multi-tab sync (pre-existing limitation).
 - Durable persistence beyond in-memory (covered by the existing SQLite migration follow-up for the queue).
+
+## Follow-ups (surfaced by review, not blockers for v0)
+
+- **Idempotency-on-post.** The MCP tool has no client-supplied id; the server mints a fresh `AgentReply.id` on every call. An agent that retries on a transient failure will create duplicate replies the reviewer sees as twins. Fix: accept an optional client-supplied `clientReplyId` on `POST /api/agent/replies` and treat it as an idempotency key (return the existing reply if the same id appears twice). Cheap when we get a real report of a duplicate.
+- **Persist schema bump.** `agentReplies` was added to `ReviewState.replies[*]` via a forward-fill in `filterRepliesByHunk` rather than a `v: 2` migration. Fine for one optional field; the *next* persist-shape addition should bump to `v: 2` so future migrations can tell pre/post agent-reply blobs apart. AGENTS.md "things that have bitten us" calls out versioning internal shapes.
+- **Query-param naming.** `GET /api/agent/delivered` takes `?path=…`; the new `GET /api/agent/replies` takes `?worktreePath=…`. Both mean the same thing. Pick one (`worktreePath` is the better name — matches the POST bodies and the rest of the agent-queue endpoints) and update the other in a follow-up.
+- **`assertGitDir` realpath.** The validator blocks `..` and verifies a `.git` entry but doesn't `fs.realpath` the path. A symlink from `/tmp/evil` → `/home/victim/private-repo` passes today. Acceptable under "localhost is the boundary" — any local process can `fs.symlink` anyway — but worth tightening if the trust boundary changes.
+- **Late reply against an aged-out comment id.** The delivered list is capped at `DELIVERED_HISTORY_CAP = 200`. A worktree that delivers >200 comments before the agent posts replies will see the oldest ids fall off the back of the list, and the reply endpoint's defensive `commentId` check will then 400 a legitimate late reply. Acceptable in practice — agents reply within a single batch — but worth surfacing if real workflows hit it. Fix is either to lift the cap, to retain a shadow set of "ever-delivered" ids, or to relax the check to a known-id-shaped string.
 
 ## Open Questions Resolved
 

@@ -79,8 +79,8 @@ Detection is server-side — `GET /api/worktrees/mcp-status` reads `~/.claude/se
 - `web/src/state.ts` — adds `agentContext?: AgentContextSlice` to `ReviewState` + actions `SET_AGENT_CONTEXT`, `SET_AGENT_SESSION`.
 - `web/src/view.ts` — extends `InspectorViewModel` with the rendered slice.
 - `server/src/agent-context.ts` (new) — JSONL parser, `cwd` matcher, commit-boundary slicer.
-- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|delivered|unenqueue` (the queue substrate, see `docs/plans/share-review-comments.md`).
-- `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` over stdio. Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
+- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|unenqueue`, `GET /api/agent/delivered` (the queue substrate, see `docs/plans/share-review-comments.md`), `POST /api/agent/replies` and `GET /api/agent/replies` (the agent → reviewer back-channel, see `docs/sdd/agent-reply-support/spec.md`).
+- `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` (pull pending comments) and `shippable_post_review_reply` (post structured per-comment replies back). Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
 
 ## Out of scope for this feature
 

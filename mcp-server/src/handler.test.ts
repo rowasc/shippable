@@ -37,7 +37,7 @@ afterEach(() => {
 describe("handleCheckReviewComments", () => {
   it("returns the payload when the server has pending comments", async () => {
     const payload =
-      "<reviewer-feedback from=\"shippable\" commit=\"abc\"><comment kind=\"freeform\">hi</comment></reviewer-feedback>";
+      "<reviewer-feedback from=\"shippable\" commit=\"abc\"><comment id=\"c1\" file=\"x.ts\" lines=\"1\" kind=\"block\">hi</comment></reviewer-feedback>";
     const { fetchFn } = makeFetch(jsonResponse({ payload, ids: ["a", "b"] }));
 
     const result = await handleCheckReviewComments(
@@ -274,5 +274,27 @@ describe("handlePostReviewReply", () => {
     );
 
     expect(calls[0]!.url).toBe("http://127.0.0.1:5050/api/agent/replies");
+  });
+
+  it("returns an error result when the response body is not valid JSON", async () => {
+    const { fetchFn } = makeFetch(
+      new Response("not json", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+
+    const result = await handlePostReviewReply(
+      {
+        worktreePath: "/repo",
+        commentId: "c1",
+        replyText: "x",
+        outcome: "addressed",
+      },
+      { fetchFn, port: 5151 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toMatch(/JSON|parse/i);
   });
 });

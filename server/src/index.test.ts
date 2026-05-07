@@ -279,6 +279,28 @@ describe("GET /api/worktrees/mcp-status (slice 5)", () => {
   });
 });
 
+describe("request body size cap", () => {
+  it("rejects an oversized body with HTTP 413 and a useful error", async () => {
+    // ~2 MiB of JSON-safe filler. Any endpoint that consumes a body will
+    // trip the cap; pick the replies POST since it's the most recently
+    // added one and the security review flagged it specifically.
+    const huge = "x".repeat(2 * 1024 * 1024);
+    const res = await fetch(`${baseUrl}/api/agent/replies`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        worktreePath,
+        commentId: "anything",
+        body: huge,
+        outcome: "noted",
+      }),
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error?: string };
+    expect(String(body.error)).toMatch(/exceeds.*bytes/);
+  });
+});
+
 describe("POST /api/agent/replies", () => {
   it("rejects an invalid JSON body", async () => {
     const res = await fetch(`${baseUrl}/api/agent/replies`, {
@@ -328,10 +350,32 @@ describe("POST /api/agent/replies", () => {
     expect(r.status).toBe(400);
   });
 
-  it("returns { id } on success and persists via GET", async () => {
+  it("rejects an unknown commentId (not in delivered set for this worktree)", async () => {
     const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      commentId: "c1",
+      commentId: "no-such-id",
+      body: "x",
+      outcome: "noted",
+    });
+    expect(r.status).toBe(400);
+    expect(String(r.body.error)).toMatch(/not a delivered comment/);
+  });
+
+  it("returns { id } on success and persists via GET", async () => {
+    // Enqueue + pull to mint a real delivered commentId — the post-reply
+    // endpoint validates that commentId belongs to the worktree's
+    // delivered set (defensive per spec § Data Flow).
+    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "deadbeef",
+      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+    });
+    const realCommentId = enq.body.id as string;
+    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
+
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      worktreePath,
+      commentId: realCommentId,
       body: "fixed it",
       outcome: "addressed",
     });
@@ -346,20 +390,28 @@ describe("POST /api/agent/replies", () => {
     expect(list.body.replies).toHaveLength(1);
     expect(list.body.replies[0].id).toBe(r.body.id);
     expect(list.body.replies[0].outcome).toBe("addressed");
-    expect(list.body.replies[0].commentId).toBe("c1");
+    expect(list.body.replies[0].commentId).toBe(realCommentId);
     expect(list.body.replies[0].body).toBe("fixed it");
   });
 
   it("appends multiple replies to the same commentId", async () => {
+    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "deadbeef",
+      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+    });
+    const realCommentId = enq.body.id as string;
+    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
+
     await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      commentId: "c1",
+      commentId: realCommentId,
       body: "first",
       outcome: "noted",
     });
     await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      commentId: "c1",
+      commentId: realCommentId,
       body: "second",
       outcome: "addressed",
     });
@@ -371,6 +423,36 @@ describe("POST /api/agent/replies", () => {
       "first",
       "second",
     ]);
+  });
+
+  it("caps the per-worktree reply list at REPLY_HISTORY_CAP", async () => {
+    // Mirror the delivered-history-cap regression test: post past the cap
+    // and confirm the oldest entries are dropped.
+    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "deadbeef",
+      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+    });
+    const realCommentId = enq.body.id as string;
+    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
+
+    // Cap is 200; post 205 to spill 5.
+    for (let i = 0; i < 205; i++) {
+      await postJson(`${baseUrl}/api/agent/replies`, {
+        worktreePath,
+        commentId: realCommentId,
+        body: `reply-${i}`,
+        outcome: "noted",
+      });
+    }
+    const list = await getJson(
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+    );
+    expect(list.body.replies).toHaveLength(200);
+    // Oldest retained should be reply-5; reply-0..4 dropped. Newest is
+    // reply-204.
+    expect(list.body.replies[0].body).toBe("reply-5");
+    expect(list.body.replies[199].body).toBe("reply-204");
   });
 });
 

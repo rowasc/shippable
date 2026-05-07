@@ -371,14 +371,13 @@ export type CommentKind =
   | "block"
   | "reply-to-ai-note"
   | "reply-to-teammate"
-  | "reply-to-hunk-summary"
-  | "freeform";
+  | "reply-to-hunk-summary";
 
 export interface Comment {
   id: string;
   kind: CommentKind;
-  /** Repo-relative path. Omitted (undefined) for `freeform`. */
-  file?: string;
+  /** Repo-relative path. */
+  file: string;
   /** `"118"` or `"72-79"` — string so single lines and ranges both fit. */
   lines?: string;
   body: string;

@@ -79,7 +79,7 @@ export async function enqueueComment(args: {
   commitSha: string;
   comment: {
     kind: CommentKind;
-    file?: string;
+    file: string;
     lines?: string;
     body: string;
     supersedes?: string | null;

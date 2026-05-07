@@ -203,6 +203,20 @@ describe("postReply / listReplies", () => {
     resetForTests();
     expect(listReplies(WT)).toEqual([]);
   });
+
+  it("caps the per-worktree reply list at the history limit", () => {
+    // Mirror the delivered-history-cap behaviour: oldest replies aged out
+    // once we cross the cap. Defends against a noisy agent in a
+    // long-lived process.
+    for (let i = 0; i < 250; i++) {
+      postReply(WT, { commentId: "c1", body: `r-${i}`, outcome: "noted" });
+    }
+    const replies = listReplies(WT);
+    expect(replies).toHaveLength(200);
+    // Append-order, oldest first → oldest retained is r-50.
+    expect(replies[0].body).toBe("r-50");
+    expect(replies[199].body).toBe("r-249");
+  });
 });
 
 describe("delivered history cap", () => {
@@ -285,6 +299,22 @@ describe("formatPayload", () => {
     };
     const out = formatPayload([c], "sha");
     expect(out).toContain("see `foo<bar>` and <baz>");
+  });
+
+  it("XML-escapes the id attribute (defensive — ids are randomUUID today, but the contract holds for any id)", () => {
+    const c: Comment = {
+      id: 'wat"y&<id>',
+      kind: "block",
+      file: "a.ts",
+      lines: "1",
+      body: "x",
+      commitSha: "sha",
+      supersedes: null,
+      enqueuedAt: "2025-01-01T00:00:00Z",
+    };
+    const out = formatPayload([c], "sha");
+    expect(out).toContain(`id="wat&quot;y&amp;&lt;id&gt;"`);
+    expect(out).not.toContain('id="wat"y');
   });
 
   it("XML-escapes attribute values (quotes, ampersand, brackets)", () => {

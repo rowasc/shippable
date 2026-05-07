@@ -50,6 +50,7 @@ interface QueueEntry {
 }
 
 const DELIVERED_HISTORY_CAP = 200;
+const REPLY_HISTORY_CAP = 200;
 
 const queues = new Map<string, QueueEntry>();
 const replyStore = new Map<string, AgentReply[]>();
@@ -142,6 +143,12 @@ export function postReply(
     replyStore.set(worktreePath, list);
   }
   list.push(reply);
+  // Bound the per-worktree reply list — a noisy agent in a long-lived
+  // process otherwise grows this without limit. Mirrors
+  // DELIVERED_HISTORY_CAP on the comment side.
+  if (list.length > REPLY_HISTORY_CAP) {
+    list.splice(0, list.length - REPLY_HISTORY_CAP);
+  }
   return id;
 }
 
@@ -149,6 +156,20 @@ export function listReplies(worktreePath: string): AgentReply[] {
   const list = replyStore.get(worktreePath);
   if (!list) return [];
   return list.slice();
+}
+
+/**
+ * Returns true when `commentId` was previously delivered for this worktree.
+ * Used by the reply endpoint to defensively reject replies anchored to ids
+ * the agent never actually saw.
+ */
+export function isDeliveredCommentId(
+  worktreePath: string,
+  commentId: string,
+): boolean {
+  const entry = queues.get(worktreePath);
+  if (!entry) return false;
+  return entry.delivered.some((d) => d.id === commentId);
 }
 
 /** Test-only: clear all queues. */

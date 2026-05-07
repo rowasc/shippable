@@ -143,6 +143,95 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     expect(r.result.current.delivered.map((d) => d.id)).toEqual(["cmt_1"]);
   });
 
+  it("Promise.allSettled keeps endpoints independent: delivered fails, replies succeeds → delivered frozen, agentReplies updated, error: true", async () => {
+    // The headline behaviour change in the polling rewrite: a failure in
+    // one endpoint must not poison the other. Pre-commit, delivered
+    // would freeze in last-known state when its fetcher errored, but
+    // there was a single try/catch; under Promise.allSettled the two
+    // sides freeze independently.
+    const ar = (id: string, postedAt: string): PolledAgentReply => ({
+      id,
+      commentId: "cmt_1",
+      body: id,
+      outcome: "addressed",
+      postedAt,
+    });
+
+    const fetcher = vi
+      .fn<(p: string) => Promise<DeliveredComment[]>>()
+      .mockResolvedValueOnce([delivered("cmt_1")])
+      .mockRejectedValue(new Error("ECONNREFUSED"));
+    const repliesFetcher = vi
+      .fn<(p: string) => Promise<PolledAgentReply[]>>()
+      .mockResolvedValueOnce([ar("ar1", "2026-05-06T12:01:00.000Z")])
+      .mockResolvedValueOnce([
+        ar("ar1", "2026-05-06T12:01:00.000Z"),
+        ar("ar2", "2026-05-06T12:02:00.000Z"),
+      ]);
+
+    const r = renderHook(() =>
+      useDeliveredPolling({ worktreePath: "/wt", fetcher, repliesFetcher }),
+    );
+
+    // First tick: both succeed; both populated; no error.
+    await act(() => Promise.resolve());
+    expect(r.result.current.delivered.map((d) => d.id)).toEqual(["cmt_1"]);
+    expect(r.result.current.agentReplies.map((a) => a.id)).toEqual(["ar1"]);
+    expect(r.result.current.error).toBe(false);
+
+    // Second tick: delivered errors; replies succeeds with a new entry.
+    // delivered must stay frozen at ["cmt_1"]; agentReplies must update;
+    // error flips true.
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_INTERVAL_MS);
+      await Promise.resolve();
+    });
+    expect(r.result.current.delivered.map((d) => d.id)).toEqual(["cmt_1"]);
+    expect(r.result.current.agentReplies.map((a) => a.id)).toEqual([
+      "ar1",
+      "ar2",
+    ]);
+    expect(r.result.current.error).toBe(true);
+  });
+
+  it("Promise.allSettled keeps endpoints independent: replies fails, delivered succeeds → agentReplies frozen, delivered updated, error: true", async () => {
+    // Mirror of the above with the failure on the other side.
+    const fetcher = vi
+      .fn<(p: string) => Promise<DeliveredComment[]>>()
+      .mockResolvedValueOnce([delivered("cmt_1")])
+      .mockResolvedValueOnce([delivered("cmt_1"), delivered("cmt_2")]);
+    const repliesFetcher = vi
+      .fn<(p: string) => Promise<PolledAgentReply[]>>()
+      .mockResolvedValueOnce([
+        {
+          id: "ar1",
+          commentId: "cmt_1",
+          body: "fixed",
+          outcome: "addressed",
+          postedAt: "2026-05-06T12:01:00.000Z",
+        },
+      ])
+      .mockRejectedValue(new Error("ECONNREFUSED"));
+
+    const r = renderHook(() =>
+      useDeliveredPolling({ worktreePath: "/wt", fetcher, repliesFetcher }),
+    );
+    await act(() => Promise.resolve());
+    expect(r.result.current.agentReplies.map((a) => a.id)).toEqual(["ar1"]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(POLL_INTERVAL_MS);
+      await Promise.resolve();
+    });
+    // delivered updated; agentReplies frozen at last good value.
+    expect(r.result.current.delivered.map((d) => d.id)).toEqual([
+      "cmt_1",
+      "cmt_2",
+    ]);
+    expect(r.result.current.agentReplies.map((a) => a.id)).toEqual(["ar1"]);
+    expect(r.result.current.error).toBe(true);
+  });
+
   it("polls agent replies in parallel and exposes them on the result", async () => {
     const fetcher = vi.fn(async () => [delivered("cmt_1")]);
     const repliesFetcher = vi.fn<(p: string) => Promise<PolledAgentReply[]>>(

@@ -8,10 +8,10 @@ import type { ChangeSet, CommentKind } from "./types";
 
 export interface DerivedCommentPayload {
   kind: CommentKind;
-  /** Repo-relative file path. Omitted for `freeform`. */
-  file?: string;
+  /** Repo-relative file path. */
+  file: string;
   /** `"118"` for a single line; `"72-79"` for a range. Omitted for thread
-   *  kinds where line context isn't meaningful (hunkSummary, teammate, freeform). */
+   *  kinds where line context isn't meaningful (hunkSummary, teammate). */
   lines?: string;
 }
 

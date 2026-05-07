@@ -48,69 +48,69 @@ export function createApp(): Server {
       return;
     }
     if (req.method === "POST" && req.url === "/api/plan") {
-      return handlePlan(req, res, origin);
+      return await handlePlan(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/review") {
-      return handleReview(req, res, origin);
+      return await handleReview(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/definition/capabilities") {
-      return handleDefinitionCapabilities(req, res, origin);
+      return await handleDefinitionCapabilities(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/definition") {
-      return handleDefinition(req, res, origin);
+      return await handleDefinition(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/library/refresh") {
-      return handleLibraryRefresh(req, res, origin);
+      return await handleLibraryRefresh(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/library/prompts") {
-      return handleListPrompts(req, res, origin);
+      return await handleListPrompts(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/list") {
-      return handleWorktreesList(req, res, origin);
+      return await handleWorktreesList(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/pick-directory") {
-      return handleWorktreesPickDirectory(req, res, origin);
+      return await handleWorktreesPickDirectory(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
-      return handleWorktreesChangeset(req, res, origin);
+      return await handleWorktreesChangeset(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/graph") {
-      return handleWorktreesGraph(req, res, origin);
+      return await handleWorktreesGraph(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/sessions") {
-      return handleWorktreesSessions(req, res, origin);
+      return await handleWorktreesSessions(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/worktrees/agent-context") {
-      return handleWorktreesAgentContext(req, res, origin);
+      return await handleWorktreesAgentContext(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/worktrees/mcp-status") {
-      return handleWorktreesMcpStatus(req, res, origin);
+      return await handleWorktreesMcpStatus(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/enqueue") {
-      return handleAgentEnqueue(req, res, origin);
+      return await handleAgentEnqueue(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/pull") {
-      return handleAgentPull(req, res, origin);
+      return await handleAgentPull(req, res, origin);
     }
     if (
       req.method === "GET" &&
       req.url &&
       req.url.startsWith("/api/agent/delivered")
     ) {
-      return handleAgentDelivered(req, res, origin);
+      return await handleAgentDelivered(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/unenqueue") {
-      return handleAgentUnenqueue(req, res, origin);
+      return await handleAgentUnenqueue(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/replies") {
-      return handleAgentPostReply(req, res, origin);
+      return await handleAgentPostReply(req, res, origin);
     }
     if (
       req.method === "GET" &&
       req.url &&
       req.url.startsWith("/api/agent/replies")
     ) {
-      return handleAgentListReplies(req, res, origin);
+      return await handleAgentListReplies(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -122,6 +122,16 @@ export function createApp(): Server {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   } catch (err) {
+    if (err instanceof RequestBodyTooLargeError) {
+      // Map oversized-body rejections from `readBody` to a real
+      // 413 instead of a generic 500 — clients can recover, ops can
+      // grep for it, and the security signal isn't lost in the noise.
+      if (!res.headersSent) {
+        res.writeHead(413, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+      return;
+    }
     console.error("[server] unhandled error:", err);
     if (!res.headersSent) {
       res.writeHead(500, { "Content-Type": "application/json" });
@@ -844,6 +854,20 @@ async function handleAgentPostReply(
     res.end(JSON.stringify({ error: message }));
     return;
   }
+  // Reject replies whose commentId never appeared in this worktree's
+  // delivered list — an agent posting against a fabricated id is either
+  // confused or talking past us; either way it would silently create an
+  // orphan that the UI merge step drops.
+  if (!agentQueue.isDeliveredCommentId(wtPath, commentId)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `commentId ${JSON.stringify(commentId)} is not a delivered comment for this worktree`,
+      }),
+    );
+    return;
+  }
   const id = agentQueue.postReply(wtPath, {
     commentId,
     body: replyBody,
@@ -927,11 +951,47 @@ async function handleAgentUnenqueue(
   res.end(JSON.stringify({ unenqueued }));
 }
 
+// Cap the bytes any single request body can grow to. Local server, but we
+// share the box with anything else on 127.0.0.1, and an agent / browser tab
+// spamming multi-MB POSTs would trivially OOM us otherwise. 1 MiB is a
+// loose upper bound on legitimate review-comment / reply prose.
+const MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024;
+
+class RequestBodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`request body exceeds ${limit} bytes`);
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    let size = 0;
+    let oversized = false;
+    req.on("data", (chunk: Buffer) => {
+      if (oversized) return;
+      size += chunk.length;
+      if (size > MAX_REQUEST_BODY_BYTES) {
+        // Stop accumulating but let the body finish streaming so the
+        // request/response lifecycle stays in lockstep — fetch clients
+        // may not read our response until they've finished writing the
+        // body. Rejecting here would also work but sometimes lets the
+        // outer catch write 413 before the socket is ready, which some
+        // clients see as a connection reset.
+        oversized = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (oversized) {
+        reject(new RequestBodyTooLargeError(MAX_REQUEST_BODY_BYTES));
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
     req.on("error", reject);
   });
 }
