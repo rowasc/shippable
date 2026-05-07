@@ -28,7 +28,7 @@ We are focusing on the core of the idea and experience; how to make the review e
 
 - Select code to send to an AI to review from a prompt library, mantain your own.
 
-- Review-while-they-work workflows - as your agents work, you review your worktrees based on the last changeset committed (or the uncommitted edits as they happen — `docs/plans/worktree-live-reload.md` shipped this, with content-anchored comments that survive reload). It uses your agent's context and chat, and you can feed your review back to the agent with feedback to continue after it wraps up the next task, or to a new agent. See `docs/plans/share-review-comments.md` for the MCP-pull design that ships the reviewer→agent half, and `docs/plans/worktrees.md` for the worktree ingest plan more broadly.
+- Review-while-they-work workflows - as your agents work, you review your worktrees based on the last changeset committed. It uses your agent's context and chat, and you can feed your review back to the agent with feedback to continue after it wraps up the next task, or to a new agent. See `docs/plans/share-review-comments.md` for the MCP-pull design that ships the reviewer→agent half, and `docs/plans/worktrees.md` for the worktree ingest plan more broadly.
     - can we send feedback to a live session, too,? That'd be excellent, to steer the session live.
     - we should test the results a bit, or give the user the option between live and non-live operations mode 
 

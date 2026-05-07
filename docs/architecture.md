@@ -16,7 +16,6 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 - `GET  /api/library/prompts` — list prompts.
 - `POST /api/library/refresh` — gated by `SHIPPABLE_ADMIN_TOKEN` (or `SHIPPABLE_DEV_MODE=1`).
 - `GET  /api/health`.
-- `POST /api/worktrees/list`, `/api/worktrees/pick-directory`, `/api/worktrees/changeset`, `/api/worktrees/state`, `/api/worktrees/file-at` — worktree ingest, the live-reload poll, and historical-file fetch. See `docs/plans/worktrees.md` and `docs/plans/worktree-live-reload.md`.
 - Origin allowlist with explicit handling of opaque origins (`Origin: null`) and `Sec-Fetch-Site`. The "null"-origin case has bitten us before; see comment in source.
 
 ## API key storage
@@ -27,7 +26,7 @@ macOS Keychain at `service=shippable, account=ANTHROPIC_API_KEY`. Same entry ser
 
 - `ChangeSet` → `DiffFile[]` → `Hunk[]` → `DiffLine[]`. Hunks carry symbol metadata, expand-above/below context, AI notes, and an optional teammate review.
 - `ReviewPlan` = `headline` + `intent: Claim[]` + `StructureMap` + `entryPoints` (max 3). Every claim carries `EvidenceRef[]`. The UI refuses to render a claim with no evidence.
-- `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, acked notes, replies, detached replies (orphaned by a worktree reload), expand levels, line selection. Worktree provenance (path + sha + dirtyHash) lives alongside as App-level state.
+- `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, acked notes, replies, expand levels, line selection.
 - Persistence: localStorage.
 
 ## In-browser code runner
@@ -36,7 +35,7 @@ macOS Keychain at `service=shippable, account=ANTHROPIC_API_KEY`. Same entry ser
 
 ## UI surfaces
 
-`web/src/components/`: DiffView, Sidebar (+ Detached pile + view-at-sha panel), Inspector, StatusBar, ReviewPlanView, GuidePrompt, ReplyThread, PromptPicker, PromptEditor, PromptRunsPanel, CodeRunner, CodeText, CopyButton, RichText, Reference, KeySetup, LoadModal, LiveReloadBar, HelpOverlay, ThemePicker, SyntaxBlock/Showcase, plus Gallery and Demo (internal — not part of the user-facing product).
+`web/src/components/`: DiffView, Sidebar, Inspector, StatusBar, ReviewPlanView, GuidePrompt, ReplyThread, PromptPicker, PromptEditor, PromptRunsPanel, CodeRunner, CodeText, CopyButton, RichText, Reference, KeySetup, LoadModal, HelpOverlay, ThemePicker, SyntaxBlock/Showcase, plus Gallery and Demo (internal — not part of the user-facing product).
 
 ## Other front-end modules
 
@@ -47,7 +46,6 @@ Beyond components, the load-bearing modules in `web/src/`:
 - `feature-docs.tsx` — entry point for `/feature-docs.html`, paired with per-feature markdown under `docs/features/`.
 - `parseDiff.ts`, `highlight.ts`, `tokens.ts` — diff parsing and Shiki-based highlighting feeding `DiffView`.
 - `persist.ts` — localStorage round-trip for `ReviewState`.
-- Worktree live-reload loop: `useWorktreeLiveReload.ts` (poll), `worktreeChangeset.ts` (fetch + parse), `anchor.ts` (content-anchored comment matching), `fileAt.ts` (view-at-sha fetch).
 
 ## Themes
 
