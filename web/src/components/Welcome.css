@@ -291,8 +291,18 @@
   color: var(--fg-mute);
   font-size: 12px;
 }
+.welcome__samples--featured {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
 .welcome__samples-label {
   color: var(--fg-dim);
+}
+.welcome__samples--featured .welcome__samples-label {
+  color: var(--fg);
+  font-size: 13px;
+  width: 100%;
 }
 .welcome__sample {
   background: transparent;
@@ -303,6 +313,11 @@
   font-size: 11px;
   color: var(--fg-dim);
   cursor: pointer;
+}
+.welcome__samples--featured .welcome__sample {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--fg);
 }
 .welcome__sample:hover {
   color: var(--accent);
