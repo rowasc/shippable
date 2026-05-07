@@ -210,6 +210,26 @@ body,
   color: var(--accent);
 }
 
+/* focus -------------------------------------------------------------------- */
+/* Default focus rings so keyboard navigation is always visible. Targets
+   button-like things only; form fields signal focus via border-color in
+   their own components and are not retargeted here. Components that draw
+   their own focus indicator (DiffView's cursor row, sidebar row tint)
+   override this with a more specific rule. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 2px;
+}
+/* Mouse clicks should not paint the ring — :focus-visible already excludes
+   them, but several components also call .blur() after click to be safe. */
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
 /* kbd --------------------------------------------------------------------- */
 /* Used inline in help overlays and hint text across multiple presenters. */
 kbd {
