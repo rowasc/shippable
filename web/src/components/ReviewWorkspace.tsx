@@ -92,8 +92,10 @@ interface Props {
     cs: ChangeSet,
     source: RecentSource,
   ) => void;
-  /** Live-reload banner (idle / stale / gone) — null when no worktree
-   *  changeset is loaded. Rendered between the topbar and the main view. */
+  /** Live-reload banner slot. App owns the polling hook + drift state and
+   *  renders the banner; we accept it as a ReactNode so this component stays
+   *  free of worktree/live-reload concerns. Null when no worktree changeset
+   *  is loaded. */
   liveReloadBar?: ReactNode;
 }
 

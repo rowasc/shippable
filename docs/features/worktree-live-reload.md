@@ -4,7 +4,7 @@
 Keeps a loaded worktree review in sync with the underlying git tree.
 
 ## What it does
-- Polls the worktree every 3s for HEAD sha + dirty-tree digest.
+- Polls the worktree every 3s for HEAD sha + dirty-tree digest. Polling is the MVP shape on purpose — push-based updates (SSE + `fs.watch`) are tracked as a follow-up slice.
 - Surfaces a non-modal banner when a new commit lands or uncommitted edits change, with an explicit reload click — never auto-replaces the diff.
 - Reloads via the existing changeset endpoint, honoring `dirty=true` for working-tree-only refreshes.
 - Per-worktree on/off toggle, persisted by absolute path; default-on for new worktrees.

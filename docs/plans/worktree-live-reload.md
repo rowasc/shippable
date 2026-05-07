@@ -72,6 +72,8 @@ The same rule covers committed and dirty origins. The asymmetry is only in what 
 
 **(a) MVP — polling + notify banner, both commits and uncommitted.** Client polls `/api/worktrees/state?path=…` every few seconds. Endpoint returns `{ sha, dirty, dirtyHash }` where `dirtyHash` is a digest of `git status --porcelain=v2 -z` (or `null` when clean). If `sha` differs *or* `dirtyHash` differs from what's loaded, render a non-modal banner ("Worktree changed — reload") that the user clicks to refetch. Toggle in the review header turns polling off. *Done when:* you can leave the page open, an agent commits *or* edits, and within ~5 seconds you see the banner. Reload with no anchoring yet — comments still get displaced. The next slice fixes that.
 
+*Why polling first, not push?* Polling is two cheap git calls behind a stateless POST — it survives server restarts, sleep/wake cycles, and `tsx watch` reloads without reconnect plumbing. `fs.watch` on macOS has historically been flaky for nested directories, and chokidar adds a dep we don't need at MVP scale. Slice (f) is the upgrade path once we have evidence polling is too slow or too chatty in real use.
+
 **(b) Per-worktree toggle persistence.** localStorage key keyed by worktree identity (path for now, see open questions). The toggle remembers the last choice across sessions. Default-on for first encounter; respects the saved value after that. *Done when:* turning live reload off on one worktree doesn't affect another; reload sticks.
 
 **(c) Content-anchored comments + detached sidebar.** Add `originSha`, `originType`, `anchorPath`, `anchorContext`, `anchorHash` to `Reply` at write time. New `RELOAD_CHANGESET` reducer action runs the anchoring pass (inline / re-anchor / detach) instead of `LOAD_CHANGESET` resetting the world. Sidebar gains a "Detached" group with per-file subgroups, only visible when non-empty. Each entry shows the body and the snippet; committed entries get a placeholder "view at `<sha7>`" affordance that's wired up in slice (e). *Done when:* you write a comment, the agent edits the file unrelatedly, you reload — your comment is still inline. You write another, the agent edits the line you commented on, you reload — your comment is detached with the original snippet visible.
@@ -89,7 +91,7 @@ Implementation notes from the slice (c) landing:
 
 **(e) "View at `<sha>`" for outdated committed comments.** New endpoint `POST /api/worktrees/file-at` returning the file's content (or just a slice) at a given sha. Detached committed entries' "view at" link opens an inline panel that renders the historical file around the comment. Dirty entries don't get this affordance. *Done when:* clicking "view at" on an outdated committed comment shows the file as it was at that sha, scrolled to the anchor.
 
-**(f) Server-pushed updates (optional, deferred).** Replace polling with SSE backed by `fs.watch`. Worth doing only if (a) is meaningfully insufficient. *Done when:* there's evidence polling is too slow or too chatty in real use.
+**(f) Server-pushed updates (optional, deferred).** Replace polling with SSE backed by `fs.watch` (or chokidar if cross-platform consistency matters by then). Worth doing only if (a) is meaningfully insufficient — e.g. reviewers complain about lag, or the request volume becomes a real cost. *Done when:* there's evidence polling is too slow or too chatty in real use.
 
 Slices (a)–(d) are the feature. (e) is the next-most-useful follow-up. (f) is an "if we need it."
 
@@ -153,6 +155,8 @@ Same as the parent worktrees feature — only modes that already support worktre
 - **Storage budget.** A few KB per comment in localStorage. Not a worry at prototype scale, but flag when persisted state hits the localStorage quota (~5MB) — most likely from a long thread on a long-lived worktree. Lean: **don't pre-optimize; surface a warning if persist write fails.**
 
 - **Worktree identity for the toggle key.** Path is what we have. If the worktree gets renamed mid-session the toggle resets. Lean: **start with path; revisit when (c) lands and we need a real identity scheme for cursors anyway.**
+
+- **Toggle-map GC.** The `shippable:liveReload:v1` map accumulates an entry per absolute worktree path the user has ever loaded. There's no cleanup pass. Auto-deleting on `onWorktreeGone` is wrong — that fires after three poll failures (sleep/wake, server restart, network blip) and would silently drop a real preference. Each entry is tiny (~100 bytes); a user accumulating 50K worktree paths to hit the 5MB localStorage quota is not a realistic shape. Lean: **no GC for now; revisit if we ever ship a "manage worktrees" surface, or if a user reports the map filling up.**
 
 - **What about banner UX when the user has the toggle off?** Off means off — no surprise banner. Lean: **stop polling entirely when toggled off.**
 
