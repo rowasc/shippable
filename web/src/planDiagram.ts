@@ -204,11 +204,22 @@ function buildMermaid(
   nodes: PlanDiagramNode[],
   edges: PlanDiagramEdge[],
 ): string {
-  const lines = ["flowchart LR"];
+  const lines = [
+    '%%{init: {"flowchart": {"defaultRenderer": "elk"}}}%%',
+    "flowchart LR",
+  ];
 
-  for (const node of nodes) {
-    lines.push(`  ${node.id}["${escapeMermaidText(node.path)}"]`);
+  const groups = groupNodesByDir(nodes);
+  let groupCounter = 0;
+  for (const [dir, groupNodes] of groups) {
+    const groupId = `g${groupCounter++}`;
+    lines.push(`  subgraph ${groupId}["${escapeMermaidText(dir)}"]`);
+    for (const node of groupNodes) {
+      lines.push(`    ${node.id}["${escapeMermaidText(basename(node.path))}"]`);
+    }
+    lines.push("  end");
   }
+
   if (edges.length === 0) {
     lines.push("  %% no dependency edges detected inside this changeset");
   }
@@ -233,6 +244,31 @@ function buildMermaid(
   if (changedNodes.length > 0) lines.push(`  class ${changedNodes.join(",")} added;`);
 
   return lines.join("\n");
+}
+
+function groupNodesByDir(
+  nodes: PlanDiagramNode[],
+): Map<string, PlanDiagramNode[]> {
+  const groups = new Map<string, PlanDiagramNode[]>();
+  for (const node of nodes) {
+    const dir = dirname(node.path) || ".";
+    const bucket = groups.get(dir) ?? [];
+    bucket.push(node);
+    groups.set(dir, bucket);
+  }
+  return new Map(
+    [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+
+function dirname(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? "" : path.slice(0, idx);
+}
+
+function basename(path: string): string {
+  const idx = path.lastIndexOf("/");
+  return idx === -1 ? path : path.slice(idx + 1);
 }
 
 function formatEdgeLabel(labels: string[]): string {

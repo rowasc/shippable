@@ -75,9 +75,11 @@ describe("buildPlanDiagram", () => {
     expect(test?.isTest).toBe(true);
     expect(coreToPanel?.labels).toEqual(["loadPrefs", "savePrefs"]);
     expect(diagram.mermaid).toContain("flowchart LR");
+    expect(diagram.mermaid).toContain('"defaultRenderer": "elk"');
     expect(diagram.mermaid).toContain('classDef entry fill:#fff1cc');
     expect(diagram.mermaid).toContain('classDef test fill:#eef6ff');
-    expect(diagram.mermaid).toContain('src/core.ts');
+    expect(diagram.mermaid).toContain('subgraph g0["src"]');
+    expect(diagram.mermaid).toContain('core.ts');
     expect(diagram.mermaid).toContain('loadPrefs, savePrefs');
   });
 
@@ -106,7 +108,8 @@ describe("buildPlanDiagram", () => {
     expect(diagram.nodes).toHaveLength(1);
     expect(diagram.edges).toHaveLength(0);
     expect(diagram.mermaid).toContain("%% no dependency edges detected");
-    expect(diagram.mermaid).toContain('f0["docs/notes.md"]');
+    expect(diagram.mermaid).toContain('subgraph g0["docs"]');
+    expect(diagram.mermaid).toContain('f0["notes.md"]');
   });
 
   it("uses an attached repo graph when available, including unchanged neighbors", () => {
