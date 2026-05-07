@@ -51,7 +51,14 @@ Implementation followed the spec closely. A handful of small deviations and surp
 - **User preference said:** one commit per slice.
 - **Implementation does:** slices 2–5 are each one commit. Slice 1 is four commits (three subtask commits + a review-fix commit) because the per-slice grouping preference came in *after* slice 1 had landed with subtask commits, and rewriting history retroactively was unnecessarily destructive.
 - **Reason:** user explicitly said "Perhaps we could group them in a single commit though" as forward-looking guidance, not a directive to rewrite slice 1.
-- **Impact:** slightly noisier `git log` for slice 1; everything else is clean. The aggregate work on this branch is 8 commits; rebasing to 5 before opening a PR is a one-command operation if cleanliness matters at that boundary.
+- **Impact:** slightly noisier `git log` for slice 1; everything else is clean. The aggregate work on this branch is 8 commits; rebasing to 5 before opening a PR is a one-command operation if cleanliness matters at that boundary. (After the rebase the branch ended up at 5 slice commits + 2 follow-up fix commits.)
+
+### Welcome.tsx — missed sibling load surface
+
+- **Spec said:** "PR URL paste ingest. A LoadModal affordance accepts `https://<host>/<owner>/<repo>/pull/<n>`…"
+- **Implementation does:** slice 3 added the section to `LoadModal.tsx` only. `web/src/components/Welcome.tsx` is a *separate* load surface — the empty-state landing page shown before any changeset is loaded — and was missed. Fresh-launch users had no way to reach the GH PR ingest path until they loaded some other diff first. Fixed in a follow-up commit (`fix(web): add GitHub PR section to Welcome`).
+- **Reason:** the plan listed file paths under slice 3 but didn't enumerate every load surface; the spec said "LoadModal" and the implementer matched it literally; all six final reviewers (architecture / design / UX / security / spec compliance / codebase synergy) verified against `LoadModal.tsx` and missed Welcome too.
+- **Impact:** caught during user testing, fixed before merge. Lesson for future ingest-path additions: grep the codebase for *all* `loadFromUrl`-style entry points (Welcome, LoadModal, anywhere else that lets a user start a review), not just the canonical modal.
 
 ## Notes worth recording
 
@@ -65,8 +72,8 @@ Implementation followed the spec closely. A handful of small deviations and surp
 
 ## Test coverage at end of branch
 
-- Server: 197 passing (was 144 before the feature; +53 net). Test files: 11 (was 8; +3: `url.test.ts`, `auth-store.test.ts`, `api-client.test.ts`, `pr-load.test.ts`, `branch-lookup.test.ts`, plus integration tests in `index.test.ts`).
-- Web: 295 passing (was 269 before the feature; +26 net). New test files: `githubPrClient.test.ts`, `GitHubTokenModal.test.tsx`, `LoadModal.test.tsx`, `Inspector.test.tsx` (PR-pill specific cases), plus added `state.test.ts` cases for `MERGE_PR_OVERLAY` and `ReviewWorkspace.test.tsx` cases for the topbar / banners.
+- Server: 205 passing (was 144 before the feature; +61 net). Five new test files (`url.test.ts`, `auth-store.test.ts`, `api-client.test.ts`, `pr-load.test.ts`, `branch-lookup.test.ts`) plus integration coverage in `index.test.ts`.
+- Web: 309 passing (was 269 before the feature; +40 net). New test files: `githubPrClient.test.ts`, `GitHubTokenModal.test.tsx`, `LoadModal.test.tsx`, `Inspector.test.tsx` (PR-pill specific cases), `Welcome.test.tsx` (PR section), plus additions to `state.test.ts` for `MERGE_PR_OVERLAY` / cursor-preserve and to `ReviewWorkspace.test.tsx` for the topbar / banners / refresh flow.
 
 ## Open follow-ups (not v0)
 
@@ -81,3 +88,4 @@ These are documented in the spec § Out of Scope and / or surfaced by reviewers 
 - **Settings UI for token management.** `clearGithubToken` and `hasGithubToken` server endpoints exist and are tested; the UI to invoke them does not. Lands when a real workflow needs it.
 - **Shared `humanAgo` / `timeAgo`.** Now duplicated in `Inspector.tsx`, `AgentContextSection.tsx`, and `ReplyThread.tsx`. Cleanup target.
 - **Rate-limit visualization.** A "rate limit: 4321/5000" pill is on the spec's follow-up list.
+- **`onLoad` signature drift between Welcome and LoadModal.** `Welcome.tsx` calls `onLoad(cs, replies, source)` (3 args); `LoadModal.tsx` calls `onLoad(cs, source)` (2 args). The Welcome PR-ingest fix matched the existing Welcome shape correctly, but the inconsistency is real and worth aligning when next touching either file.

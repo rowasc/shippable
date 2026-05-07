@@ -6,6 +6,9 @@ import { STUBS } from "../fixtures";
 import type { RecentEntry, RecentSource } from "../recents";
 import { removeRecent } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
+import { loadGithubPr, setGithubToken, GithubFetchError, GH_ERROR_MESSAGES } from "../githubPrClient";
+import { isTauri, keychainGet, keychainSet } from "../keychain";
+import { GitHubTokenModal } from "./GitHubTokenModal";
 
 interface Props {
   recents: RecentEntry[];
@@ -36,6 +39,16 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   const [heroDropActive, setHeroDropActive] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // GitHub PR section state.
+  const [prUrl, setPrUrl] = useState("");
+  const [prBusy, setPrBusy] = useState(false);
+  const [prErr, setPrErr] = useState<string | null>(null);
+  const [tokenModal, setTokenModal] = useState<{
+    host: string;
+    reason: "first-time" | "rejected";
+    pendingPrUrl: string;
+  } | null>(null);
 
   function deliver(
     cs: ChangeSet,
@@ -99,6 +112,59 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     handleParsed(pasted, `pasted-${Date.now().toString(36)}`, "pasted diff", {
       kind: "paste",
     });
+  }
+
+  async function loadFromGithubPr(targetUrl: string) {
+    if (!targetUrl.trim()) return;
+    setPrErr(null);
+    setPrBusy(true);
+    try {
+      const cs = await loadGithubPr(targetUrl);
+      deliver(cs, {}, { kind: "pr", prUrl: targetUrl });
+    } catch (e) {
+      if (e instanceof GithubFetchError) {
+        if (e.discriminator === "github_token_required" && e.host) {
+          // Tauri-only: try Keychain first. If found, push to server and retry
+          // before bothering the user. In dev mode (no Tauri) skip straight to
+          // the modal — Keychain isn't available.
+          if (isTauri()) {
+            const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
+            if (cached) {
+              await setGithubToken(e.host, cached);
+              return loadFromGithubPr(targetUrl);
+            }
+          }
+          setTokenModal({
+            host: e.host,
+            reason: "first-time",
+            pendingPrUrl: targetUrl,
+          });
+        } else if (e.discriminator === "github_auth_failed") {
+          setTokenModal({
+            host: e.host ?? "github.com",
+            reason: "rejected",
+            pendingPrUrl: targetUrl,
+          });
+        } else {
+          setPrErr(GH_ERROR_MESSAGES[e.discriminator] ?? e.discriminator);
+        }
+      } else {
+        setPrErr(e instanceof Error ? e.message : "Unknown error");
+      }
+    } finally {
+      setPrBusy(false);
+    }
+  }
+
+  async function handleTokenSubmit(host: string, token: string): Promise<void> {
+    if (isTauri()) {
+      await keychainSet(`GITHUB_TOKEN:${host}`, token);
+    }
+    await setGithubToken(host, token);
+    // Token saved — close the modal and retry the PR load.
+    const pendingUrl = tokenModal?.pendingPrUrl ?? prUrl;
+    setTokenModal(null);
+    await loadFromGithubPr(pendingUrl);
   }
 
   const worktrees = useWorktreeLoader({
@@ -279,7 +345,42 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
           </section>
         )}
 
+        {tokenModal && (
+          <GitHubTokenModal
+            host={tokenModal.host}
+            reason={tokenModal.reason}
+            onSubmit={handleTokenSubmit}
+            onCancel={() => setTokenModal(null)}
+          />
+        )}
+
         {/* Always-on secondary loaders. */}
+        <section className="welcome__sec">
+          <h2 className="welcome__sec-h">From a GitHub PR</h2>
+          <p>
+            Paste a GitHub or GitHub Enterprise pull request URL. You'll be
+            prompted for a Personal Access Token on first use per host.
+          </p>
+          <div className="welcome__row">
+            <input
+              className="welcome__input"
+              type="url"
+              placeholder="https://github.com/owner/repo/pull/123"
+              value={prUrl}
+              onChange={(e) => setPrUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && loadFromGithubPr(prUrl)}
+            />
+            <button
+              className="welcome__btn"
+              onClick={() => loadFromGithubPr(prUrl)}
+              disabled={prBusy || !prUrl.trim()}
+            >
+              {prBusy ? "loading…" : "load PR"}
+            </button>
+          </div>
+          {prErr && <div className="welcome__err">{prErr}</div>}
+        </section>
+
         <section className="welcome__sec">
           <h2 className="welcome__sec-h">From a URL</h2>
           <div className="welcome__row">
