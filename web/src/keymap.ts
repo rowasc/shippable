@@ -75,8 +75,12 @@ export const KEYMAP: KeyEntry[] = [
   { key: "ArrowDown", label: "next line",            group: "navigation", action: "MOVE_LINE_DOWN" },
   { key: "k",         label: "previous line",        group: "navigation", action: "MOVE_LINE_UP" },
   { key: "ArrowUp",   label: "previous line",        group: "navigation", action: "MOVE_LINE_UP" },
-  { key: "J",         label: "next hunk",            group: "navigation", action: "MOVE_HUNK_DOWN" },
-  { key: "K",         label: "previous hunk",        group: "navigation", action: "MOVE_HUNK_UP" },
+  // Mark shift explicitly so the help table renders these as ⇧j / ⇧k
+  // alongside ⇧m / ⇧l / ⇧r — without `shift: true` they showed as bare
+  // capital letters next to the lowercase j/k bindings, mixing two
+  // conventions in the same table.
+  { key: "J", shift: true, label: "next hunk",     group: "navigation", action: "MOVE_HUNK_DOWN" },
+  { key: "K", shift: true, label: "previous hunk", group: "navigation", action: "MOVE_HUNK_UP" },
   // ]/[ for files keeps Tab as the browser-native focus key. Sample-changeset
   // cycling moves to the shifted variants (}/{) — testing-only, less common.
   { key: "]",         label: "next file",            group: "navigation", action: "MOVE_FILE_NEXT" },
