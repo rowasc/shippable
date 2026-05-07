@@ -66,6 +66,15 @@ export interface WorktreeState {
   dirtyHash: string | null;
 }
 
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  date: string;
+  parents: string[];
+}
+
 export interface ChangesetResult {
   diff: string;
   sha: string;
@@ -585,6 +594,180 @@ export async function dirtyChangesetFor(
     date: new Date().toISOString(),
     branch,
     parentSha: headSha.slice(0, 7),
+    fileContents,
+    state,
+  };
+}
+
+/**
+ * Recent commits on `worktreePath` (HEAD-ward) for the range picker. Uses ASCII
+ * unit/record separators so commit subjects can contain anything except 0x1e
+ * — which is essentially nothing in real-world commit messages.
+ */
+export async function listCommits(
+  worktreePath: string,
+  limit = 50,
+): Promise<CommitInfo[]> {
+  await assertGitDir(worktreePath);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+    throw new Error(`limit must be an integer in [1, 500], got: ${limit}`);
+  }
+
+  const FS = "\x1f";
+  const RS = "\x1e";
+  const fmt = `%H${FS}%h${FS}%s${FS}%an <%ae>${FS}%aI${FS}%P${RS}`;
+  const { stdout } = await execFileAsync(
+    GIT,
+    ["log", `-n${limit}`, `--format=${fmt}`, "--end-of-options", "HEAD"],
+    { cwd: worktreePath, maxBuffer: 8 * 1024 * 1024 },
+  );
+
+  const commits: CommitInfo[] = [];
+  for (const record of stdout.split(RS)) {
+    const trimmed = record.replace(/^\n/, "");
+    if (!trimmed) continue;
+    const [sha = "", shortSha = "", subject = "", author = "", date = "", parentsRaw = ""] =
+      trimmed.split(FS);
+    if (!sha) continue;
+    commits.push({
+      sha,
+      shortSha,
+      subject,
+      author,
+      date,
+      parents: parentsRaw.trim().split(/\s+/).filter(Boolean),
+    });
+  }
+  return commits;
+}
+
+// Standard empty-tree sha; used as a fallback "parent" when the user picks the
+// repo's first commit (which has no real parent) so `git diff` still works.
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+/**
+ * Diff a range `fromRef..toRef` (inclusive of `from`) plus, optionally, the
+ * working tree when `toRef === "HEAD"`. Backs the range picker — single-commit
+ * review falls out as `from === to`.
+ */
+export async function rangeChangeset(
+  worktreePath: string,
+  fromRef: string,
+  toRef: string,
+  includeDirty: boolean,
+): Promise<ChangesetResult> {
+  await assertGitDir(worktreePath);
+  validateRef(fromRef);
+  validateRef(toRef);
+
+  const toSha = toRef === "HEAD"
+    ? await revParseHead(worktreePath)
+    : (await execFileAsync(
+        GIT,
+        ["rev-parse", "--verify", "--end-of-options", `${toRef}^{commit}`],
+        { cwd: worktreePath },
+      )).stdout.trim();
+
+  const fromSha = (await execFileAsync(
+    GIT,
+    ["rev-parse", "--verify", "--end-of-options", `${fromRef}^{commit}`],
+    { cwd: worktreePath },
+  )).stdout.trim();
+
+  // `from`'s parent — the diff base. If `from` is a root commit, fall back to
+  // the empty-tree sha so the diff still resolves.
+  let diffBase: string;
+  try {
+    const { stdout } = await execFileAsync(
+      GIT,
+      ["rev-parse", "--verify", "--end-of-options", `${fromSha}^`],
+      { cwd: worktreePath },
+    );
+    diffBase = stdout.trim();
+  } catch {
+    diffBase = EMPTY_TREE_SHA;
+  }
+
+  let trackedDiff = await safeGitDiff(
+    ["diff", "--end-of-options", diffBase, toSha],
+    worktreePath,
+  );
+
+  const dirtyApplies = includeDirty && toRef === "HEAD";
+  if (dirtyApplies) {
+    trackedDiff += await safeGitDiff(["diff", "HEAD"], worktreePath);
+    try {
+      const { stdout: untrackedList } = await execFileAsync(
+        GIT,
+        ["ls-files", "--others", "--exclude-standard"],
+        { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+      );
+      for (const rel of untrackedList.split("\n").filter(Boolean)) {
+        try {
+          const synth = await synthesiseNewFileDiff(worktreePath, rel);
+          if (synth) trackedDiff += synth;
+        } catch {
+          // skip unreadable / vanished
+        }
+      }
+    } catch {
+      // ls-files failure non-fatal
+    }
+  }
+
+  const SEP = "<<<SHIPPABLE-WT-SEP>>>";
+  const fmt = `%s%n%an <%ae>%n%aI%n${SEP}`;
+  const { stdout: metaOut } = await execFileAsync(
+    GIT,
+    ["log", "-1", `--format=${fmt}`, "--end-of-options", toSha],
+    { cwd: worktreePath },
+  );
+  const sepIdx = metaOut.indexOf(SEP);
+  const meta = sepIdx >= 0 ? metaOut.slice(0, sepIdx).split("\n") : [];
+  const [subject = "", author = "", date = ""] = meta;
+
+  let branch: string | null = null;
+  try {
+    const { stdout: br } = await execFileAsync(
+      GIT,
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: worktreePath },
+    );
+    const trimmed = br.trim();
+    branch = trimmed && trimmed !== "HEAD" ? trimmed : null;
+  } catch {
+    branch = null;
+  }
+
+  const fileContents: Record<string, string> = {};
+  for (const p of extractRenderablePaths(trackedDiff)) {
+    try {
+      if (dirtyApplies) {
+        fileContents[p] = await fs.readFile(path.join(worktreePath, p), "utf8");
+      } else {
+        const { stdout: content } = await execFileAsync(
+          GIT,
+          ["show", "--end-of-options", `${toSha}:${p}`],
+          { cwd: worktreePath, maxBuffer: 4 * 1024 * 1024 },
+        );
+        fileContents[p] = content;
+      }
+    } catch {
+      // missing / oversized / deleted — frontend falls back to in-diff content
+    }
+  }
+
+  const state = await stateFor(worktreePath);
+  const sha = dirtyApplies && state.dirty ? `dirty:${state.dirtyHash}` : toSha;
+
+  return {
+    diff: trackedDiff,
+    sha,
+    subject: subject || "(no commit subject)",
+    author,
+    date,
+    branch,
+    parentSha: fromSha.slice(0, 7),
     fileContents,
     state,
   };

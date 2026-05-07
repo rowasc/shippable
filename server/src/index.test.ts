@@ -583,3 +583,88 @@ describe("POST /api/worktrees/file-at", () => {
     expect(r.status).toBe(400);
   });
 });
+
+describe("POST /api/worktrees/commits and range changeset", () => {
+  let rangeWt: string;
+  let firstSha: string;
+  let secondSha: string;
+
+  beforeAll(async () => {
+    rangeWt = await fs.mkdtemp(path.join(os.tmpdir(), "shippable-range-"));
+    await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: rangeWt });
+    await execFileAsync("git", ["config", "user.email", "t@t"], { cwd: rangeWt });
+    await execFileAsync("git", ["config", "user.name", "t"], { cwd: rangeWt });
+    await fs.writeFile(path.join(rangeWt, "a.txt"), "alpha\n");
+    await execFileAsync("git", ["add", "."], { cwd: rangeWt });
+    await execFileAsync("git", ["commit", "-m", "first"], { cwd: rangeWt });
+    firstSha = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: rangeWt }))
+      .stdout.trim();
+    await fs.writeFile(path.join(rangeWt, "b.txt"), "beta\n");
+    await execFileAsync("git", ["add", "."], { cwd: rangeWt });
+    await execFileAsync("git", ["commit", "-m", "second"], { cwd: rangeWt });
+    secondSha = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: rangeWt }))
+      .stdout.trim();
+  });
+
+  afterAll(async () => {
+    await fs.rm(rangeWt, { recursive: true, force: true });
+  });
+
+  it("lists recent commits newest-first", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/commits`, {
+      path: rangeWt,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.commits).toHaveLength(2);
+    expect(r.body.commits[0].sha).toBe(secondSha);
+    expect(r.body.commits[1].sha).toBe(firstSha);
+    expect(r.body.commits[0].subject).toBe("second");
+  });
+
+  it("rejects a missing path", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/commits`, {});
+    expect(r.status).toBe(400);
+  });
+
+  it("routes fromRef+toRef through rangeChangeset", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/changeset`, {
+      path: rangeWt,
+      fromRef: secondSha,
+      toRef: secondSha,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.diff).toContain("+++ b/b.txt");
+    expect(r.body.diff).not.toContain("+++ b/a.txt");
+    expect(r.body.sha).toBe(secondSha);
+  });
+
+  it("legacy { path } still hits branchChangeset (regression)", async () => {
+    // No upstream/origin in this temp repo, so branchChangeset returns an
+    // empty diff with parentSha=null. We just verify the call shape works.
+    const r = await postJson(`${baseUrl}/api/worktrees/changeset`, {
+      path: rangeWt,
+    });
+    expect(r.status).toBe(200);
+    expect(typeof r.body.sha).toBe("string");
+  });
+
+  it("legacy { path, ref } still hits changesetFor (regression)", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/changeset`, {
+      path: rangeWt,
+      ref: firstSha,
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.sha).toBe(firstSha);
+    expect(r.body.diff).toContain("+++ b/a.txt");
+  });
+
+  it("legacy { path, dirty: true } still hits dirtyChangesetFor (regression)", async () => {
+    const r = await postJson(`${baseUrl}/api/worktrees/changeset`, {
+      path: rangeWt,
+      dirty: true,
+    });
+    expect(r.status).toBe(200);
+    // Tree is clean; dirty changeset returns the HEAD sha and an empty diff.
+    expect(r.body.sha).toBe(secondSha);
+  });
+});

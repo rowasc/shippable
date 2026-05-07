@@ -78,6 +78,9 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/worktrees/changeset") {
       return await handleWorktreesChangeset(req, res, origin);
     }
+    if (req.method === "POST" && req.url === "/api/worktrees/commits") {
+      return await handleWorktreesCommits(req, res, origin);
+    }
     if (req.method === "POST" && req.url === "/api/worktrees/state") {
       return handleWorktreesState(req, res, origin);
     }
@@ -427,7 +430,14 @@ async function handleWorktreesChangeset(
   origin: string | null,
 ) {
   const body = await readBody(req);
-  let parsed: { path?: unknown; ref?: unknown; dirty?: unknown };
+  let parsed: {
+    path?: unknown;
+    ref?: unknown;
+    dirty?: unknown;
+    fromRef?: unknown;
+    toRef?: unknown;
+    includeDirty?: unknown;
+  };
   try {
     parsed = JSON.parse(body);
   } catch {
@@ -440,28 +450,83 @@ async function handleWorktreesChangeset(
   const ref =
     typeof parsed.ref === "string" && parsed.ref.length > 0 ? parsed.ref : null;
   const dirty = parsed.dirty === true;
+  const fromRef =
+    typeof parsed.fromRef === "string" && parsed.fromRef.length > 0
+      ? parsed.fromRef
+      : null;
+  const toRef =
+    typeof parsed.toRef === "string" && parsed.toRef.length > 0
+      ? parsed.toRef
+      : null;
+  const includeDirty = parsed.includeDirty === true;
   if (!wtPath) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { path: string, ref?: string, dirty?: boolean }" }));
+    res.end(
+      JSON.stringify({
+        error:
+          "expected { path: string, ref?: string, dirty?: boolean, fromRef?: string, toRef?: string, includeDirty?: boolean }",
+      }),
+    );
     return;
   }
   try {
-    // dirty=true: working-tree-only diff (live-reload "show me the
-    // uncommitted edits" path). ref: single-commit view (future "load
-    // specific commit" UX). Otherwise: cumulative branch view, which is
-    // what LoadModal asks for today.
-    const result = dirty
-      ? await worktrees.dirtyChangesetFor(wtPath)
-      : ref
-        ? await worktrees.changesetFor(wtPath, ref)
-        : await worktrees.branchChangeset(wtPath);
+    // Routing precedence: range > dirty > single-ref > cumulative branch view.
+    // Strict superset of the original contract — legacy callers (no fromRef/toRef)
+    // still hit the dirty/ref/branch paths unchanged.
+    const result =
+      fromRef && toRef
+        ? await worktrees.rangeChangeset(wtPath, fromRef, toRef, includeDirty)
+        : dirty
+          ? await worktrees.dirtyChangesetFor(wtPath)
+          : ref
+            ? await worktrees.changesetFor(wtPath, ref)
+            : await worktrees.branchChangeset(wtPath);
     writeCorsHeaders(res, origin);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(result));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`[server] /api/worktrees/changeset err: ${message}`);
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: message }));
+  }
+}
+
+async function handleWorktreesCommits(
+  req: IncomingMessage,
+  res: ServerResponse,
+  origin: string | null,
+) {
+  const body = await readBody(req);
+  let parsed: { path?: unknown; limit?: unknown };
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "invalid JSON body" }));
+    return;
+  }
+  const wtPath = typeof parsed.path === "string" ? parsed.path : "";
+  const limit = typeof parsed.limit === "number" ? parsed.limit : undefined;
+  if (!wtPath) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({ error: "expected { path: string, limit?: number }" }),
+    );
+    return;
+  }
+  try {
+    const commits = await worktrees.listCommits(wtPath, limit);
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ commits }));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[server] /api/worktrees/commits err: ${message}`);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
