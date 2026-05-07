@@ -30,6 +30,16 @@ export interface PlanDiagram {
   mermaid: string;
   nodes: PlanDiagramNode[];
   edges: PlanDiagramEdge[];
+  /** Count of markdown files present in the source graph. Lets the UI decide
+   *  whether to surface a "show docs" toggle even when they're filtered out. */
+  markdownCount: number;
+}
+
+export interface BuildPlanDiagramOptions {
+  /** Markdown files (`.md` / `.mdx`) are excluded by default — they crowd
+   *  the code map and rarely have meaningful symbol edges. Pass `true` to
+   *  fold them back in. */
+  includeMarkdown?: boolean;
 }
 
 interface DependencyBucket {
@@ -38,11 +48,23 @@ interface DependencyBucket {
   labels: Set<string>;
 }
 
-export function buildPlanDiagram(plan: ReviewPlan, graph?: CodeGraph): PlanDiagram {
+export function isMarkdownPath(path: string): boolean {
+  return /\.mdx?$/i.test(path);
+}
+
+export function buildPlanDiagram(
+  plan: ReviewPlan,
+  graph?: CodeGraph,
+  options: BuildPlanDiagramOptions = {},
+): PlanDiagram {
   const planFiles = plan.map.files;
   const filesByPath = new Map(planFiles.map((file) => [file.path, file]));
   const entryPointFileIds = new Set(plan.entryPoints.map((entry) => entry.fileId));
-  const graphSource = graph ?? buildFallbackGraph(plan);
+  const fullGraph = graph ?? buildFallbackGraph(plan);
+  const markdownCount = fullGraph.nodes.filter((node) => isMarkdownPath(node.path)).length;
+  const graphSource = options.includeMarkdown
+    ? fullGraph
+    : filterMarkdown(fullGraph);
   const fileIdByPath = new Map(planFiles.map((file) => [file.path, file.fileId]));
 
   const edgeBuckets = graphSource.edges
@@ -129,6 +151,17 @@ export function buildPlanDiagram(plan: ReviewPlan, graph?: CodeGraph): PlanDiagr
     mermaid: buildMermaid(nodes, edges),
     nodes,
     edges,
+    markdownCount,
+  };
+}
+
+function filterMarkdown(graph: CodeGraph): CodeGraph {
+  return {
+    scope: graph.scope,
+    nodes: graph.nodes.filter((node) => !isMarkdownPath(node.path)),
+    edges: graph.edges.filter(
+      (edge) => !isMarkdownPath(edge.fromPath) && !isMarkdownPath(edge.toPath),
+    ),
   };
 }
 

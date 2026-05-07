@@ -16,6 +16,34 @@
   border-bottom: 1px solid var(--border);
 }
 
+.plan-diagram__head-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.plan-diagram__toggle {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  text-transform: lowercase;
+}
+
+.plan-diagram__toggle:hover {
+  background: var(--bg-1);
+  border-color: var(--border-active);
+}
+
+.plan-diagram__toggle[aria-pressed="true"] {
+  background: var(--bg-1);
+  border-color: var(--border-active);
+}
+
 .plan-diagram__title {
   font-size: 12px;
   font-weight: 600;

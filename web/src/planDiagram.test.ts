@@ -103,13 +103,71 @@ describe("buildPlanDiagram", () => {
       entryPoints: [],
     };
 
-    const diagram = buildPlanDiagram(plan);
+    const diagram = buildPlanDiagram(plan, undefined, { includeMarkdown: true });
 
     expect(diagram.nodes).toHaveLength(1);
     expect(diagram.edges).toHaveLength(0);
     expect(diagram.mermaid).toContain("%% no dependency edges detected");
     expect(diagram.mermaid).toContain('subgraph g0["docs"]');
     expect(diagram.mermaid).toContain('f0["notes.md"]');
+    expect(diagram.markdownCount).toBe(1);
+  });
+
+  it("hides markdown files by default and reports their count", () => {
+    const plan: ReviewPlan = {
+      headline: "with docs",
+      intent: [],
+      map: {
+        files: [
+          {
+            fileId: "core",
+            path: "src/core.ts",
+            status: "modified",
+            added: 4,
+            removed: 1,
+            isTest: false,
+          },
+          {
+            fileId: "readme",
+            path: "README.md",
+            status: "modified",
+            added: 3,
+            removed: 0,
+            isTest: false,
+          },
+          {
+            fileId: "guide",
+            path: "docs/guide.mdx",
+            status: "added",
+            added: 12,
+            removed: 0,
+            isTest: false,
+          },
+        ],
+        symbols: [
+          {
+            name: "explain",
+            definedIn: "src/core.ts",
+            referencedIn: ["README.md"],
+          },
+        ],
+      },
+      entryPoints: [],
+    };
+
+    const hidden = buildPlanDiagram(plan);
+    expect(hidden.nodes.map((n) => n.path)).toEqual(["src/core.ts"]);
+    expect(hidden.edges).toHaveLength(0);
+    expect(hidden.markdownCount).toBe(2);
+
+    const shown = buildPlanDiagram(plan, undefined, { includeMarkdown: true });
+    expect(shown.nodes.map((n) => n.path).sort()).toEqual([
+      "README.md",
+      "docs/guide.mdx",
+      "src/core.ts",
+    ]);
+    expect(shown.edges).toHaveLength(1);
+    expect(shown.markdownCount).toBe(2);
   });
 
   it("uses an attached repo graph when available, including unchanged neighbors", () => {

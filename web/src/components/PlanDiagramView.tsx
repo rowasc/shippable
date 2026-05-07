@@ -14,6 +14,8 @@ type EdgeTone = (typeof EDGE_TONES)[number];
 
 interface Props {
   diagram: PlanDiagram;
+  includeMarkdown: boolean;
+  onToggleMarkdown: () => void;
 }
 
 interface PositionedEdge extends PlanDiagramEdge {
@@ -24,15 +26,37 @@ interface PositionedEdge extends PlanDiagramEdge {
   label: string;
 }
 
-export function PlanDiagramView({ diagram }: Props) {
+export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: Props) {
+  const hasMarkdown = diagram.markdownCount > 0;
+  const markdownToggle = hasMarkdown ? (
+    <button
+      type="button"
+      className="plan-diagram__toggle"
+      onClick={onToggleMarkdown}
+      aria-pressed={includeMarkdown}
+      title={
+        includeMarkdown
+          ? "Hide markdown files from the diagram"
+          : `Include ${diagram.markdownCount} markdown file${diagram.markdownCount === 1 ? "" : "s"} in the diagram`
+      }
+    >
+      {includeMarkdown ? "hide docs" : "show docs"}
+    </button>
+  ) : null;
+
   if (diagram.nodes.length === 0) {
     return (
       <section className="plan-diagram">
         <div className="plan-diagram__head">
           <div>
             <div className="plan-diagram__title">Diagram</div>
-            <div className="plan-diagram__hint">No files in this change.</div>
+            <div className="plan-diagram__hint">
+              {hasMarkdown && !includeMarkdown
+                ? "Only markdown files in this change — toggle to include them."
+                : "No files in this change."}
+            </div>
           </div>
+          {markdownToggle}
         </div>
       </section>
     );
@@ -67,7 +91,10 @@ export function PlanDiagramView({ diagram }: Props) {
                 : "Generated from the current diff. Copy the Mermaid source if you want to refine it elsewhere."}
           </div>
         </div>
-        <CopyButton text={diagram.mermaid} title="Copy Mermaid diagram source" />
+        <div className="plan-diagram__head-actions">
+          {markdownToggle}
+          <CopyButton text={diagram.mermaid} title="Copy Mermaid diagram source" />
+        </div>
       </div>
 
       <div className="plan-diagram__canvas">
@@ -301,7 +328,7 @@ function edgeTone(edge: PlanDiagramEdge): EdgeTone {
 }
 
 function edgeStrokeWidth(labelCount: number): number {
-  if (labelCount >= 3) return 3.2;
-  if (labelCount === 2) return 2.6;
-  return 2.1;
+  if (labelCount >= 3) return 1.4;
+  if (labelCount === 2) return 1.2;
+  return 1;
 }

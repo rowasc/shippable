@@ -44,9 +44,13 @@ export function ReviewPlanView({
   changeset,
 }: Props) {
   const [showDiagram, setShowDiagram] = useState(false);
+  const [includeMarkdown, setIncludeMarkdown] = useState(false);
   const diagram = useMemo(
-    () => (showDiagram ? buildPlanDiagram(plan, changeset?.graph) : null),
-    [changeset?.graph, plan, showDiagram],
+    () =>
+      showDiagram
+        ? buildPlanDiagram(plan, changeset?.graph, { includeMarkdown })
+        : null,
+    [changeset?.graph, plan, showDiagram, includeMarkdown],
   );
 
   return (
@@ -89,6 +93,8 @@ export function ReviewPlanView({
         showDiagram={showDiagram}
         onToggleDiagram={() => setShowDiagram((value) => !value)}
         diagram={diagram}
+        includeMarkdown={includeMarkdown}
+        onToggleMarkdown={() => setIncludeMarkdown((value) => !value)}
       />
       <EntrySection
         entryPoints={plan.entryPoints}
@@ -151,12 +157,16 @@ function MapSection({
   showDiagram,
   onToggleDiagram,
   diagram,
+  includeMarkdown,
+  onToggleMarkdown,
 }: {
   map: StructureMap;
   onNavigate?: (ev: EvidenceRef) => void;
   showDiagram: boolean;
   onToggleDiagram: () => void;
   diagram: ReturnType<typeof buildPlanDiagram> | null;
+  includeMarkdown: boolean;
+  onToggleMarkdown: () => void;
 }) {
   return (
     <section className="plan__sec">
@@ -211,7 +221,13 @@ function MapSection({
           ))}
         </ul>
       )}
-      {diagram && <PlanDiagramView diagram={diagram} />}
+      {diagram && (
+        <PlanDiagramView
+          diagram={diagram}
+          includeMarkdown={includeMarkdown}
+          onToggleMarkdown={onToggleMarkdown}
+        />
+      )}
     </section>
   );
 }
