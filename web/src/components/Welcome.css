@@ -208,6 +208,10 @@
   background: var(--bg-3);
   color: var(--fg);
 }
+.welcome__drop--compact {
+  padding: 14px 12px;
+  font-size: 12px;
+}
 .welcome__drop input[type="file"] {
   display: none;
 }

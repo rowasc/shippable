@@ -29,8 +29,12 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   // Paste pane.
   const [pasted, setPasted] = useState("");
 
-  // Drop zone.
-  const [dropActive, setDropActive] = useState(false);
+  // Drop zones. The hero exposes one when the server is unavailable; a
+  // smaller secondary one always lives below in the "From a file" section
+  // so the CORS error message ("load it from the file input or paste box
+  // below") always points at something the eye can find.
+  const [heroDropActive, setHeroDropActive] = useState(false);
+  const [fileDropActive, setFileDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   function deliver(
@@ -246,15 +250,15 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               one of the loaders below.
             </p>
             <label
-              className={`welcome__drop ${dropActive ? "welcome__drop--active" : ""}`}
+              className={`welcome__drop ${heroDropActive ? "welcome__drop--active" : ""}`}
               onDragOver={(e) => {
                 e.preventDefault();
-                setDropActive(true);
+                setHeroDropActive(true);
               }}
-              onDragLeave={() => setDropActive(false)}
+              onDragLeave={() => setHeroDropActive(false)}
               onDrop={(e) => {
                 e.preventDefault();
-                setDropActive(false);
+                setHeroDropActive(false);
                 const f = e.dataTransfer.files?.[0];
                 if (f) loadFromFile(f);
               }}
@@ -300,14 +304,33 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
         {worktrees.serverAvailable === true && (
           <section className="welcome__sec">
             <h2 className="welcome__sec-h">From a file</h2>
-            <input
-              type="file"
-              accept=".diff,.patch,text/plain"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
+            <label
+              className={`welcome__drop welcome__drop--compact ${fileDropActive ? "welcome__drop--active" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setFileDropActive(true);
+              }}
+              onDragLeave={() => setFileDropActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setFileDropActive(false);
+                const f = e.dataTransfer.files?.[0];
                 if (f) loadFromFile(f);
               }}
-            />
+            >
+              <span className="welcome__drop-strong">drop a diff here</span>
+              <span> or </span>
+              <span className="welcome__drop-strong">click to choose a file</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".diff,.patch,text/plain"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) loadFromFile(f);
+                }}
+              />
+            </label>
           </section>
         )}
 
