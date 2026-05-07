@@ -136,6 +136,41 @@
 .reply__delete:hover {
   color: var(--red);
 }
+.reply__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  font-size: 11px;
+}
+.reply__confirm-q {
+  color: var(--fg-dim);
+}
+.reply__confirm-yes,
+.reply__confirm-no {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 10.5px;
+  padding: 0 6px;
+  border-radius: 2px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.reply__confirm-yes {
+  color: var(--red);
+  border-color: var(--red);
+}
+.reply__confirm-yes:hover,
+.reply__confirm-yes:focus-visible {
+  background: var(--red-bg);
+}
+.reply__confirm-no:hover,
+.reply__confirm-no:focus-visible {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
 .reply__body {
   margin: 2px 0 0 0;
   color: var(--fg);

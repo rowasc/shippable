@@ -1,5 +1,5 @@
 import "./ReplyThread.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgentReply, Cursor, DeliveredComment, Reply } from "../types";
 import type { SymbolIndex } from "../symbols";
 import { RichText } from "./RichText";
@@ -55,6 +55,11 @@ export function ReplyThread({
   // sending. Surface a hint so they know it's still waiting.
   const hasUnsentDraft = !isDrafting && draftBody.trim().length > 0;
 
+  // Inline two-step delete: clicking "× delete" arms the row instead of
+  // popping a native browser confirm() that breaks focus and looks foreign.
+  // The armed row swaps in a "delete?  [yes] [cancel]" cluster in place.
+  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+
   if (replies.length === 0 && !isDrafting) {
     return (
       <div className="thread thread--empty">
@@ -94,17 +99,37 @@ export function ReplyThread({
                 onRetry={onRetryReply ? () => onRetryReply(r.id) : undefined}
               />
               {r.author === "you" && (
-                <button
-                  className="reply__delete"
-                  onClick={() => {
-                    if (window.confirm("Delete this reply?")) {
-                      onDeleteReply(r.id);
-                    }
-                  }}
-                  title={deleteTitle}
-                >
-                  × delete
-                </button>
+                armedDeleteId === r.id ? (
+                  <span className="reply__confirm" role="group" aria-label="confirm delete">
+                    <span className="reply__confirm-q">delete?</span>
+                    <button
+                      type="button"
+                      className="reply__confirm-yes"
+                      onClick={() => {
+                        setArmedDeleteId(null);
+                        onDeleteReply(r.id);
+                      }}
+                      autoFocus
+                    >
+                      yes
+                    </button>
+                    <button
+                      type="button"
+                      className="reply__confirm-no"
+                      onClick={() => setArmedDeleteId(null)}
+                    >
+                      cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    className="reply__delete"
+                    onClick={() => setArmedDeleteId(r.id)}
+                    title={deleteTitle}
+                  >
+                    × delete
+                  </button>
+                )
               )}
             </div>
             <div className="reply__body">
