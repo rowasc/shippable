@@ -172,6 +172,7 @@ describe("ReviewWorkspace symbol navigation", () => {
         themeId="light"
         setThemeId={() => undefined}
         onLoadChangeset={() => undefined}
+        onReloadChangeset={() => undefined}
         currentSource={{ kind: "worktree", path: "/repo", branch: "feat/nav" }}
       />,
     );
