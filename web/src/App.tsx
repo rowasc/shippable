@@ -142,21 +142,6 @@ export default function App() {
     setRecents(pushRecent(cs, replies, source));
   }
 
-  // Reload-in-place. Replaces the changeset whose id is `prevChangesetId`
-  // and runs the content-anchor pass over its replies. Used by the debug
-  // "reload now" button today; slice (a) of the live-reload plan will
-  // wire the polling banner to this same path.
-  function handleReloadChangeset(
-    prevChangesetId: string,
-    cs: ChangeSet,
-    source: RecentSource,
-  ) {
-    dispatch({ type: "RELOAD_CHANGESET", prevChangesetId, changeset: cs });
-    // Round-trip through recents so the next welcome screen surfaces the
-    // newest sha rather than pinning the stale one.
-    setRecents(pushRecent(cs, {}, source));
-  }
-
   // ── Live reload ───────────────────────────────────────────────────────
   // Provenance (path + branch + sha + dirtyHash baseline) lives on the
   // active changeset's worktreeSource. We derive it for the polling hook +
@@ -294,7 +279,6 @@ export default function App() {
       setThemeId={setThemeId}
       onLoadChangeset={handleLoadChangeset}
       currentSource={currentSource}
-      onReloadChangeset={handleReloadChangeset}
       liveReloadBar={liveReloadBar}
     />
   );

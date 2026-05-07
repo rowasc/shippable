@@ -122,16 +122,10 @@ export type ReplyAnchorFields = Pick<
  * Returns an empty object when the key isn't recognized or the hunk it
  * names is missing — the reply is still saved, just without anchor info,
  * which means it falls back to in-place hashing on reload.
- *
- * `opts.dirty`, when set, forces `originType` regardless of the
- * changeset's `worktreeSource.dirty` flag. The debug "dirty" toggle in
- * the review topbar uses this to simulate the dirty case before slice (a)
- * lands the real polling-driven dirty diffs.
  */
 export function buildReplyAnchor(
   key: string,
   cs: ChangeSet,
-  opts?: { dirty?: boolean },
 ): ReplyAnchorFields {
   const colon = key.indexOf(":");
   if (colon < 0) return {};
@@ -176,7 +170,7 @@ export function buildReplyAnchor(
       // pasted/uploaded loads we fall back to the changeset id so detached
       // entries still have *something* to display in their origin caption.
       const wt = cs.worktreeSource;
-      const dirty = opts?.dirty ?? wt?.dirty ?? false;
+      const dirty = wt?.dirty ?? false;
       return {
         anchorPath: f.path,
         anchorContext: cap.context,
