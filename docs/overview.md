@@ -19,7 +19,7 @@ A code review tool that walks you through a diff. Built for the case where you j
 
 - It only takes pasted or uploaded diffs. No URL ingest, no GitHub/GitLab integration.
 - Reviews live in localStorage. Nothing syncs anywhere; teammates can't see each other's reviews.
-- Only Claude. The model is hardcoded to Sonnet 4.6 on the server.
+- Only Claude. The server defaults to `claude-sonnet-4-6`; override with the `CLAUDE_MODEL` env var.
 - No tests, no CI. `npm run build` is the typecheck.
 - The `.dmg` is unsigned.
 
