@@ -436,6 +436,16 @@ export interface WorktreeSource {
    * Absent / false means a normal committed view.
    */
   dirty?: boolean;
+  /**
+   * Set when the load was a range pick (LoadModal "pick range…" or topbar
+   * re-slice). The picker prefills from this on next open. `includeDirty` is
+   * only honoured server-side when `toRef === "HEAD"`.
+   */
+  range?: {
+    fromRef: string;
+    toRef: string;
+    includeDirty: boolean;
+  };
   state?: WorktreeState;
 }
 

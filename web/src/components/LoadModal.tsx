@@ -4,7 +4,9 @@ import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
 import type { RecentSource } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
+import type { LoadOpts } from "../worktreeChangeset";
 import { CopyButton } from "./CopyButton";
+import { RangePicker } from "./RangePicker";
 
 interface Props {
   /**
@@ -21,6 +23,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
   const [pasted, setPasted] = useState("");
   const [urlBusy, setUrlBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pickerForPath, setPickerForPath] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const urlIsValid = isValidHttpUrl(url);
@@ -197,24 +200,59 @@ export function LoadModal({ onLoad, onClose }: Props) {
               <ul className="modal__wt-list">
                 {worktrees.wtList.map((wt) => (
                   <li key={wt.path}>
-                    <button
-                      type="button"
-                      className="modal__wt-row"
-                      onClick={() => worktrees.loadFromWorktree(wt)}
-                      disabled={worktrees.wtLoadingPath !== null}
-                    >
-                      <span className="modal__wt-branch">
-                        {wt.branch ?? "(detached)"}
-                        {wt.isMain && (
-                          <span className="modal__wt-tag"> main</span>
-                        )}
-                      </span>
-                      <span className="modal__wt-path">{wt.path}</span>
-                      <span className="modal__wt-head">
-                        {wt.head.slice(0, 7)}
-                        {worktrees.wtLoadingPath === wt.path && " · loading…"}
-                      </span>
-                    </button>
+                    <div className="modal__wt-row-wrap">
+                      <button
+                        type="button"
+                        className="modal__wt-row"
+                        onClick={() => worktrees.loadFromWorktree(wt)}
+                        disabled={worktrees.wtLoadingPath !== null}
+                      >
+                        <span className="modal__wt-branch">
+                          {wt.branch ?? "(detached)"}
+                          {wt.isMain && (
+                            <span className="modal__wt-tag"> main</span>
+                          )}
+                        </span>
+                        <span className="modal__wt-path">{wt.path}</span>
+                        <span className="modal__wt-head">
+                          {wt.head.slice(0, 7)}
+                          {worktrees.wtLoadingPath === wt.path && " · loading…"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="modal__wt-pick-range"
+                        onClick={() =>
+                          setPickerForPath(
+                            pickerForPath === wt.path ? null : wt.path,
+                          )
+                        }
+                        disabled={worktrees.wtLoadingPath !== null}
+                        aria-expanded={pickerForPath === wt.path}
+                      >
+                        {pickerForPath === wt.path ? "close" : "pick range…"}
+                      </button>
+                    </div>
+                    {pickerForPath === wt.path && (
+                      <RangePicker
+                        worktreePath={wt.path}
+                        fetchCommits={worktrees.fetchCommits}
+                        defaultToRef="HEAD"
+                        busy={worktrees.wtLoadingPath === wt.path}
+                        onApply={(opts: LoadOpts) => {
+                          setPickerForPath(null);
+                          void worktrees.loadFromWorktree(wt, opts);
+                        }}
+                        onCancel={() => setPickerForPath(null)}
+                        onJustThis={(sha: string) => {
+                          setPickerForPath(null);
+                          void worktrees.loadFromWorktree(wt, {
+                            kind: "ref",
+                            ref: sha,
+                          });
+                        }}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
