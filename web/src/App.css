@@ -30,22 +30,39 @@ body,
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
+  min-width: 0;
 }
 .topbar__brand {
   color: var(--magenta);
   font-weight: 600;
+  flex-shrink: 0;
 }
 .topbar__sep {
   color: var(--fg-mute);
+  flex-shrink: 0;
 }
 .topbar__id {
   color: var(--yellow);
+  flex-shrink: 0;
 }
+/* Title is the most variable-length element (commit subjects can be very
+   long). Let it ellipsize so the action buttons on the right stay on
+   screen. */
 .topbar__title {
   color: var(--fg);
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar__branch {
   color: var(--fg-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 28ch;
 }
 .topbar__meta-chip {
   border: 1px solid var(--border);
@@ -64,9 +81,15 @@ body,
 }
 .topbar__spacer {
   flex: 1;
+  min-width: 0;
 }
 .topbar__author {
   color: var(--blue);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 22ch;
 }
 .topbar__btn {
   display: inline-flex;
@@ -81,6 +104,7 @@ body,
   border-radius: 2px;
   cursor: pointer;
   margin-left: 10px;
+  flex-shrink: 0;
 }
 .topbar__btn:hover:not(:disabled) {
   color: var(--accent);
