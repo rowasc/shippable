@@ -198,9 +198,19 @@ function PromptList({
             <CopyButton text={error} />
           </div>
         )}
-        {loading && <div className="picker__empty">loading prompts…</div>}
+        {loading && (
+          <div className="picker__empty picker__empty--loading" aria-live="polite">
+            <span className="picker__spinner" aria-hidden="true" />
+            loading prompts from library/…
+          </div>
+        )}
         {!loading && !error && prompts.length === 0 && (
-          <div className="picker__empty">no prompts match.</div>
+          <div className="picker__empty">
+            {query.trim()
+              ? `No prompts match "${query.trim()}".`
+              : "No prompts yet."}{" "}
+            Press <kbd>+ new</kbd> to write one.
+          </div>
         )}
         {prompts.length > 0 && (
           <ul className="picker__list">

@@ -147,7 +147,11 @@ export function CommandPalette({ predicates, onClose, onPick }: Props) {
         </section>
         <section className="modal__sec cmdpal__results">
           {filtered.length === 0 ? (
-            <div className="picker__empty">no commands match.</div>
+            <div className="picker__empty">
+              {query.trim()
+                ? `No commands match "${query.trim()}".`
+                : "No commands available."}
+            </div>
           ) : (
             <ul className="cmdpal__list">
               {filtered.map((item) => {
