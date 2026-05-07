@@ -748,6 +748,7 @@ export function ReviewWorkspace({
           <kbd>?</kbd>
         </button>
         <button
+          type="button"
           className="topbar__btn topbar__btn--danger"
           onClick={() => {
             if (
@@ -760,8 +761,9 @@ export function ReviewWorkspace({
             }
           }}
           title="clear persisted progress and reload"
+          aria-label="reset review session (destructive)"
         >
-          × reset
+          <span className="topbar__btn-label">reset session</span>
         </button>
       </header>
 
