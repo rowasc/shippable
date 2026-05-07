@@ -113,40 +113,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     onRecentsChange(removeRecent(id));
   }
 
-  /**
-   * The samples block is the lowest-friction way to see what the app is.
-   * For repeat visitors we keep it as the small dev-debug strip at the
-   * footer, but on first paint (no recents) we promote it next to the
-   * hero so a brand-new user has a one-click "show me what this is".
-   */
-  const samples = STUBS.length > 0 && (
-    <section
-      className={
-        "welcome__samples" +
-        (recents.length === 0 ? " welcome__samples--featured" : "")
-      }
-    >
-      <span className="welcome__samples-label">
-        {recents.length === 0
-          ? "Don't have a diff handy? Try a sample:"
-          : "Or explore with a built-in sample:"}
-      </span>
-      {STUBS.map((s) => (
-        <button
-          key={s.code}
-          type="button"
-          className="welcome__sample"
-          onClick={() =>
-            deliver(s.changeset, s.replies, { kind: "stub", code: s.code })
-          }
-          title={s.changeset.title}
-        >
-          {s.code} · {s.changeset.title}
-        </button>
-      ))}
-    </section>
-  );
-
   return (
     <div className="welcome">
       <header className="welcome__top">
@@ -313,8 +279,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
           </section>
         )}
 
-        {recents.length === 0 && samples}
-
         {/* Always-on secondary loaders. */}
         <section className="welcome__sec">
           <h2 className="welcome__sec-h">From a URL</h2>
@@ -392,7 +356,26 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
 
         {err && <div className="welcome__err">{err}</div>}
 
-        {recents.length > 0 && samples}
+        {STUBS.length > 0 && (
+          <section className="welcome__samples">
+            <span className="welcome__samples-label">
+              Or explore with a built-in sample:
+            </span>
+            {STUBS.map((s) => (
+              <button
+                key={s.code}
+                type="button"
+                className="welcome__sample"
+                onClick={() =>
+                  deliver(s.changeset, s.replies, { kind: "stub", code: s.code })
+                }
+                title={s.changeset.title}
+              >
+                {s.code} · {s.changeset.title}
+              </button>
+            ))}
+          </section>
+        )}
       </div>
     </div>
   );
