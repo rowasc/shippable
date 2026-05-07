@@ -189,9 +189,11 @@ export function PromptEditor({
             required
           </label>
           <button
+            type="button"
             className="modal__btn editor__arg-rm"
             onClick={() => removeArg(idx)}
             title="remove arg"
+            aria-label={`remove arg ${a.name || idx + 1}`}
           >
             ×
           </button>

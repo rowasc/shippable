@@ -1242,7 +1242,13 @@ function DefinitionPeek({
         <strong>definition</strong>
         {" symbol "}
         <code>{peek.symbol}</code>
-        <button className="definition-peek__close" onClick={onDismiss}>
+        <button
+          type="button"
+          className="definition-peek__close"
+          onClick={onDismiss}
+          aria-label="close definition peek"
+          title="close (Esc)"
+        >
           ×
         </button>
       </div>

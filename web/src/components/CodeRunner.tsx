@@ -235,7 +235,12 @@ export function CodeRunner({
               edit
             </button>
           </div>
-          <button className="coderunner__close" onClick={closePanel} title="close (Esc)">
+          <button
+            className="coderunner__close"
+            onClick={closePanel}
+            title="close (Esc)"
+            aria-label="close code runner"
+          >
             ×
           </button>
         </header>
