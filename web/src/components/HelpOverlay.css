@@ -5,12 +5,15 @@
   display: grid;
   place-items: center;
   z-index: 10;
+  padding: 24px;
 }
 .help__box {
   background: var(--bg-2);
   border: 1px solid var(--border-active);
   padding: 16px 20px;
   min-width: 340px;
+  max-height: 100%;
+  overflow: auto;
 }
 .help__head {
   display: flex;
