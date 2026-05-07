@@ -78,6 +78,12 @@ If you want a different browser-origin allowlist, set:
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
+The streaming review endpoint is rate-limited per IP. Defaults to 30 requests per minute; tune with:
+
+```
+export SHIPPABLE_REVIEW_RATE_LIMIT=30
+```
+
 #### API surface
 
 The full surface lives in [`server/src/index.ts`](server/src/index.ts). Request/response shapes are TypeScript types in [`web/src/types.ts`](web/src/types.ts) and [`web/src/definitionTypes.ts`](web/src/definitionTypes.ts) — the server imports them directly so they cannot drift from the client.
@@ -91,10 +97,14 @@ The endpoints, grouped by feature:
 | `POST`   | `/api/review`                     | Streaming review (SSE). Rate-limited per IP.                               |
 | `GET`    | `/api/definition/capabilities`    | Whether definition lookup is available + which languages.                  |
 | `POST`   | `/api/definition`                 | `{ file, language, line, col, workspaceRoot? } → DefinitionResponse`.      |
+| `POST`   | `/api/code-graph`                 | Symbol graph for the touched files in a diff (LSP- or regex-backed).       |
 | `GET`    | `/api/library/prompts`            | List shipped prompts.                                                      |
 | `POST`   | `/api/library/refresh`            | Re-sync the prompt library. Requires `SHIPPABLE_ADMIN_TOKEN`.              |
 | `POST`   | `/api/worktrees/list`             | List git worktrees discoverable from a given dir.                          |
-| `POST`   | `/api/worktrees/changeset`        | Build a `ChangeSet` from a worktree at HEAD or a specific ref.             |
+| `POST`   | `/api/worktrees/changeset`        | Build a `ChangeSet` from a worktree at HEAD, a single ref, or a SHA range. |
+| `POST`   | `/api/worktrees/commits`          | Recent commits for a worktree (powers the range picker).                   |
+| `POST`   | `/api/worktrees/state`            | `(sha, dirty, dirtyHash)` — the live-reload poll baseline.                 |
+| `POST`   | `/api/worktrees/file-at`          | Fetch a file's content at a given sha (full-file view).                    |
 | `POST`   | `/api/worktrees/graph`            | Repo graph for a worktree at a ref.                                        |
 | `POST`   | `/api/worktrees/sessions`         | Claude/Codex session files for a worktree.                                 |
 | `POST`   | `/api/worktrees/agent-context`    | Slice of agent context for one commit.                                     |
@@ -104,6 +114,8 @@ The endpoints, grouped by feature:
 | `POST`   | `/api/agent/pull`                 | MCP-side: pull pending comments and ack them.                              |
 | `GET`    | `/api/agent/delivered?path=…`     | Already-delivered comments for a worktree.                                 |
 | `POST`   | `/api/agent/unenqueue`            | Drop a comment by id before delivery.                                      |
+| `POST`   | `/api/agent/replies`              | MCP-side: post an agent reply to a delivered reviewer comment.             |
+| `GET`    | `/api/agent/replies?path=…`       | Reviewer-side: pull replies the agent posted to delivered comments.        |
 
 The plan model defaults to `claude-sonnet-4-6`; override by setting `CLAUDE_MODEL` in the same shell.
 
