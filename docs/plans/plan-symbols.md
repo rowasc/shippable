@@ -409,3 +409,7 @@ The hard parts (workspace bridge, cache, cold-start UX) are exercised at sub-ste
 - **When to invalidate resolver caches on local file changes.** LSPs handle their own watches; the chain just needs to forward `didChange`. Build the watcher with step 4.
 - **Trust model for spawning the user's LSP binary.** We're executing a binary the user pointed us at — not worse than VS Code does, but worth being explicit about. v0.1.0 stance: config-only (no auto-spawn from probed paths until the user confirms once).
 - **How `memory-only` is triggered.** Deployment flag? Per-repository config? User toggle? Probably some combination, but the workspace contract doesn't care — only the place that constructs the workspace does.
+
+## Related
+
+- [`lsp-code-graph.md`](lsp-code-graph.md) — reuses the LanguageModule resolver chain to derive diagram edges (`documentSymbol` + `references`) instead of regex, so non-JS files stop rendering as floating islands.
