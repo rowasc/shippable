@@ -24,6 +24,7 @@ body,
 .app > .main {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* topbar ------------------------------------------------------------------ */
@@ -82,6 +83,31 @@ body,
 .topbar__meta-chip--bad {
   color: var(--red);
   border-color: var(--red);
+}
+.topbar__meta-chip--good {
+  color: var(--magenta);
+  border-color: var(--magenta);
+}
+.topbar__truncation-banner {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--fg-dim);
+  font-size: 11px;
+  padding: 3px 12px;
+}
+.topbar__truncation-banner--warn {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+.topbar__banner-btn {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
 }
 .topbar__spacer {
   flex: 1;

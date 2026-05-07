@@ -21,7 +21,8 @@ export type RecentSource =
   | { kind: "file"; filename: string }
   | { kind: "paste" }
   | { kind: "worktree"; path: string; branch: string | null }
-  | { kind: "stub"; code: string };
+  | { kind: "stub"; code: string }
+  | { kind: "pr"; prUrl: string };
 
 export interface RecentEntry {
   /** Same as changeset.id — used to dedupe and to match persisted cursor. */

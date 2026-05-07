@@ -5,6 +5,8 @@ import type {
   Cursor,
   DeliveredComment,
   LineSelection,
+  PrConversationItem,
+  PrReviewComment,
   Reply,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
@@ -120,6 +122,16 @@ interface Props {
    * changeset" — the section is hidden entirely. See AgentContextProps.
    */
   agentContext?: AgentContextProps;
+  /**
+   * Line-anchored PR review comments for the current cursor line. Populated
+   * when the changeset was loaded from a GitHub PR; absent/empty otherwise.
+   */
+  prReviewComments?: PrReviewComment[];
+  /**
+   * Issue-level PR conversation items. Populated when the changeset was loaded
+   * from a GitHub PR; absent/empty otherwise.
+   */
+  prConversation?: PrConversationItem[];
 }
 
 export function Inspector({
@@ -137,6 +149,8 @@ export function Inspector({
   onRetryReply,
   onVerifyAiNote,
   agentContext,
+  prReviewComments,
+  prConversation,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -195,6 +209,10 @@ export function Inspector({
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
         />
+      )}
+
+      {prConversation && prConversation.length > 0 && (
+        <PrConversationSection items={prConversation} />
       )}
 
       <section className="inspector__sec">
@@ -258,6 +276,10 @@ export function Inspector({
           </ul>
         )}
       </section>
+
+      {prReviewComments && prReviewComments.length > 0 && (
+        <PrReviewCommentsSection comments={prReviewComments} />
+      )}
 
       {vm.aiSummary !== null && vm.aiSummaryReplyKey !== null && (
         <HunkSummarySection
@@ -733,4 +755,99 @@ function TeammateSection({
       </div>
     </section>
   );
+}
+
+// ── PR review comments (line-anchored, read-only) ─────────────────────────────
+
+function PrReviewCommentsSection({ comments }: { comments: PrReviewComment[] }) {
+  return (
+    <section className="inspector__sec">
+      <div className="inspector__sec-h">
+        PR review comments
+        <span className="inspector__sec-count">{comments.length}</span>
+      </div>
+      <ul className="notes">
+        {comments.map((c) => (
+          <li key={c.id} className="ainote ainote--info">
+            <div className="ainote__head">
+              <span className="ainote__sev">@{c.author}</span>
+              <span className="ainote__summary ainote__summary--muted">
+                {c.lineSpan
+                  ? `(spans L${c.lineSpan.lo}–${c.lineSpan.hi}) `
+                  : ""}
+                <time dateTime={c.createdAt} title={c.createdAt}>
+                  {humanAgo(c.createdAt)}
+                </time>
+              </span>
+              <span className="ainote__actions">
+                <a
+                  href={c.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ainote__ack"
+                  title="Open on GitHub"
+                >
+                  ↗
+                </a>
+              </span>
+            </div>
+            <div className="ainote__detail">{c.body}</div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// ── PR conversation (issue-level discussion, read-only) ───────────────────────
+
+function PrConversationSection({ items }: { items: PrConversationItem[] }) {
+  return (
+    <details className="inspector__sec inspector__pr-conv">
+      <summary className="inspector__sec-h inspector__pr-conv-summary">
+        PR conversation ({items.length})
+      </summary>
+      <ul className="notes">
+        {items.map((item) => (
+          <li key={item.id} className="ainote ainote--info">
+            <div className="ainote__head">
+              <span className="ainote__sev">@{item.author}</span>
+              <span className="ainote__summary ainote__summary--muted">
+                <time dateTime={item.createdAt} title={item.createdAt}>
+                  {humanAgo(item.createdAt)}
+                </time>
+              </span>
+              <span className="ainote__actions">
+                <a
+                  href={item.htmlUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ainote__ack"
+                  title="Open on GitHub"
+                >
+                  ↗
+                </a>
+              </span>
+            </div>
+            <div className="ainote__detail">{item.body}</div>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function humanAgo(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+  } catch {
+    return "—";
+  }
 }

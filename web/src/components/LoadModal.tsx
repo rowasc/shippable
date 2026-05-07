@@ -1,5 +1,12 @@
 import "./LoadModal.css";
 import { useRef, useState } from "react";
+
+const prErrorMessages: Record<string, string> = {
+  github_pr_not_found: "PR not found.",
+  github_upstream: "GitHub returned an error. Try again.",
+  invalid_pr_url: "That doesn't look like a valid PR URL.",
+  unknown: "Something went wrong loading the PR.",
+};
 import type { ChangeSet } from "../types";
 import { parseDiff } from "../parseDiff";
 import type { RecentSource } from "../recents";
@@ -7,6 +14,9 @@ import { useWorktreeLoader } from "../useWorktreeLoader";
 import type { LoadOpts } from "../worktreeChangeset";
 import { CopyButton } from "./CopyButton";
 import { RangePicker } from "./RangePicker";
+import { loadGithubPr, setGithubToken, GithubFetchError } from "../githubPrClient";
+import { GitHubTokenModal } from "./GitHubTokenModal";
+import { isTauri, keychainGet, keychainSet } from "../keychain";
 
 interface Props {
   /**
@@ -25,6 +35,16 @@ export function LoadModal({ onLoad, onClose }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [pickerForPath, setPickerForPath] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // GitHub PR section state
+  const [prUrl, setPrUrl] = useState("");
+  const [prBusy, setPrBusy] = useState(false);
+  const [prErr, setPrErr] = useState<string | null>(null);
+  const [tokenModal, setTokenModal] = useState<{
+    host: string;
+    reason: "first-time" | "rejected";
+    pendingPrUrl: string;
+  } | null>(null);
 
   const urlIsValid = isValidHttpUrl(url);
 
@@ -110,6 +130,59 @@ export function LoadModal({ onLoad, onClose }: Props) {
     }
   }
 
+  async function loadFromGithubPr(targetUrl: string) {
+    if (!targetUrl.trim()) return;
+    setPrErr(null);
+    setPrBusy(true);
+    try {
+      const cs = await loadGithubPr(targetUrl);
+      onLoad(cs, { kind: "pr", prUrl: targetUrl });
+    } catch (e) {
+      if (e instanceof GithubFetchError) {
+        if (e.discriminator === "github_token_required" && e.host) {
+          // Tauri-only: try Keychain first. If found, push to server and retry
+          // before bothering the user. In dev mode (no Tauri) skip straight to
+          // the modal — Keychain isn't available.
+          if (isTauri()) {
+            const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
+            if (cached) {
+              await setGithubToken(e.host, cached);
+              return loadFromGithubPr(targetUrl);
+            }
+          }
+          setTokenModal({
+            host: e.host,
+            reason: "first-time",
+            pendingPrUrl: targetUrl,
+          });
+        } else if (e.discriminator === "github_auth_failed") {
+          setTokenModal({
+            host: e.host ?? "github.com",
+            reason: "rejected",
+            pendingPrUrl: targetUrl,
+          });
+        } else {
+          setPrErr(prErrorMessages[e.discriminator] ?? e.discriminator);
+        }
+      } else {
+        setPrErr(e instanceof Error ? e.message : "Unknown error");
+      }
+    } finally {
+      setPrBusy(false);
+    }
+  }
+
+  async function handleTokenSubmit(host: string, token: string): Promise<void> {
+    if (isTauri()) {
+      await keychainSet(`GITHUB_TOKEN:${host}`, token);
+    }
+    await setGithubToken(host, token);
+    // Token saved — close the modal and retry the PR load.
+    const pendingUrl = tokenModal?.pendingPrUrl ?? prUrl;
+    setTokenModal(null);
+    await loadFromGithubPr(pendingUrl);
+  }
+
   function loadFromPaste() {
     if (!pasted.trim()) return;
     setErr(null);
@@ -149,6 +222,15 @@ export function LoadModal({ onLoad, onClose }: Props) {
         {/* Worktrees pane: only renders when the local server is reachable.
          *  In no-server / browser-only modes this section is hidden and the
          *  three classic loaders below remain fully functional. */}
+        {tokenModal && (
+          <GitHubTokenModal
+            host={tokenModal.host}
+            reason={tokenModal.reason}
+            onSubmit={handleTokenSubmit}
+            onCancel={() => setTokenModal(null)}
+          />
+        )}
+
         {worktrees.serverAvailable && (
           <section className="modal__sec">
             <div className="modal__sec-h">From a local repo or worktrees folder</div>
@@ -281,6 +363,36 @@ export function LoadModal({ onLoad, onClose }: Props) {
             )}
           </section>
         )}
+
+        <section className="modal__sec">
+          <div className="modal__sec-h">From a GitHub PR</div>
+          <p className="modal__hint">
+            Paste a GitHub or GitHub Enterprise pull request URL. You will be
+            prompted for a Personal Access Token on first use per host.
+          </p>
+          <div className="modal__row">
+            <input
+              className="modal__input"
+              type="url"
+              placeholder="https://github.com/owner/repo/pull/123"
+              value={prUrl}
+              onChange={(e) => setPrUrl(e.target.value)}
+              onKeyDown={(e) =>
+                e.key === "Enter" && loadFromGithubPr(prUrl)
+              }
+            />
+            <button
+              className="modal__btn modal__btn--primary"
+              onClick={() => loadFromGithubPr(prUrl)}
+              disabled={prBusy || !prUrl.trim()}
+            >
+              {prBusy ? "loading…" : "load PR"}
+            </button>
+          </div>
+          {prErr && (
+            <p className="modal__hint modal__hint--error">{prErr}</p>
+          )}
+        </section>
 
         <section className="modal__sec">
           <div className="modal__sec-h">From URL</div>

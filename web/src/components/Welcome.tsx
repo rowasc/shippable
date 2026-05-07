@@ -435,6 +435,12 @@ function sourceLabel(s: RecentSource): string {
       return s.branch ?? s.path;
     case "stub":
       return `sample ${s.code}`;
+    case "pr":
+      try {
+        return new URL(s.prUrl).pathname.replace(/^\//, "");
+      } catch {
+        return s.prUrl;
+      }
   }
 }
 

@@ -252,3 +252,19 @@
   font-size: 12px;
   line-height: 1.55;
 }
+
+/* PR conversation disclosure section */
+.inspector__pr-conv {
+  /* reuses inspector__sec padding/border */
+}
+.inspector__pr-conv-summary {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+}
+.inspector__pr-conv-summary::-webkit-details-marker {
+  display: none;
+}
+.inspector__pr-conv[open] .inspector__pr-conv-summary {
+  margin-bottom: 6px;
+}

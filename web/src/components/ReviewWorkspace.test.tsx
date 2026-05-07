@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { Dispatch } from "react";
 import { ReviewWorkspace } from "./ReviewWorkspace";
-import type { ChangeSet } from "../types";
+import type { Action } from "../state";
+import type { ChangeSet, PrSource } from "../types";
 import { initialState } from "../state";
 
 const {
@@ -11,6 +13,25 @@ const {
 } = vi.hoisted(() => ({
   fetchDefinitionCapabilitiesMock: vi.fn(),
   fetchDefinitionMock: vi.fn(),
+}));
+
+const { loadGithubPrMock } = vi.hoisted(() => ({
+  loadGithubPrMock: vi.fn(),
+}));
+
+vi.mock("../githubPrClient", () => ({
+  loadGithubPr: loadGithubPrMock,
+  setGithubToken: vi.fn().mockResolvedValue(undefined),
+  GithubFetchError: class GithubFetchError extends Error {
+    discriminator: string;
+    host?: string;
+    constructor(discriminator: string, message: string, host?: string) {
+      super(message);
+      this.name = "GithubFetchError";
+      this.discriminator = discriminator;
+      this.host = host;
+    }
+  },
 }));
 
 vi.mock("../highlight", () => ({
@@ -199,6 +220,173 @@ describe("ReviewWorkspace symbol navigation", () => {
         lineIdx: 0,
       },
     });
+  });
+});
+
+function fixturePrSource(): PrSource {
+  return {
+    host: "github.com",
+    owner: "owner",
+    repo: "repo",
+    number: 1,
+    htmlUrl: "https://github.com/owner/repo/pull/1",
+    headSha: "abc123",
+    baseSha: "def456",
+    state: "open",
+    title: "My PR Title",
+    body: "PR body",
+    baseRef: "main",
+    headRef: "feat/branch",
+    lastFetchedAt: "2026-05-07T12:00:00.000Z",
+  };
+}
+
+function fixturePrChangeset(): ChangeSet {
+  return {
+    id: "pr:github.com:owner:repo:1",
+    title: "My PR Title",
+    author: "octocat",
+    branch: "feat/branch",
+    base: "main",
+    createdAt: "2026-05-01T00:00:00.000Z",
+    description: "",
+    prSource: fixturePrSource(),
+    files: [
+      {
+        id: "file1",
+        path: "src/foo.ts",
+        language: "ts",
+        status: "modified",
+        hunks: [
+          {
+            id: "hunk1",
+            header: "@@ -1,1 +1,1 @@",
+            oldStart: 1,
+            oldCount: 1,
+            newStart: 1,
+            newCount: 1,
+            lines: [{ kind: "context", text: "const x = 1;", newNo: 1, oldNo: 1 }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function renderPrWorkspace(over: Partial<{ dispatch: Dispatch<Action> }> = {}) {
+  const cs = fixturePrChangeset();
+  const state = initialState([cs]);
+  const dispatch: Dispatch<Action> = over.dispatch ?? vi.fn();
+
+  render(
+    <ReviewWorkspace
+      state={state}
+      dispatch={dispatch}
+      drafts={{}}
+      setDrafts={() => ({})}
+      themeId="light"
+      setThemeId={() => undefined}
+      onLoadChangeset={() => undefined}
+      currentSource={{ kind: "pr", prUrl: "https://github.com/owner/repo/pull/1" }}
+    />,
+  );
+
+  return { state, dispatch };
+}
+
+describe("ReviewWorkspace — PR topbar", () => {
+  beforeEach(() => {
+    fetchDefinitionCapabilitiesMock.mockResolvedValue({ languages: [] });
+  });
+
+  it("renders the PR title in the topbar", () => {
+    renderPrWorkspace();
+    expect(screen.getByText("My PR Title")).toBeTruthy();
+  });
+
+  it("renders the PR state badge", () => {
+    renderPrWorkspace();
+    // The topbar should show the PR state as a chip
+    expect(screen.getByText("open")).toBeTruthy();
+  });
+
+  it("renders the branch refs", () => {
+    renderPrWorkspace();
+    expect(screen.getByText(/feat\/branch.*main|main.*feat\/branch/)).toBeTruthy();
+  });
+
+  it("renders a refresh button", () => {
+    renderPrWorkspace();
+    expect(
+      screen.getByRole("button", { name: /refresh/i }),
+    ).toBeTruthy();
+  });
+
+  it("dispatches LOAD_CHANGESET when refresh is clicked", async () => {
+    const newCs = { ...fixturePrChangeset(), title: "Updated PR" };
+    loadGithubPrMock.mockResolvedValue(newCs);
+    const dispatch = vi.fn();
+
+    renderPrWorkspace({ dispatch });
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: "LOAD_CHANGESET" }),
+      ),
+    );
+  });
+});
+
+describe("ReviewWorkspace — PR auth-rejected banner", () => {
+  beforeEach(() => {
+    fetchDefinitionCapabilitiesMock.mockResolvedValue({ languages: [] });
+  });
+
+  it("shows the auth-rejected banner after a refresh fails with github_auth_failed", async () => {
+    const { GithubFetchError } = await import("../githubPrClient");
+    loadGithubPrMock.mockRejectedValue(
+      new GithubFetchError("github_auth_failed", "github_auth_failed", "github.com"),
+    );
+
+    renderPrWorkspace();
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/was rejected/i)).toBeTruthy(),
+    );
+
+    expect(
+      screen.getByRole("button", { name: /re-enter token/i }),
+    ).toBeTruthy();
+  });
+
+  it("renders the truncation banner when prSource.truncation is set", () => {
+    const cs: ChangeSet = {
+      ...fixturePrChangeset(),
+      prSource: {
+        ...fixturePrSource(),
+        truncation: { kind: "files", reason: "too many files" },
+      },
+    };
+    const state = initialState([cs]);
+
+    render(
+      <ReviewWorkspace
+        state={state}
+        dispatch={vi.fn() as Dispatch<Action>}
+        drafts={{}}
+        setDrafts={() => ({})}
+        themeId="light"
+        setThemeId={() => undefined}
+        onLoadChangeset={() => undefined}
+        currentSource={null}
+      />,
+    );
+
+    expect(screen.getByText(/truncated by GitHub: too many files/i)).toBeTruthy();
   });
 });
 

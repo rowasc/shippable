@@ -38,6 +38,7 @@ import type {
   ChangeSet,
   Cursor,
   EvidenceRef,
+  PrSource,
   ReviewState,
   Reply,
   WorktreeSource,
@@ -61,6 +62,9 @@ import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
 import type { ThemeId } from "../tokens";
 import type { RecentSource } from "../recents";
+import { loadGithubPr, setGithubToken, GithubFetchError } from "../githubPrClient";
+import { GitHubTokenModal } from "./GitHubTokenModal";
+import { isTauri, keychainSet } from "../keychain";
 import {
   buildDiffViewModel,
   buildSidebarViewModel,
@@ -155,6 +159,19 @@ export function ReviewWorkspace({
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [agentRefreshTick, setAgentRefreshTick] = useState(0);
+
+  // PR refresh state — tracks per-cs whether a refresh is in flight,
+  // and whether the last refresh failed with auth-rejected (surfaces a banner).
+  const [prRefreshBusy, setPrRefreshBusy] = useState(false);
+  const [prAuthRejected, setPrAuthRejected] = useState<{
+    csId: string;
+    host: string;
+  } | null>(null);
+  const [prRefreshTokenModal, setPrRefreshTokenModal] = useState<{
+    host: string;
+    pendingHtmlUrl: string;
+  } | null>(null);
+
   // MCP-install status with retry+backoff. The dev server's port briefly
   // disappears during `tsx watch` reloads; a single attempt can hit
   // ECONNREFUSED and leave the banner stuck "unknown". After ~31s of
@@ -265,6 +282,39 @@ export function ReviewWorkspace({
     generate: generatePlan,
   } = usePlan(cs);
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
+
+  async function handlePrRefresh(htmlUrl: string) {
+    setPrRefreshBusy(true);
+    setPrAuthRejected(null);
+    try {
+      const newCs = await loadGithubPr(htmlUrl);
+      dispatch({ type: "LOAD_CHANGESET", changeset: newCs });
+    } catch (e) {
+      if (
+        e instanceof GithubFetchError &&
+        e.discriminator === "github_auth_failed"
+      ) {
+        setPrAuthRejected({ csId: cs.id, host: e.host ?? "github.com" });
+      }
+      // Other errors surface in console; the button becomes available again.
+    } finally {
+      setPrRefreshBusy(false);
+    }
+  }
+
+  async function handlePrRefreshTokenSubmit(
+    host: string,
+    token: string,
+  ): Promise<void> {
+    if (isTauri()) {
+      await keychainSet(`GITHUB_TOKEN:${host}`, token);
+    }
+    await setGithubToken(host, token);
+    const pendingUrl = prRefreshTokenModal?.pendingHtmlUrl ?? "";
+    setPrRefreshTokenModal(null);
+    setPrAuthRejected(null);
+    if (pendingUrl) await handlePrRefresh(pendingUrl);
+  }
 
   const suggestion = maybeSuggest(cs, state);
   const lineNoteAcked = state.ackedNotes.has(
@@ -712,7 +762,9 @@ export function ReviewWorkspace({
         <span className="topbar__brand">shippable</span>
         <span className="topbar__sep">│</span>
         <span className="topbar__id">{cs.id}</span>
-        <span className="topbar__title">{cs.title}</span>
+        <span className="topbar__title">
+          {cs.prSource ? cs.prSource.title : cs.title}
+        </span>
         <PlanChip
           isOpen={showPlan}
           plan={plan}
@@ -723,19 +775,29 @@ export function ReviewWorkspace({
           }}
         />
         <span className="topbar__sep">│</span>
-        <span className="topbar__branch">
-          {cs.branch} → {cs.base}
-        </span>
-        {cs.worktreeSource && (
-          <button
-            type="button"
-            className={`topbar__btn topbar__btn--range ${showRangePicker ? "topbar__btn--on" : ""}`}
-            onClick={() => setShowRangePicker((v) => !v)}
-            title="pick a SHA range to review"
-            disabled={rangePickerBusy}
-          >
-            <span className="topbar__btn-label">⇄ range</span>
-          </button>
+        {cs.prSource ? (
+          <PrTopbarMeta
+            prSource={cs.prSource}
+            refreshBusy={prRefreshBusy}
+            onRefresh={() => handlePrRefresh(cs.prSource!.htmlUrl)}
+          />
+        ) : (
+          <>
+            <span className="topbar__branch">
+              {cs.branch} → {cs.base}
+            </span>
+            {cs.worktreeSource && (
+              <button
+                type="button"
+                className={`topbar__btn topbar__btn--range ${showRangePicker ? "topbar__btn--on" : ""}`}
+                onClick={() => setShowRangePicker((v) => !v)}
+                title="pick a SHA range to review"
+                disabled={rangePickerBusy}
+              >
+                <span className="topbar__btn-label">⇄ range</span>
+              </button>
+            )}
+          </>
         )}
         <DefinitionStatusChip
           currentSource={currentSource}
@@ -880,6 +942,38 @@ export function ReviewWorkspace({
       )}
 
       {liveReloadBar}
+
+      {cs.prSource?.truncation && (
+        <div className="topbar__truncation-banner">
+          Diff truncated by GitHub: {cs.prSource.truncation.reason}
+        </div>
+      )}
+
+      {prAuthRejected && prAuthRejected.csId === cs.id && (
+        <div className="topbar__truncation-banner topbar__truncation-banner--warn">
+          Token for {prAuthRejected.host} was rejected.{" "}
+          <button
+            className="topbar__banner-btn"
+            onClick={() =>
+              setPrRefreshTokenModal({
+                host: prAuthRejected.host,
+                pendingHtmlUrl: cs.prSource?.htmlUrl ?? "",
+              })
+            }
+          >
+            Re-enter token
+          </button>
+        </div>
+      )}
+
+      {prRefreshTokenModal && (
+        <GitHubTokenModal
+          host={prRefreshTokenModal.host}
+          reason="rejected"
+          onSubmit={handlePrRefreshTokenSubmit}
+          onCancel={() => setPrRefreshTokenModal(null)}
+        />
+      )}
 
       <div
         className={`main ${showInspector ? "main--with-inspector" : ""} ${
@@ -1192,6 +1286,8 @@ export function ReviewWorkspace({
                   }
                 : undefined
             }
+            prReviewComments={line?.prReviewComments}
+            prConversation={cs.prConversation}
           />
         )}
       </div>
@@ -1702,6 +1798,68 @@ function buildHelpContext({
     ],
     hint: "Use ? for the full shortcut sheet. Use ⌘K / ⌃K when you want app-level commands instead of diff navigation.",
   };
+}
+
+/**
+ * Renders PR-specific topbar metadata: state badge, last-fetched time,
+ * and a refresh button. Only rendered when cs.prSource is set.
+ */
+function PrTopbarMeta({
+  prSource,
+  refreshBusy,
+  onRefresh,
+}: {
+  prSource: PrSource;
+  refreshBusy: boolean;
+  onRefresh: () => void;
+}) {
+  const stateClass =
+    prSource.state === "open"
+      ? "topbar__meta-chip--ok"
+      : prSource.state === "merged"
+        ? "topbar__meta-chip--good"
+        : "topbar__meta-chip--muted";
+
+  const fetchedTime = formatHHMM(prSource.lastFetchedAt);
+
+  return (
+    <>
+      <span className="topbar__branch">
+        {prSource.headRef} → {prSource.baseRef}
+      </span>
+      <span className={`topbar__meta-chip ${stateClass}`}>
+        {prSource.state}
+      </span>
+      <span
+        className="topbar__meta-chip topbar__meta-chip--muted"
+        title={prSource.lastFetchedAt}
+      >
+        fetched {fetchedTime}
+      </span>
+      <button
+        type="button"
+        className="topbar__btn"
+        onClick={onRefresh}
+        disabled={refreshBusy}
+        title="Refresh PR diff and comments from GitHub"
+      >
+        <span className="topbar__btn-label">
+          {refreshBusy ? "refreshing…" : "↻ refresh"}
+        </span>
+      </button>
+    </>
+  );
+}
+
+function formatHHMM(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const h = d.getHours().toString().padStart(2, "0");
+    const m = d.getMinutes().toString().padStart(2, "0");
+    return `${h}:${m}`;
+  } catch {
+    return "—";
+  }
 }
 
 /**
