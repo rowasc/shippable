@@ -16,7 +16,7 @@ What this enables:
 
 What it explicitly does *not* try to do, at least not yet:
 
-- Multi-repo workspaces, GitHub PR ingest, real-time file watching.
+- Multi-repo workspaces, GitHub PR ingest. (Real-time file watching is now in [worktree-live-reload.md](./worktree-live-reload.md).)
 - Anything outside `disk-allowed` deployment modes (see the matrix below).
 - Replacing the existing URL / upload / paste flows. This is a fourth source, not a replacement.
 
@@ -83,7 +83,7 @@ The shape of these will probably move as we build (a) and (b).
 
 - **Worktree identity.** Path is what `git worktree list` gives us, but paths move. Branch name is more durable but multiple worktrees can target the same branch over time. Probably `(repo-root, branch)` for the cursor key, with path as display? Open. The localStorage shape needs to survive worktree renames without dropping review state on the floor.
 
-- **What does "latest changeset" mean?** Options: (1) `HEAD~1..HEAD` — last commit. (2) Last *pushed* commit, ignoring local in-progress work. (3) Everything since I last reviewed. (4) Working-tree-uncommitted-changes. MVP is going with (1). (3) is slice (c). (4) is interesting — when an agent is mid-task, the diff that matters might not be committed yet. Worth testing.
+- **What does "latest changeset" mean?** Options: (1) `HEAD~1..HEAD` — last commit. (2) Last *pushed* commit, ignoring local in-progress work. (3) Everything since I last reviewed. (4) Working-tree-uncommitted-changes. MVP is going with (1). (3) is slice (c). (4) is now covered by [worktree-live-reload.md](./worktree-live-reload.md) — while a worktree is loaded, dirty trees are shown as a `HEAD..working-tree` diff and update via the live-reload poll.
 
 - **Live-session steering.** Quoted above. Genuinely don't know if this is a thin shim or a research project. The "live vs non-live mode" toggle the user mentioned is probably the right shape regardless — let people opt in.
 
@@ -116,8 +116,8 @@ This section records decisions made while scoping the agent-context UX (the "Cla
 
 - GitHub PRs. That's a separate ingest path, on the roadmap, not this plan.
 - Multi-repo workspaces. One directory, the worktrees inside it, period.
-- Real-time file watching / inotify / FSEvents. The reviewer pulls when you ask it to. Auto-refresh is a nice-to-have, not table stakes.
-- Reviewing uncommitted working-tree changes. Maybe slice (b.5) eventually; not MVP.
+- Real-time file watching / inotify / FSEvents — moved to [worktree-live-reload.md](./worktree-live-reload.md), which polls and surfaces drift via a banner. Replace this bullet with that one if it ever needs updating.
+- Reviewing uncommitted working-tree changes — also [worktree-live-reload.md](./worktree-live-reload.md). Dirty-tree diffs are first-class while a worktree is loaded.
 - Posting reviews to GitHub. 0.2.0 territory.
 
 ## Files of interest
