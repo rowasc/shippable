@@ -131,4 +131,29 @@ describe("rangeChangeset", () => {
     expect(out.sha).toBe(b);
     expect(a).toBeTruthy();
   });
+
+  it("returns per-commit breakdown with body and files", async () => {
+    const a = await commit("a.txt", "a\n", "add a");
+    await fs.writeFile(path.join(repo, "b.txt"), "b\n");
+    await git(["add", "b.txt"]);
+    await git([
+      "commit",
+      "-m",
+      "add b",
+      "-m",
+      "Body line one.\nBody line two.",
+    ]);
+    const b = await git(["rev-parse", "HEAD"]);
+    const out = await rangeChangeset(repo, a, b, false);
+    expect(out.commits).toBeDefined();
+    expect(out.commits!.map((c) => c.sha)).toEqual([b, a]);
+    const bCommit = out.commits!.find((c) => c.sha === b)!;
+    expect(bCommit.subject).toBe("add b");
+    expect(bCommit.body).toBe("Body line one.\nBody line two.");
+    expect(bCommit.files).toEqual(["b.txt"]);
+    const aCommit = out.commits!.find((c) => c.sha === a)!;
+    expect(aCommit.subject).toBe("add a");
+    expect(aCommit.body).toBe("");
+    expect(aCommit.files).toEqual(["a.txt"]);
+  });
 });

@@ -207,6 +207,26 @@ export interface ChangeSet {
    * `prSource` is set; empty array means the PR has no issue comments.
    */
   prConversation?: PrConversationItem[];
+  /**
+   * Per-commit breakdown for ranges/branches loaded from a worktree. Newest
+   * first. Drives the per-commit render in the plan section. Absent on
+   * paste/uploaded loads, dirty-only loads, and PR loads (the GitHub commits
+   * endpoint isn't wired up yet).
+   */
+  commits?: ChangeSetCommit[];
+}
+
+export interface ChangeSetCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  /** Body of the commit message (everything after the subject line). May be empty. */
+  body: string;
+  author: string;
+  date: string;
+  parents: string[];
+  /** Repo-relative paths touched by this commit. Empty for merges by default. */
+  files: string[];
 }
 
 export interface Cursor {

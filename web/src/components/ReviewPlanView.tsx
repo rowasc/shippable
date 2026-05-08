@@ -8,6 +8,8 @@ import type {
   StructureMap,
   StructureMapFile,
   ChangeSet,
+  ChangeSetCommit,
+  CodeGraphNode,
 } from "../types";
 import { buildPlanDiagram } from "../planDiagram";
 import { Reference } from "./Reference";
@@ -139,29 +141,69 @@ function IntentSection({
   // fall back to in worktree loads).
   const description = (changeset?.prSource?.body ?? changeset?.description ?? "").trim();
 
+  const hasCommits = !!changeset?.commits && changeset.commits.length > 0;
+
   return (
     <section className="plan__sec">
       <div className="plan__sec-h">What this change does</div>
-      {description ? (
-        <>
-          <div className="plan__desc">
-            <MarkdownView
-              source={description}
-              basePath=""
-              imageAssets={changeset?.imageAssets}
-            />
-          </div>
-          {changeset && (
-            <DescriptionFiles
-              changeset={changeset}
-              onNavigate={onNavigate}
-            />
-          )}
-        </>
-      ) : (
+      {description && (
+        <div className="plan__desc">
+          <MarkdownView
+            source={description}
+            basePath=""
+            imageAssets={changeset?.imageAssets}
+          />
+        </div>
+      )}
+      {changeset && hasCommits && (
+        <CommitGroups changeset={changeset} onNavigate={onNavigate} />
+      )}
+      {changeset && !hasCommits && description && (
+        <DescriptionFiles changeset={changeset} onNavigate={onNavigate} />
+      )}
+      {!description && !hasCommits && (
         <div className="plan__empty">No description available.</div>
       )}
     </section>
+  );
+}
+
+function useGraphNodes(graph: ChangeSet["graph"]): Map<string, CodeGraphNode> {
+  return useMemo(() => {
+    const map = new Map<string, CodeGraphNode>();
+    for (const n of graph?.nodes ?? []) map.set(n.path, n);
+    return map;
+  }, [graph]);
+}
+
+function FileLine({
+  path,
+  nodeByPath,
+  onNavigate,
+}: {
+  path: string;
+  nodeByPath: Map<string, CodeGraphNode>;
+  onNavigate?: (ev: EvidenceRef) => void;
+}) {
+  const node = nodeByPath.get(path);
+  const symbols = node?.symbols ?? [];
+  return (
+    <li className="plan__desc-file">
+      <Reference ev={{ kind: "file", path }} onNavigate={onNavigate} />
+      {node && <span className="plan__desc-file-role">{node.fileRole}</span>}
+      {symbols.length > 0 && (
+        <span className="plan__desc-file-defs">
+          defines{" "}
+          {symbols.map((s) => (
+            <Reference
+              key={s.name}
+              ev={{ kind: "symbol", name: s.name, definedIn: path }}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </span>
+      )}
+    </li>
   );
 }
 
@@ -172,44 +214,85 @@ function DescriptionFiles({
   changeset: ChangeSet;
   onNavigate?: (ev: EvidenceRef) => void;
 }) {
-  const nodeByPath = useMemo(() => {
-    const map = new Map<string, NonNullable<ChangeSet["graph"]>["nodes"][number]>();
-    for (const n of changeset.graph?.nodes ?? []) map.set(n.path, n);
-    return map;
-  }, [changeset.graph]);
-
+  const nodeByPath = useGraphNodes(changeset.graph);
   if (changeset.files.length === 0) return null;
-
   return (
     <ul className="plan__desc-files">
-      {changeset.files.map((f) => {
-        const node = nodeByPath.get(f.path);
-        const symbols = node?.symbols ?? [];
-        return (
-          <li key={f.id} className="plan__desc-file">
-            <Reference
-              ev={{ kind: "file", path: f.path }}
+      {changeset.files.map((f) => (
+        <FileLine
+          key={f.id}
+          path={f.path}
+          nodeByPath={nodeByPath}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function CommitGroups({
+  changeset,
+  onNavigate,
+}: {
+  changeset: ChangeSet;
+  onNavigate?: (ev: EvidenceRef) => void;
+}) {
+  const nodeByPath = useGraphNodes(changeset.graph);
+  const commits = changeset.commits ?? [];
+  return (
+    <ol className="plan__commits">
+      {commits.map((c) => (
+        <CommitGroup
+          key={c.sha}
+          commit={c}
+          nodeByPath={nodeByPath}
+          imageAssets={changeset.imageAssets}
+          onNavigate={onNavigate}
+        />
+      ))}
+    </ol>
+  );
+}
+
+function CommitGroup({
+  commit,
+  nodeByPath,
+  imageAssets,
+  onNavigate,
+}: {
+  commit: ChangeSetCommit;
+  nodeByPath: Map<string, CodeGraphNode>;
+  imageAssets?: Record<string, string>;
+  onNavigate?: (ev: EvidenceRef) => void;
+}) {
+  return (
+    <li className="plan__commit">
+      <div className="plan__commit-h">
+        <code className="plan__commit-sha">{commit.shortSha}</code>
+        <span className="plan__commit-subject">{commit.subject}</span>
+      </div>
+      {commit.body && (
+        <div className="plan__commit-body">
+          <MarkdownView
+            source={commit.body}
+            basePath=""
+            imageAssets={imageAssets}
+          />
+        </div>
+      )}
+      {commit.files.length > 0 && (
+        <ul className="plan__desc-files">
+          {commit.files.map((p) => (
+            <FileLine
+              key={p}
+              path={p}
+              nodeByPath={nodeByPath}
               onNavigate={onNavigate}
             />
-            {node && (
-              <span className="plan__desc-file-role">{node.fileRole}</span>
-            )}
-            {symbols.length > 0 && (
-              <span className="plan__desc-file-defs">
-                defines{" "}
-                {symbols.map((s) => (
-                  <Reference
-                    key={s.name}
-                    ev={{ kind: "symbol", name: s.name, definedIn: f.path }}
-                    onNavigate={onNavigate}
-                  />
-                ))}
-              </span>
-            )}
-          </li>
-        );
-      })}
-    </ul>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

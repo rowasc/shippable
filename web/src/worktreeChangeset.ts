@@ -1,7 +1,7 @@
 import { postJson } from "./apiClient";
 import { fetchDiffCodeGraph } from "./codeGraphClient";
 import { parseDiff } from "./parseDiff";
-import type { ChangeSet, WorktreeState } from "./types";
+import type { ChangeSet, ChangeSetCommit, WorktreeState } from "./types";
 
 interface WorktreeChangesetResponse {
   diff: string;
@@ -13,6 +13,7 @@ interface WorktreeChangesetResponse {
   parentSha?: string | null;
   fileContents?: Record<string, string>;
   state?: WorktreeState;
+  commits?: ChangeSetCommit[];
 }
 
 /**
@@ -137,6 +138,7 @@ export async function fetchWorktreeChangeset(
   }
   const lspGraph = await fetchDiffCodeGraph(wt.path, json.sha, cs.files);
   if (lspGraph) cs.graph = lspGraph;
+  if (json.commits && json.commits.length > 0) cs.commits = json.commits;
   // The server stamps `dirty:<hash>` on json.sha when the loaded view contains
   // uncommitted edits — applies to `kind: "dirty"` and to range picks with
   // `includeDirty` against HEAD when the tree is actually dirty. Comments

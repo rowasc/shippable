@@ -75,6 +75,19 @@ export interface CommitInfo {
   parents: string[];
 }
 
+export interface RangeCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  /** Commit message body — everything after the subject line. May be empty. */
+  body: string;
+  author: string;
+  date: string;
+  parents: string[];
+  /** Repo-relative paths touched by this commit. May be empty for merges. */
+  files: string[];
+}
+
 export interface ChangesetResult {
   diff: string;
   sha: string;
@@ -82,6 +95,12 @@ export interface ChangesetResult {
   author: string;
   date: string;
   branch: string | null;
+  /**
+   * Per-commit breakdown. Newest first. Populated for paths that resolve a
+   * range (single-commit, branch, or fromRef..toRef); absent on dirty-only
+   * loads. Capped to keep the response small — see PER_COMMIT_LIMIT.
+   */
+  commits?: RangeCommit[];
   /**
    * Worktree state observed when this changeset was produced. Returned
    * alongside the diff so the live-reload poll can start with a baseline
@@ -384,7 +403,21 @@ export async function changesetFor(
   }
 
   const state = await stateFor(worktreePath);
-  return { diff, sha, subject, author, date, branch, parentSha, fileContents, state };
+  const commits = await listCommitsWithFiles(worktreePath, sha, ["-1"]).catch(
+    () => undefined,
+  );
+  return {
+    diff,
+    sha,
+    subject,
+    author,
+    date,
+    branch,
+    parentSha,
+    fileContents,
+    state,
+    ...(commits && commits.length > 0 ? { commits } : {}),
+  };
 }
 
 /**
@@ -501,6 +534,15 @@ export async function branchChangeset(
     : null;
 
   const state = await stateFor(worktreePath);
+  // Branch view: every commit since divergence from the resolved base. Skip
+  // when no base could be resolved (orphan branch / no upstream) — there's no
+  // meaningful "since" to walk.
+  const commits = effectiveBase
+    ? await listCommitsWithFiles(
+        worktreePath,
+        effectiveBase === headSha ? `${headSha}~..${headSha}` : `${effectiveBase}..${headSha}`,
+      ).catch(() => undefined)
+    : undefined;
   return {
     diff,
     sha: headSha,
@@ -511,6 +553,7 @@ export async function branchChangeset(
     parentSha: baseLabel,
     fileContents,
     state,
+    ...(commits && commits.length > 0 ? { commits } : {}),
   };
 }
 
@@ -645,6 +688,76 @@ export async function listCommits(
 // repo's first commit (which has no real parent) so `git diff` still works.
 const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
+// Cap the per-commit breakdown to keep responses bounded; the plan UI only
+// renders this many anyway, with a "and N more" footer above this threshold.
+const PER_COMMIT_LIMIT = 50;
+
+/**
+ * Walk a git log range and return per-commit metadata + body + name-only file
+ * list for each commit. `range` is the standard rev-list spec — typically
+ * `<exclusiveBase>..<inclusiveTip>`, or just `<sha>` (with a `-1` arg) for a
+ * single commit.
+ *
+ * Uses ASCII unit/record separators to delimit fields and commits, the same
+ * convention `listCommits` uses. The format ends with `%b<FS>` so the
+ * --name-only file list (which appears between formatted records) lands as a
+ * separate FS-delimited field rather than getting glued onto the body.
+ */
+async function listCommitsWithFiles(
+  worktreePath: string,
+  range: string,
+  extraArgs: string[] = [],
+): Promise<RangeCommit[]> {
+  const FS = "\x1f";
+  const RS = "\x1e";
+  const fmt = `${RS}%H${FS}%h${FS}%s${FS}%an <%ae>${FS}%aI${FS}%P${FS}%b${FS}`;
+  const { stdout } = await execFileAsync(
+    GIT,
+    [
+      "log",
+      `--format=${fmt}`,
+      "--name-only",
+      ...extraArgs,
+      "--end-of-options",
+      range,
+    ],
+    { cwd: worktreePath, maxBuffer: 32 * 1024 * 1024 },
+  );
+
+  const out: RangeCommit[] = [];
+  for (const record of stdout.split(RS)) {
+    if (out.length >= PER_COMMIT_LIMIT) break;
+    if (!record.trim()) continue;
+    const parts = record.split(FS);
+    const [
+      sha = "",
+      shortSha = "",
+      subject = "",
+      author = "",
+      date = "",
+      parentsRaw = "",
+      body = "",
+      filesBlob = "",
+    ] = parts;
+    if (!sha) continue;
+    const files = filesBlob
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    out.push({
+      sha,
+      shortSha,
+      subject,
+      body: body.replace(/^\n+|\n+$/g, ""),
+      author,
+      date,
+      parents: parentsRaw.trim().split(/\s+/).filter(Boolean),
+      files,
+    });
+  }
+  return out;
+}
+
 /**
  * Diff a range `fromRef..toRef` (inclusive of `from`) plus, optionally, the
  * working tree when `toRef === "HEAD"`. Backs the range picker — single-commit
@@ -760,6 +873,15 @@ export async function rangeChangeset(
   const state = await stateFor(worktreePath);
   const sha = dirtyApplies && state.dirty ? `dirty:${state.dirtyHash}` : toSha;
 
+  // Per-commit breakdown: every commit reachable from `toSha` but not from
+  // `fromSha`'s parent. That spans the whole picked range, including `from`
+  // itself. `diffBase === EMPTY_TREE_SHA` means `from` is a root commit; in
+  // that case `git log` of just the tip gives us everything.
+  const commits = await listCommitsWithFiles(
+    worktreePath,
+    diffBase === EMPTY_TREE_SHA ? toSha : `${diffBase}..${toSha}`,
+  ).catch(() => undefined);
+
   return {
     diff: trackedDiff,
     sha,
@@ -770,6 +892,7 @@ export async function rangeChangeset(
     parentSha: fromSha.slice(0, 7),
     fileContents,
     state,
+    ...(commits && commits.length > 0 ? { commits } : {}),
   };
 }
 
