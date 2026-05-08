@@ -85,51 +85,34 @@ describe("PlanDiagramView (mermaid renderer)", () => {
     expect(html).toContain('aria-disabled="true"');
   });
 
-  it("emits the mermaid source augmented with click directives wired to onNavigate", () => {
+  it("emits one mermaid `click ... call cb(path) tooltip` per node", () => {
     expect(html).toContain("flowchart LR");
     expect(html).toContain("classDef role-entity");
     expect(html).toContain("classDef role-route");
     expect(html).toContain("classDef role-test");
-    // One click directive per node — mermaid resolves the callback name
-    // against window when the diagram is rendered. The source is shown
-    // inside a <code> block so quotes round-trip as `&quot;`.
-    expect(html).toMatch(/click f0 __shippableDiagramClick (?:"|&quot;)src\/Cart\.php(?:"|&quot;)/);
-    expect(html).toMatch(/click f1 __shippableDiagramClick (?:"|&quot;)src\/Routes\.php(?:"|&quot;)/);
-    expect(html).toMatch(/click f2 __shippableDiagramClick (?:"|&quot;)src\/CartTest\.php(?:"|&quot;)/);
+    // The `call cb(arg)` form is what makes mermaid pass our path
+    // through to the dispatcher; without `call(...)` the third quoted
+    // string would land in the tooltip slot, not the callback. The
+    // source renders inside a <code> block so `"` round-trips as
+    // `&quot;`.
+    const Q = "(?:\"|&quot;)";
+    expect(html).toMatch(
+      new RegExp(`click f0 call __shippableDiagramClick\\(${Q}src/Cart\\.php${Q}\\) ${Q}Data class`),
+    );
+    expect(html).toMatch(
+      new RegExp(`click f1 call __shippableDiagramClick\\(${Q}src/Routes\\.php${Q}\\) ${Q}Request entry point`),
+    );
+    expect(html).toMatch(
+      new RegExp(`click f2 call __shippableDiagramClick\\(${Q}src/CartTest\\.php${Q}\\) ${Q}Test file`),
+    );
+  });
+
+  it("includes the LSP shape summary in the tooltip when present", () => {
+    expect(html).toContain("1 class, 1 method, 4 properties");
   });
 
   it("offers a 'copy mermaid source' affordance", () => {
     expect(html).toContain("Copy Mermaid diagram source");
-  });
-
-  it("does not render the disagreement legend when pathRole === fileRole everywhere", () => {
-    const diagram = makeDiagram();
-    diagram.nodes[0].pathRole = "entity";
-    diagram.nodes[0].fileRole = "entity";
-    const out = renderToStaticMarkup(
-      <PlanDiagramView
-        diagram={diagram}
-        includeMarkdown={false}
-        onToggleMarkdown={() => {}}
-      />,
-    );
-    expect(out).not.toContain("plan-diagram__legend");
-  });
-
-  it("renders the disagreement legend when at least one node was upgraded by LSP", () => {
-    const diagram = makeDiagram();
-    diagram.nodes[0].pathRole = "code";
-    diagram.nodes[0].fileRole = "entity";
-    const out = renderToStaticMarkup(
-      <PlanDiagramView
-        diagram={diagram}
-        includeMarkdown={false}
-        onToggleMarkdown={() => {}}
-      />,
-    );
-    expect(out).toContain("plan-diagram__legend");
-    expect(out).toContain("classified as <strong>entity</strong>");
-    expect(out).toContain("path looked like <em>code</em>");
   });
 
   it("renders the empty state when the diagram has no nodes", () => {

@@ -2,8 +2,30 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import mermaid from "mermaid";
 import "./PlanDiagramView.css";
 import type { PlanDiagram, PlanDiagramNode } from "../planDiagram";
-import type { EvidenceRef } from "../types";
+import type { EvidenceRef, FileRole, SymbolShape } from "../types";
 import { CopyButton } from "./CopyButton";
+
+// What each role means in plain language, surfaced as the hover tooltip
+// on every node. Reviewers don't need to know about path-floor vs LSP-shape
+// classifiers — they need to know what a `component` *is*. Keep these short:
+// mermaid renders them as the SVG `title` attribute, which most browsers
+// truncate or lay out awkwardly past a single line.
+const ROLE_DESCRIPTION: Record<FileRole, string> = {
+  component: "UI component — renders something to the screen.",
+  hook: "Reusable hook — stateful logic shared across components.",
+  route: "Request entry point — where requests or pages land.",
+  test: "Test file — exercises behaviour in code under review.",
+  entity: "Data class — mostly fields with simple accessors.",
+  "type-def": "Types only — interfaces and aliases, no runtime code.",
+  schema: "Schema definition — describes the shape of data.",
+  migration: "Schema or data migration — ships a one-way change.",
+  config: "Configuration — drives behaviour without being code.",
+  fixture: "Test fixture — sample data for tests.",
+  prompt: "Product prompt — shipped to the AI at runtime.",
+  doc: "Documentation — Markdown for humans.",
+  style: "Stylesheet.",
+  code: "Code.",
+};
 
 interface Props {
   diagram: PlanDiagram;
@@ -126,10 +148,6 @@ export function PlanDiagramView({
     );
   }
 
-  const disagreements = diagram.nodes.filter(
-    (node) => node.pathRole !== node.fileRole,
-  );
-
   return (
     <section className="plan-diagram">
       <DiagramTabs />
@@ -163,10 +181,6 @@ export function PlanDiagramView({
           aria-label="Code map for the current changeset"
         />
       </div>
-
-      {disagreements.length > 0 ? (
-        <DisagreementLegend nodes={disagreements} />
-      ) : null}
 
       <details className="plan-diagram__source">
         <summary>Mermaid source</summary>
@@ -234,36 +248,50 @@ function DiagramTabs() {
   );
 }
 
-function DisagreementLegend({ nodes }: { nodes: PlanDiagramNode[] }) {
-  return (
-    <aside className="plan-diagram__legend" aria-label="Classifier disagreements">
-      <div className="plan-diagram__legend-title">
-        LSP-shape upgraded the role on {nodes.length} file
-        {nodes.length === 1 ? "" : "s"}
-      </div>
-      <ul>
-        {nodes.map((node) => (
-          <li key={node.id}>
-            <code>{node.path}</code> — classified as{" "}
-            <strong>{node.fileRole}</strong> (path looked like{" "}
-            <em>{node.pathRole}</em>)
-          </li>
-        ))}
-      </ul>
-    </aside>
-  );
-}
-
 function withClickDirectives(diagram: PlanDiagram): string {
   // The diagram source already encodes nodes + classes + edges. We append
-  // one `click <id> <callback> "<path>"` per node so mermaid wires up DOM
-  // handlers when it renders. The callback name resolves against `window`.
-  const lines = diagram.nodes.map(
-    (node) => `  click ${node.id} ${MERMAID_CALLBACK_PROP} "${escapeQuotes(node.path)}"`,
-  );
+  // one `click <id> call cb(path) "tooltip"` per node so mermaid wires
+  // up the click handler AND a hover tooltip in the same directive. The
+  // `call cb(arg)` form is what passes our argument through; the bare
+  // `click <id> cb` form would route the third arg into the tooltip slot
+  // and the callback would only receive the node id.
+  const lines = diagram.nodes.map((node) => {
+    const path = mermaidArg(node.path);
+    const tooltip = mermaidArg(tooltipFor(node));
+    return `  click ${node.id} call ${MERMAID_CALLBACK_PROP}(${path}) ${tooltip}`;
+  });
   return `${diagram.mermaid}\n${lines.join("\n")}`;
 }
 
-function escapeQuotes(text: string): string {
-  return text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"");
+function tooltipFor(node: PlanDiagramNode): string {
+  const description = ROLE_DESCRIPTION[node.fileRole];
+  const shapeText = formatShape(node.shape);
+  return shapeText ? `${description}  ${shapeText}` : description;
+}
+
+function formatShape(shape: SymbolShape | undefined): string | null {
+  if (!shape) return null;
+  const parts: string[] = [];
+  const push = (count: number | undefined, singular: string, plural: string): void => {
+    if (!count) return;
+    parts.push(`${count} ${count === 1 ? singular : plural}`);
+  };
+  push(shape.classes, "class", "classes");
+  push(shape.interfaces, "interface", "interfaces");
+  push(shape.methods, "method", "methods");
+  push(shape.properties, "property", "properties");
+  push(shape.functions, "function", "functions");
+  push(shape.types, "type", "types");
+  push(shape.enums, "enum", "enums");
+  push(shape.constants, "constant", "constants");
+  push(shape.variables, "variable", "variables");
+  if (parts.length === 0) return null;
+  return parts.slice(0, 3).join(", ");
+}
+
+function mermaidArg(text: string): string {
+  // Both `cb(arg)` args and the trailing tooltip are quoted strings in
+  // mermaid's flowchart directive parser. Escape backslashes and the quote
+  // char so multi-word labels and unusual paths don't break parsing.
+  return `"${text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 }
