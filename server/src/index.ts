@@ -204,8 +204,7 @@ async function handlePlan(
   }
 }
 
-// Per-IP fixed-window limiter on the streaming endpoint. A stolen session
-// shouldn't be able to drain the API budget; this is the cheapest brake.
+// Per-IP fixed-window limiter on the streaming endpoint. Defaults to 30 requests per minute as a check against accidental/local spam; tune with:
 const REVIEW_RATE_LIMIT = Number(process.env.SHIPPABLE_REVIEW_RATE_LIMIT ?? 30);
 const REVIEW_RATE_WINDOW_MS = 60_000;
 const reviewRequestLog = new Map<string, number[]>();

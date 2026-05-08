@@ -78,7 +78,7 @@ If you want a different browser-origin allowlist, set:
 export SHIPPABLE_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-The streaming review endpoint is rate-limited per IP. Defaults to 30 requests per minute; tune with:
+The streaming review endpoint is rate-limited per IP. Defaults to 30 requests per minute as a check against accidental/local spam; tune with:
 
 ```
 export SHIPPABLE_REVIEW_RATE_LIMIT=30
