@@ -57,6 +57,21 @@ export function LoadModal({ onLoad, onClose }: Props) {
     onLoad: (cs: ChangeSet, source: RecentSource) => onLoad(cs, source),
   });
 
+  // Empty-diff loads (branch at parity, picked merge commit, etc.) auto-open
+  // the range picker for that row — let the user choose a different slice
+  // instead of staring at an error.
+  function isPickerOpenFor(p: string): boolean {
+    return pickerForPath === p || worktrees.wtEmpty?.path === p;
+  }
+  function togglePicker(p: string) {
+    if (isPickerOpenFor(p)) {
+      setPickerForPath(null);
+      worktrees.clearWtEmpty();
+    } else {
+      setPickerForPath(p);
+    }
+  }
+
   async function loadFromUrl() {
     if (!urlIsValid) return;
     setErr(null);
@@ -222,18 +237,20 @@ export function LoadModal({ onLoad, onClose }: Props) {
                       <button
                         type="button"
                         className="modal__wt-pick-range"
-                        onClick={() =>
-                          setPickerForPath(
-                            pickerForPath === wt.path ? null : wt.path,
-                          )
-                        }
+                        onClick={() => togglePicker(wt.path)}
                         disabled={worktrees.wtLoadingPath !== null}
-                        aria-expanded={pickerForPath === wt.path}
+                        aria-expanded={isPickerOpenFor(wt.path)}
                       >
-                        {pickerForPath === wt.path ? "close" : "pick range…"}
+                        {isPickerOpenFor(wt.path) ? "close" : "pick range…"}
                       </button>
                     </div>
-                    {pickerForPath === wt.path && (
+                    {worktrees.wtEmpty?.path === wt.path && (
+                      <p className="modal__hint modal__hint--empty">
+                        {worktrees.wtEmpty.message} Pick a range below to
+                        compare commits.
+                      </p>
+                    )}
+                    {isPickerOpenFor(wt.path) && (
                       <RangePicker
                         worktreePath={wt.path}
                         fetchCommits={worktrees.fetchCommits}
@@ -241,11 +258,16 @@ export function LoadModal({ onLoad, onClose }: Props) {
                         busy={worktrees.wtLoadingPath === wt.path}
                         onApply={(opts: LoadOpts) => {
                           setPickerForPath(null);
+                          worktrees.clearWtEmpty();
                           void worktrees.loadFromWorktree(wt, opts);
                         }}
-                        onCancel={() => setPickerForPath(null)}
+                        onCancel={() => {
+                          setPickerForPath(null);
+                          worktrees.clearWtEmpty();
+                        }}
                         onJustThis={(sha: string) => {
                           setPickerForPath(null);
+                          worktrees.clearWtEmpty();
                           void worktrees.loadFromWorktree(wt, {
                             kind: "ref",
                             ref: sha,

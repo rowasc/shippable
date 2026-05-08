@@ -61,6 +61,14 @@
   color: var(--red);
   margin-top: 8px;
 }
+.modal__hint--empty {
+  color: var(--fg);
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent, var(--fg-mute));
+  background: var(--bg-subtle, transparent);
+  font-size: 12px;
+}
 .modal__row {
   display: flex;
   gap: 6px;
