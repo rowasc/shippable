@@ -13,6 +13,7 @@ import { buildPlanDiagram } from "../planDiagram";
 import { Reference } from "./Reference";
 import { CopyButton } from "./CopyButton";
 import { PlanDiagramView } from "./PlanDiagramView";
+import { MarkdownView } from "./MarkdownView";
 
 interface Props {
   plan: ReviewPlan;
@@ -86,7 +87,11 @@ export function ReviewPlanView({
         )}
       </header>
 
-      <IntentSection intent={plan.intent} onNavigate={onNavigate} />
+      <IntentSection
+        intent={plan.intent}
+        changeset={changeset}
+        onNavigate={onNavigate}
+      />
       <MapSection
         map={plan.map}
         onNavigate={onNavigate}
@@ -108,24 +113,103 @@ export function ReviewPlanView({
 
 function IntentSection({
   intent,
+  changeset,
   onNavigate,
 }: {
   intent: Claim[];
+  changeset?: ChangeSet;
   onNavigate?: (ev: EvidenceRef) => void;
 }) {
-  return (
-    <section className="plan__sec">
-      <div className="plan__sec-h">What this change does</div>
-      {intent.length === 0 ? (
-        <div className="plan__empty">No intent claims.</div>
-      ) : (
+  // AI-supplied intent claims always take precedence — they describe the
+  // change in a way the description usually doesn't.
+  if (intent.length > 0) {
+    return (
+      <section className="plan__sec">
+        <div className="plan__sec-h">What this change does</div>
         <ul className="plan__claims">
           {intent.map((c, i) => (
             <ClaimRow key={i} claim={c} onNavigate={onNavigate} />
           ))}
         </ul>
+      </section>
+    );
+  }
+
+  // Prefer the PR body (richer than the synthesised single-commit subject we
+  // fall back to in worktree loads).
+  const description = (changeset?.prSource?.body ?? changeset?.description ?? "").trim();
+
+  return (
+    <section className="plan__sec">
+      <div className="plan__sec-h">What this change does</div>
+      {description ? (
+        <>
+          <div className="plan__desc">
+            <MarkdownView
+              source={description}
+              basePath=""
+              imageAssets={changeset?.imageAssets}
+            />
+          </div>
+          {changeset && (
+            <DescriptionFiles
+              changeset={changeset}
+              onNavigate={onNavigate}
+            />
+          )}
+        </>
+      ) : (
+        <div className="plan__empty">No description available.</div>
       )}
     </section>
+  );
+}
+
+function DescriptionFiles({
+  changeset,
+  onNavigate,
+}: {
+  changeset: ChangeSet;
+  onNavigate?: (ev: EvidenceRef) => void;
+}) {
+  const nodeByPath = useMemo(() => {
+    const map = new Map<string, NonNullable<ChangeSet["graph"]>["nodes"][number]>();
+    for (const n of changeset.graph?.nodes ?? []) map.set(n.path, n);
+    return map;
+  }, [changeset.graph]);
+
+  if (changeset.files.length === 0) return null;
+
+  return (
+    <ul className="plan__desc-files">
+      {changeset.files.map((f) => {
+        const node = nodeByPath.get(f.path);
+        const symbols = node?.symbols ?? [];
+        return (
+          <li key={f.id} className="plan__desc-file">
+            <Reference
+              ev={{ kind: "file", path: f.path }}
+              onNavigate={onNavigate}
+            />
+            {node && (
+              <span className="plan__desc-file-role">{node.fileRole}</span>
+            )}
+            {symbols.length > 0 && (
+              <span className="plan__desc-file-defs">
+                defines{" "}
+                {symbols.map((s) => (
+                  <Reference
+                    key={s.name}
+                    ev={{ kind: "symbol", name: s.name, definedIn: f.path }}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

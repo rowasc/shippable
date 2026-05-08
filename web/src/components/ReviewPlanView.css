@@ -100,6 +100,50 @@
   font-style: italic;
 }
 
+/* description fallback (rendered when intent claims are absent) */
+.plan__desc {
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+.plan__desc .markdown-body {
+  background: transparent;
+  font-size: 13px;
+}
+.plan__desc .markdown-body :first-child {
+  margin-top: 0;
+}
+.plan__desc .markdown-body :last-child {
+  margin-bottom: 0;
+}
+.plan__desc-files {
+  list-style: none;
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plan__desc-file {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.plan__desc-file-role {
+  color: var(--fg-mute);
+  font-style: italic;
+  font-size: 11px;
+}
+.plan__desc-file-defs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--fg-dim);
+}
+
 /* intent claims */
 .plan__claims {
   list-style: none;

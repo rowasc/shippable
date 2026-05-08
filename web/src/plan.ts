@@ -1,6 +1,5 @@
 import type {
   ChangeSet,
-  Claim,
   EntryPoint,
   ReviewPlan,
   StructureMap,
@@ -96,51 +95,10 @@ export function buildStructureMap(cs: ChangeSet): StructureMap {
   return { files, symbols };
 }
 
-export function summarizeIntentRule(cs: ChangeSet, map: StructureMap): Claim[] {
-  const claims: Claim[] = [];
-
-  const desc = cs.description.trim();
-  if (desc.length > 0) {
-    claims.push({ text: desc, evidence: [{ kind: "description" }] });
-  }
-
-  // Group "defines X" claims by defining file, so we don't spam one claim per symbol.
-  const byFile = new Map<string, StructureMapSymbol[]>();
-  for (const s of map.symbols) {
-    const bucket = byFile.get(s.definedIn) ?? [];
-    bucket.push(s);
-    byFile.set(s.definedIn, bucket);
-  }
-
-  for (const [definedIn, syms] of byFile) {
-    const names = syms.map((s) => s.name);
-    const hunkId = findDefiningHunk(cs, definedIn, names);
-    claims.push({
-      text: `Defines ${formatList(names)} in ${definedIn}.`,
-      evidence: [
-        ...syms.map((s) => ({
-          kind: "symbol" as const,
-          name: s.name,
-          definedIn: s.definedIn,
-        })),
-        ...(hunkId ? [{ kind: "hunk" as const, hunkId }] : []),
-      ],
-    });
-  }
-
-  const tests = map.files.filter((f) => f.isTest);
-  if (tests.length > 0) {
-    claims.push({
-      text:
-        tests.length === 1
-          ? `Includes one test file: ${tests[0].path}.`
-          : `Includes ${tests.length} test files.`,
-      evidence: tests.map((t) => ({ kind: "file" as const, path: t.path })),
-    });
-  }
-
-  return claims;
-}
+// Rule-based intent has been removed: the synthesised "Defines X" / "Includes
+// test files" claims just restated what the Map section already shows. Claims
+// only carry weight when an AI (server/src/plan.ts) supplies them; otherwise
+// IntentSection falls back to rendering the changeset description.
 
 function findDefiningHunk(
   cs: ChangeSet,
@@ -262,7 +220,7 @@ export function planReview(cs: ChangeSet): ReviewPlan {
   const map = buildStructureMap(cs);
   return {
     headline: cs.title,
-    intent: summarizeIntentRule(cs, map),
+    intent: [],
     map,
     entryPoints: pickEntryPoints(cs, map),
   };
