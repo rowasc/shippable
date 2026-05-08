@@ -168,6 +168,10 @@ export async function fetchAgentContextForWorktree(args: {
   slice: AgentContextSlice;
   candidates: AgentSessionRef[];
 } | null> {
+  // Dirty views carry a synthetic `dirty:<hash>` marker as commitSha. There's
+  // no commit to slice agent context against, and passing the marker through
+  // would surface the server's "invalid commit sha" error in the right panel.
+  if (args.commitSha.startsWith("dirty:")) return null;
   const candidates = await listSessionsForWorktree(args.worktreePath);
   if (candidates.length === 0) return null;
   const session =
