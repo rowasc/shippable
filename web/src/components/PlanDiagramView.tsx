@@ -81,10 +81,12 @@ export function PlanDiagramView({
     // register a single dispatcher keyed on path; the diagram embeds
     // `click <id> __shippableDiagramClick "<path>"` per node.
     window[MERMAID_CALLBACK_PROP] = (path: string) => {
+      hideMermaidTooltip();
       onNavigate?.({ kind: "file", path });
     };
     return () => {
       delete window[MERMAID_CALLBACK_PROP];
+      hideMermaidTooltip();
     };
   }, [onNavigate]);
 
@@ -287,6 +289,15 @@ function formatShape(shape: SymbolShape | undefined): string | null {
   push(shape.variables, "variable", "variables");
   if (parts.length === 0) return null;
   return parts.slice(0, 3).join(", ");
+}
+
+function hideMermaidTooltip(): void {
+  // Mermaid attaches a single `<div class="mermaidTooltip">` to <body> and
+  // toggles its opacity via d3 mouseover/mouseout handlers. When a click
+  // navigates away, the SVG node unmounts before mouseout fires and the
+  // tooltip stays pinned at full opacity — even after the plan modal
+  // closes. Remove it; mermaid recreates it on the next hover.
+  document.querySelectorAll(".mermaidTooltip").forEach((el) => el.remove());
 }
 
 function mermaidArg(text: string): string {
