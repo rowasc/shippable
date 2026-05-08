@@ -103,7 +103,6 @@ export function useWorktreeLoader({ onLoad }: Props) {
 
   async function loadFromWorktree(wt: Worktree, opts?: LoadOpts) {
     setErr(null);
-    setWtEmpty(null);
     setWtLoadingPath(wt.path);
     try {
       // Warm the LSP index before the diff fetch so the first diagram
@@ -112,11 +111,16 @@ export function useWorktreeLoader({ onLoad }: Props) {
       // requests once initialize resolves.
       void warmCodeGraph(wt.path, "HEAD");
       const cs = await fetchWorktreeChangeset(wt, opts);
+      setWtEmpty(null);
       onLoad(cs, { kind: "worktree", path: wt.path, branch: wt.branch });
     } catch (e) {
       if (e instanceof EmptyDiffError) {
+        // Don't pre-clear before the fetch — repeat-clicks on a row already
+        // in the empty state would otherwise close-and-reopen the picker
+        // with no visible change, looking like "nothing happened".
         setWtEmpty({ path: wt.path, message: e.summary });
       } else {
+        setWtEmpty(null);
         const msg = e instanceof Error ? e.message : String(e);
         setErr(`Load failed: ${msg}`);
       }
