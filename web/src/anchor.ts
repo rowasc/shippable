@@ -132,7 +132,7 @@ export function buildReplyAnchor(
   const prefix = key.slice(0, colon);
   const rest = key.slice(colon + 1);
   let hunkId: string;
-  let lineIdx = 0;
+  let lineIdx: number;
   switch (prefix) {
     case "note":
     case "user": {

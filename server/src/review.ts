@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { z } from "zod/v4";
+import { z } from "zod";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 const RequestSchema = z.object({

@@ -1,8 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-// The Anthropic SDK's `zodOutputFormat` helper imports from `zod/v4`. Our
-// schema must use the same API surface or the helper crashes trying to walk
-// it with the wrong internals. Zod 3.25+ ships v4 at this subpath.
-import { z } from "zod/v4";
+import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type {
   ChangeSet,
@@ -98,11 +95,7 @@ export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
     ],
     messages: [{ role: "user", content: userContent }],
     output_config: {
-      // SDK 0.80.0 ships v3 types but a v4 runtime for this helper. Our
-      // schema is built with zod/v4 to match the runtime; the cast is just to
-      // satisfy the (stale) v3-typed signature.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      format: zodOutputFormat(PlanResponseSchema as any),
+      format: zodOutputFormat(PlanResponseSchema),
     },
   });
 

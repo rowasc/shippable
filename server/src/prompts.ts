@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { z } from "zod/v4";
+import { z } from "zod";
 import * as library from "./library.ts";
 
 const ArgSchema = z.object({
