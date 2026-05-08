@@ -1,6 +1,6 @@
+import { classifyFileRole } from "./fileRole";
 import type {
   CodeGraph,
-  CodeGraphEdge,
   DiffFile,
   Hunk,
 } from "./types";
@@ -17,7 +17,6 @@ interface Definition {
 interface ImportReference {
   specifier: string;
   importedNames: string[];
-  kind: CodeGraphEdge["kind"];
 }
 
 interface FileAnalysis {
@@ -96,7 +95,7 @@ function analyzeGraphSources(
     });
   }
 
-  const edgeBuckets = new Map<string, { fromPath: string; toPath: string; labels: Set<string>; kind: CodeGraphEdge["kind"] }>();
+  const edgeBuckets = new Map<string, { fromPath: string; toPath: string; labels: Set<string> }>();
 
   for (const file of uniqueFiles) {
     const analysis = byPath.get(file.path)!;
@@ -104,12 +103,11 @@ function analyzeGraphSources(
       const targetPath = resolveModulePath(file.path, reference.specifier, pathSet);
       if (!targetPath || targetPath === file.path) continue;
       const labelSet = selectEdgeLabels(reference, byPath.get(targetPath)?.definitions ?? []);
-      const key = `${targetPath}\u0000${file.path}\u0000${reference.kind}`;
+      const key = `${targetPath}\u0000${file.path}`;
       const bucket = edgeBuckets.get(key) ?? {
         fromPath: targetPath,
         toPath: file.path,
         labels: new Set<string>(),
-        kind: reference.kind,
       };
       for (const label of labelSet) bucket.labels.add(label);
       edgeBuckets.set(key, bucket);
@@ -119,20 +117,26 @@ function analyzeGraphSources(
   const graph: CodeGraph = {
     scope,
     nodes: uniqueFiles
-      .map((file) => ({ path: file.path, isTest: isTestPath(file.path) }))
+      .map((file) => {
+        const { pathRole, fileRole } = classifyFileRole(file.path);
+        return {
+          path: file.path,
+          isTest: isTestPath(file.path),
+          pathRole,
+          fileRole,
+        };
+      })
       .sort((a, b) => a.path.localeCompare(b.path)),
     edges: [...edgeBuckets.values()]
       .map((bucket) => ({
         fromPath: bucket.fromPath,
         toPath: bucket.toPath,
         labels: [...bucket.labels].sort(),
-        kind: bucket.kind,
+        kind: "imports" as const,
       }))
       .sort((a, b) =>
         a.fromPath === b.fromPath
-          ? a.toPath === b.toPath
-            ? a.kind.localeCompare(b.kind)
-            : a.toPath.localeCompare(b.toPath)
+          ? a.toPath.localeCompare(b.toPath)
           : a.fromPath.localeCompare(b.fromPath),
       ),
   };
@@ -140,12 +144,22 @@ function analyzeGraphSources(
   return { graph, byPath };
 }
 
-function buildReferencedSymbolMap(analysis: { graph: CodeGraph }): Map<string, Set<string>> {
+function buildReferencedSymbolMap(analysis: {
+  graph: CodeGraph;
+  byPath: Map<string, FileAnalysis>;
+}): Map<string, Set<string>> {
+  // Side-effect imports synthesize a path-derived guess via labelFromSpecifier
+  // that won't match a real definition; filter labels against the source
+  // file's definitions so we don't pollute hunk `referencesSymbols`.
   const refs = new Map<string, Set<string>>();
   for (const edge of analysis.graph.edges) {
-    if (edge.kind !== "symbol") continue;
+    const definedNames = new Set(
+      analysis.byPath.get(edge.fromPath)?.definitions.map((d) => d.name) ?? [],
+    );
+    const realLabels = edge.labels.filter((label) => definedNames.has(label));
+    if (realLabels.length === 0) continue;
     const bucket = refs.get(edge.toPath) ?? new Set<string>();
-    for (const label of edge.labels) bucket.add(label);
+    for (const label of realLabels) bucket.add(label);
     refs.set(edge.toPath, bucket);
   }
   return refs;
@@ -238,7 +252,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: staticImport[2],
         importedNames: parseImportedNames(staticImport[1]),
-        kind: "symbol",
       });
       return;
     }
@@ -248,7 +261,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: sideEffectImport[1],
         importedNames: [],
-        kind: "import",
       });
       return;
     }
@@ -258,7 +270,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: exportFrom[1],
         importedNames: parseExportedNames(line),
-        kind: "symbol",
       });
       return;
     }
@@ -268,7 +279,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: requireImport[1],
         importedNames: [],
-        kind: "import",
       });
       return;
     }
@@ -278,7 +288,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: dynamicImport[1],
         importedNames: [],
-        kind: "import",
       });
       return;
     }
@@ -288,7 +297,6 @@ function extractImports(text: string): ImportReference[] {
       imports.push({
         specifier: cssImport[1],
         importedNames: [],
-        kind: "import",
       });
     }
   });

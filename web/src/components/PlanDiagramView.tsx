@@ -1,16 +1,14 @@
 import "./PlanDiagramView.css";
 import type { PlanDiagram, PlanDiagramEdge, PlanDiagramNode } from "../planDiagram";
+import type { EdgeKind, FileRole, SymbolShape } from "../types";
 import { CopyButton } from "./CopyButton";
 
-const NODE_WIDTH = 240;
-const NODE_HEIGHT = 56;
-const COLUMN_GAP = 96;
+const NODE_WIDTH = 248;
+const NODE_HEIGHT = 76;
+const COLUMN_GAP = 100;
 const ROW_GAP = 28;
 const PADDING_X = 20;
 const PADDING_Y = 18;
-const EDGE_TONES = ["accent", "blue", "magenta", "green", "yellow"] as const;
-
-type EdgeTone = (typeof EDGE_TONES)[number];
 
 interface Props {
   diagram: PlanDiagram;
@@ -23,9 +21,54 @@ interface PositionedEdge extends PlanDiagramEdge {
   toPoint: { x: number; y: number };
   fromBendOffset: number;
   toBendOffset: number;
-  tone: EdgeTone;
   label: string;
 }
+
+// 14 file roles share a 5-tone palette + icon set. The icon does the
+// disambiguation; the colour does the at-a-glance grouping.
+const ROLE_TONE: Record<FileRole, "accent" | "blue" | "magenta" | "green" | "yellow" | "mute"> = {
+  component: "magenta",
+  hook: "magenta",
+  route: "yellow",
+  test: "blue",
+  entity: "green",
+  "type-def": "blue",
+  schema: "green",
+  migration: "green",
+  config: "yellow",
+  fixture: "mute",
+  prompt: "accent",
+  doc: "mute",
+  style: "mute",
+  code: "accent",
+};
+
+const ROLE_GLYPH: Record<FileRole, string> = {
+  component: "◇",
+  hook: "○",
+  route: "→",
+  test: "✓",
+  entity: "▣",
+  "type-def": "T",
+  schema: "S",
+  migration: "↑",
+  config: "⚙",
+  fixture: "·",
+  prompt: "✦",
+  doc: "¶",
+  style: "~",
+  code: "{}",
+};
+
+// Edges: tests get a dashed stroke; uses-hook a distinct accent;
+// uses-type a neutral-blue accent; references the default; imports muted.
+const EDGE_KIND_CLASS: Record<EdgeKind, string> = {
+  imports: "plan-diagram__edge--imports",
+  tests: "plan-diagram__edge--tests",
+  "uses-hook": "plan-diagram__edge--uses-hook",
+  "uses-type": "plan-diagram__edge--uses-type",
+  references: "plan-diagram__edge--references",
+};
 
 export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: Props) {
   const hasMarkdown = diagram.markdownCount > 0;
@@ -48,6 +91,7 @@ export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: 
   if (diagram.nodes.length === 0) {
     return (
       <section className="plan-diagram">
+        <DiagramTabs />
         <div className="plan-diagram__head">
           <div>
             <div className="plan-diagram__title">Diagram</div>
@@ -81,9 +125,10 @@ export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: 
 
   return (
     <section className="plan-diagram">
+      <DiagramTabs />
       <div className="plan-diagram__head">
         <div>
-          <div className="plan-diagram__title">Diagram</div>
+          <div className="plan-diagram__title">Map</div>
           <div className="plan-diagram__hint">
             {diagram.scope === "repo"
               ? "Generated from the current worktree checkout. Changed files stay highlighted; unchanged repo neighbors give the wider map."
@@ -106,7 +151,7 @@ export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: 
           aria-label="Code map for the current changeset"
         >
           <defs>
-            {EDGE_TONES.map((tone) => (
+            {(["accent", "blue", "magenta", "green", "yellow", "mute"] as const).map((tone) => (
               <marker
                 key={tone}
                 id={`plan-diagram-arrow-${tone}`}
@@ -146,6 +191,63 @@ export function PlanDiagramView({ diagram, includeMarkdown, onToggleMarkdown }: 
   );
 }
 
+function DiagramTabs() {
+  // Static placeholders. Disabled tabs explain *why* — the data is missing,
+  // not the UI. See docs/plans/diagram-typed-file-graph.md.
+  return (
+    <div className="plan-diagram__tabs" role="tablist" aria-label="Diagram types">
+      <button
+        type="button"
+        role="tab"
+        aria-selected="true"
+        className="plan-diagram__tab plan-diagram__tab--active"
+      >
+        Map
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-disabled="true"
+        disabled
+        className="plan-diagram__tab"
+        title="Class diagram needs symbol-level capture (methods, fields per class)."
+      >
+        Class
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-disabled="true"
+        disabled
+        className="plan-diagram__tab"
+        title="State diagram needs control-flow extraction we don't capture today."
+      >
+        State
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-disabled="true"
+        disabled
+        className="plan-diagram__tab"
+        title="Sequence diagram needs call-trace data we don't capture today."
+      >
+        Sequence
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-disabled="true"
+        disabled
+        className="plan-diagram__tab"
+        title="ER diagram needs schema parsing we don't capture today."
+      >
+        ER
+      </button>
+    </div>
+  );
+}
+
 function DiagramEdgeView({ edge }: { edge: PositionedEdge }) {
   const startX = edge.fromPoint.x;
   const startY = edge.fromPoint.y;
@@ -158,13 +260,17 @@ function DiagramEdgeView({ edge }: { edge: PositionedEdge }) {
   const labelX = startX + (endX - startX) / 2;
   const labelY = startY + (endY - startY) / 2 - 12;
   const labelWidth = Math.max(52, edge.label.length * 7 + 18);
+  const tone = edgeTone(edge.kind);
 
   return (
-    <g className={`plan-diagram__edge plan-diagram__edge--${edge.tone}`}>
+    <g
+      className={`plan-diagram__edge ${EDGE_KIND_CLASS[edge.kind]}`}
+      data-kind={edge.kind}
+    >
       <path
         d={`M ${startX} ${startY} C ${startX + sign * sourceBend} ${startY}, ${endX - sign * targetBend} ${endY}, ${endX} ${endY}`}
         className="plan-diagram__edge-path"
-        markerEnd={`url(#plan-diagram-arrow-${edge.tone})`}
+        markerEnd={`url(#plan-diagram-arrow-${tone})`}
       />
       <rect
         className="plan-diagram__edge-label-bg"
@@ -192,6 +298,9 @@ function DiagramNodeView({
   y: number;
 }) {
   const { dir, base } = splitPath(node.path);
+  const tone = ROLE_TONE[node.fileRole];
+  const glyph = ROLE_GLYPH[node.fileRole];
+  const shapeText = formatShape(node.shape);
   return (
     <g
       className="plan-diagram__node"
@@ -199,25 +308,84 @@ function DiagramNodeView({
       data-test={node.isTest ? "true" : "false"}
       data-status={node.status}
       data-role={node.role}
+      data-file-role={node.fileRole}
+      data-tone={tone}
     >
-      <title>
-        {node.path}
-        {node.role === "context"
-          ? " — context (unchanged file referenced by the diff)"
-          : ""}
-      </title>
+      <title>{nodeTooltip(node)}</title>
       <rect x={x} y={y} width={NODE_WIDTH} height={NODE_HEIGHT} rx="8" ry="8" />
-      <text className="plan-diagram__node-dir" x={x + 14} y={y + 22}>
+      <text className="plan-diagram__node-glyph" x={x + 14} y={y + 24}>
+        {glyph}
+      </text>
+      <text className="plan-diagram__node-base" x={x + 36} y={y + 24}>
+        {truncate(base, 26)}
+      </text>
+      <text className="plan-diagram__node-dir" x={x + 36} y={y + 40}>
         {dir || "."}
       </text>
-      <text className="plan-diagram__node-base" x={x + 14} y={y + 39}>
-        {truncate(base, 28)}
+      {shapeText ? (
+        <text className="plan-diagram__node-shape" x={x + 36} y={y + 58}>
+          {shapeText}
+        </text>
+      ) : null}
+      <text className="plan-diagram__node-role" x={x + NODE_WIDTH - 14} y={y + 24}>
+        {node.fileRole}
       </text>
-      <text className="plan-diagram__node-meta" x={x + NODE_WIDTH - 14} y={y + 22}>
-        {statusGlyph(node.status)}{node.isEntryPoint ? " start" : node.isTest ? " test" : ""}
+      <text className="plan-diagram__node-meta" x={x + NODE_WIDTH - 14} y={y + 40}>
+        {statusGlyph(node.status)}
+        {node.fanIn !== undefined && node.fanIn > 0 ? ` ↩${node.fanIn}` : ""}
       </text>
     </g>
   );
+}
+
+function nodeTooltip(node: PlanDiagramNode): string {
+  const lines: string[] = [node.path];
+  if (node.role === "context") {
+    lines.push("(context — unchanged file referenced by the diff)");
+  }
+  if (node.pathRole !== node.fileRole) {
+    lines.push(
+      `Classified as ${node.fileRole} by LSP shape (path looked like ${node.pathRole}).`,
+    );
+  } else {
+    lines.push(`Role: ${node.fileRole}`);
+  }
+  if (node.symbols && node.symbols.length > 0) {
+    lines.push("");
+    for (const sym of node.symbols.slice(0, 12)) {
+      lines.push(`${sym.kind}  ${sym.name}  · L${sym.line + 1}`);
+    }
+    if (node.symbols.length > 12) {
+      lines.push(`… +${node.symbols.length - 12} more`);
+    }
+  }
+  if (node.fanIn !== undefined && node.fanIn > 0) {
+    lines.push("");
+    lines.push(`Fan-in: ${node.fanIn} file${node.fanIn === 1 ? "" : "s"}`);
+  }
+  return lines.join("\n");
+}
+
+function formatShape(shape: SymbolShape | undefined): string | null {
+  if (!shape) return null;
+  const parts: string[] = [];
+  const push = (count: number | undefined, singular: string, plural: string): void => {
+    if (!count) return;
+    parts.push(`${count} ${count === 1 ? singular : plural}`);
+  };
+  push(shape.classes, "class", "classes");
+  push(shape.interfaces, "interface", "interfaces");
+  push(shape.methods, "method", "methods");
+  push(shape.properties, "property", "properties");
+  push(shape.functions, "function", "functions");
+  push(shape.types, "type", "types");
+  push(shape.enums, "enum", "enums");
+  push(shape.constants, "constant", "constants");
+  push(shape.variables, "variable", "variables");
+  push(shape.modules, "module", "modules");
+  push(shape.namespaces, "namespace", "namespaces");
+  if (parts.length === 0) return null;
+  return parts.slice(0, 3).join(" · ");
 }
 
 function splitPath(path: string): { dir: string; base: string } {
@@ -305,7 +473,6 @@ function positionEdges(
       },
       fromBendOffset: laneBendOffset(outgoing.length, outgoingIndex),
       toBendOffset: laneBendOffset(incoming.length, incomingIndex),
-      tone: edgeTone(edge),
       label,
     }];
   });
@@ -334,9 +501,17 @@ function laneBendOffset(total: number, index: number): number {
   return (index - (total - 1) / 2) * stride;
 }
 
-function edgeTone(edge: PlanDiagramEdge): EdgeTone {
-  let hash = 0;
-  for (let i = 0; i < edge.from.length; i++) hash = (hash * 31 + edge.from.charCodeAt(i)) >>> 0;
-  return EDGE_TONES[hash % EDGE_TONES.length];
+function edgeTone(kind: EdgeKind): "accent" | "blue" | "magenta" | "green" | "yellow" | "mute" {
+  switch (kind) {
+    case "tests":
+      return "blue";
+    case "uses-hook":
+      return "magenta";
+    case "uses-type":
+      return "blue";
+    case "references":
+      return "accent";
+    case "imports":
+      return "mute";
+  }
 }
-

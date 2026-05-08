@@ -1,4 +1,13 @@
-import type { CodeGraph, FileStatus, ReviewPlan } from "./types";
+import { classifyFileRole } from "./fileRole";
+import type {
+  CodeGraph,
+  EdgeKind,
+  FileRole,
+  FileStatus,
+  ReviewPlan,
+  SymbolShape,
+  SymbolSummary,
+} from "./types";
 
 export interface PlanDiagramNode {
   id: string;
@@ -14,6 +23,15 @@ export interface PlanDiagramNode {
    * that don't carry the role.
    */
   role: "changed" | "context";
+  /** Path-floor classifier output; carried through for the hover. */
+  pathRole: FileRole;
+  /** Final classifier output (after LSP-shape upgrade). The renderer
+   *  drives accent + role chip from this; the hover surfaces
+   *  `pathRole !== fileRole` as classifier disagreement. */
+  fileRole: FileRole;
+  shape?: SymbolShape;
+  symbols?: SymbolSummary[];
+  fanIn?: number;
   column: number;
   row: number;
 }
@@ -23,6 +41,7 @@ export interface PlanDiagramEdge {
   from: string;
   to: string;
   labels: string[];
+  kind: EdgeKind;
 }
 
 export interface PlanDiagram {
@@ -72,6 +91,7 @@ export function buildPlanDiagram(
       fromPath: edge.fromPath,
       toPath: edge.toPath,
       labels: new Set(edge.labels),
+      kind: edge.kind,
     }))
     .sort((a, b) =>
     a.fromPath === b.fromPath
@@ -115,6 +135,10 @@ export function buildPlanDiagram(
     );
     files.forEach((file, row) => {
       const nodeId = `f${nodeCounter++}`;
+      // Re-run the path-floor classifier when the source graph predates the
+      // server enrichment (legacy persisted graphs). Server-built graphs
+      // already carry pathRole/fileRole; trust those.
+      const fallback = classifyFileRole(file.path, file.shape, file.symbols);
       nodes.push({
         id: nodeId,
         fileId: fileIdByPath.get(file.path),
@@ -125,6 +149,11 @@ export function buildPlanDiagram(
           ? entryPointFileIds.has(fileIdByPath.get(file.path)!)
           : false,
         role: file.role ?? "changed",
+        pathRole: file.pathRole ?? fallback.pathRole,
+        fileRole: file.fileRole ?? fallback.fileRole,
+        shape: file.shape,
+        symbols: file.symbols,
+        fanIn: file.fanIn,
         column,
         row,
       });
@@ -143,6 +172,7 @@ export function buildPlanDiagram(
       from,
       to,
       labels: [...bucket.labels].sort(),
+      kind: bucket.kind,
     }];
   });
 
@@ -182,15 +212,20 @@ function buildFallbackGraph(plan: ReviewPlan): CodeGraph {
   }
   return {
     scope: "diff",
-    nodes: plan.map.files.map((file) => ({
-      path: file.path,
-      isTest: file.isTest,
-    })),
+    nodes: plan.map.files.map((file) => {
+      const { pathRole, fileRole } = classifyFileRole(file.path);
+      return {
+        path: file.path,
+        isTest: file.isTest,
+        pathRole,
+        fileRole,
+      };
+    }),
     edges: [...buckets.values()].map((bucket) => ({
       fromPath: bucket.fromPath,
       toPath: bucket.toPath,
       labels: [...bucket.labels].sort(),
-      kind: "symbol" as const,
+      kind: "references" as const,
     })),
   };
 }
@@ -241,14 +276,47 @@ function compareFiles(
   return pathA.localeCompare(pathB);
 }
 
+// Mermaid is *export only*. We hand-roll the SVG renderer for theming
+// and click-to-definition. The mermaid emit needs to round-trip through
+// mermaid.live without preprocessing, so it stays in vanilla `flowchart`
+// dialect — no `defaultRenderer: elk` directive (not always available in
+// renderers we don't control).
+const ROLE_CLASSDEFS: Record<FileRole, string> = {
+  component: "fill:#fbeaff,stroke:#a347c1,stroke-width:1.5px",
+  hook: "fill:#fbeaff,stroke:#a347c1,stroke-dasharray:0",
+  route: "fill:#fff1cc,stroke:#9a6700,stroke-width:1.5px",
+  test: "fill:#eef6ff,stroke:#1f6feb,stroke-dasharray:4 3",
+  entity: "fill:#e9f9ee,stroke:#1a7f37",
+  "type-def": "fill:#eaf2ff,stroke:#3a6cd6",
+  schema: "fill:#e9f9ee,stroke:#1a7f37",
+  migration: "fill:#e9f9ee,stroke:#1a7f37,stroke-width:1.5px",
+  config: "fill:#fff1cc,stroke:#9a6700",
+  fixture: "fill:#f3f3f3,stroke:#cccccc,color:#666666",
+  prompt: "fill:#fdf3f8,stroke:#a347c1",
+  doc: "fill:#f3f3f3,stroke:#cccccc,color:#666666",
+  style: "fill:#f3f3f3,stroke:#cccccc",
+  code: "fill:#f7f7f7,stroke:#bbbbbb",
+};
+
+function mermaidEdgeFor(edge: PlanDiagramEdge): string {
+  const labelParts = [...edge.labels];
+  if (edge.kind !== "imports" && edge.kind !== "references") {
+    labelParts.push(`(${edge.kind})`);
+  }
+  const label = formatEdgeLabel(labelParts);
+  // tests get a dashed arrow so the typology survives the export.
+  // Other kinds keep a regular arrow with the kind in the label.
+  if (edge.kind === "tests") {
+    return `  ${edge.from} -. "${escapeMermaidText(label)}" .-> ${edge.to}`;
+  }
+  return `  ${edge.from} -->|"${escapeMermaidText(label)}"| ${edge.to}`;
+}
+
 function buildMermaid(
   nodes: PlanDiagramNode[],
   edges: PlanDiagramEdge[],
 ): string {
-  const lines = [
-    '%%{init: {"flowchart": {"defaultRenderer": "elk"}}}%%',
-    "flowchart LR",
-  ];
+  const lines = ["flowchart LR"];
 
   const groups = groupNodesByDir(nodes);
   let groupCounter = 0;
@@ -265,14 +333,28 @@ function buildMermaid(
     lines.push("  %% no dependency edges detected inside this changeset");
   }
   for (const edge of edges) {
-    const label = formatEdgeLabel(edge.labels);
-    lines.push(
-      `  ${edge.from} -->|"${escapeMermaidText(label)}"| ${edge.to}`,
-    );
+    lines.push(mermaidEdgeFor(edge));
   }
 
+  // classDef per fileRole. Only emit defs we'll reference, to keep the
+  // export tidy enough to re-paste into mermaid.live.
+  const rolesPresent = new Set(nodes.map((n) => n.fileRole));
+  for (const role of rolesPresent) {
+    lines.push(`  classDef role-${role} ${ROLE_CLASSDEFS[role]};`);
+  }
+  const byRole = new Map<FileRole, string[]>();
+  for (const node of nodes) {
+    const bucket = byRole.get(node.fileRole) ?? [];
+    bucket.push(node.id);
+    byRole.set(node.fileRole, bucket);
+  }
+  for (const [role, ids] of byRole) {
+    lines.push(`  class ${ids.join(",")} role-${role};`);
+  }
+
+  // Status accents on top of the role styling. Mermaid honors the latter
+  // class, so role first then state-overlays land last.
   const entryNodes = nodes.filter((node) => node.isEntryPoint).map((node) => node.id);
-  const testNodes = nodes.filter((node) => node.isTest).map((node) => node.id);
   const changedNodes = nodes
     .filter((node) => node.status === "added")
     .map((node) => node.id);
@@ -280,14 +362,18 @@ function buildMermaid(
     .filter((node) => node.role === "context")
     .map((node) => node.id);
 
-  lines.push("  classDef entry fill:#fff1cc,stroke:#9a6700,stroke-width:2px;");
-  lines.push("  classDef test fill:#eef6ff,stroke:#1f6feb,stroke-dasharray:4 3;");
-  lines.push("  classDef added fill:#e9f9ee,stroke:#1a7f37;");
-  lines.push("  classDef context fill:#f4f4f4,stroke:#bbbbbb,color:#666666;");
-  if (entryNodes.length > 0) lines.push(`  class ${entryNodes.join(",")} entry;`);
-  if (testNodes.length > 0) lines.push(`  class ${testNodes.join(",")} test;`);
-  if (changedNodes.length > 0) lines.push(`  class ${changedNodes.join(",")} added;`);
-  if (contextNodes.length > 0) lines.push(`  class ${contextNodes.join(",")} context;`);
+  if (entryNodes.length > 0) {
+    lines.push("  classDef entry stroke-width:2.5px;");
+    lines.push(`  class ${entryNodes.join(",")} entry;`);
+  }
+  if (changedNodes.length > 0) {
+    lines.push("  classDef added stroke:#1a7f37,fill:#e9f9ee;");
+    lines.push(`  class ${changedNodes.join(",")} added;`);
+  }
+  if (contextNodes.length > 0) {
+    lines.push("  classDef context fill:#f4f4f4,stroke:#bbbbbb,color:#666666;");
+    lines.push(`  class ${contextNodes.join(",")} context;`);
+  }
 
   return lines.join("\n");
 }

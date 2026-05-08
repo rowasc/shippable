@@ -468,7 +468,7 @@ describe("parseDiff — diff-scoped graph extraction", () => {
       fromPath: "src/utils.ts",
       toPath: "src/view.ts",
       labels: ["buildPlanDiagram"],
-      kind: "symbol",
+      kind: "imports",
     });
     expect(cs.files[0].hunks[0].definesSymbols).toEqual(["buildPlanDiagram"]);
     expect(cs.files[1].hunks[0].referencesSymbols).toEqual(["buildPlanDiagram"]);
@@ -497,7 +497,7 @@ describe("parseDiff — diff-scoped graph extraction", () => {
       fromPath: "src/theme.css",
       toPath: "src/app.ts",
       labels: ["theme"],
-      kind: "import",
+      kind: "imports",
     });
   });
 });

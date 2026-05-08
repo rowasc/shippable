@@ -75,9 +75,9 @@ describe("buildPlanDiagram", () => {
     expect(test?.isTest).toBe(true);
     expect(coreToPanel?.labels).toEqual(["loadPrefs", "savePrefs"]);
     expect(diagram.mermaid).toContain("flowchart LR");
-    expect(diagram.mermaid).toContain('"defaultRenderer": "elk"');
-    expect(diagram.mermaid).toContain('classDef entry fill:#fff1cc');
-    expect(diagram.mermaid).toContain('classDef test fill:#eef6ff');
+    expect(diagram.mermaid).toContain("classDef role-test");
+    expect(diagram.mermaid).toContain("classDef role-code");
+    expect(diagram.mermaid).toContain("classDef entry stroke-width:2.5px;");
     expect(diagram.mermaid).toContain('subgraph g0["src"]');
     expect(diagram.mermaid).toContain('core.ts');
     expect(diagram.mermaid).toContain('loadPrefs, savePrefs');
@@ -193,15 +193,15 @@ describe("buildPlanDiagram", () => {
     const diagram = buildPlanDiagram(plan, {
       scope: "repo",
       nodes: [
-        { path: "src/core.ts", isTest: false },
-        { path: "src/changed.ts", isTest: false },
+        { path: "src/core.ts", isTest: false, pathRole: "code", fileRole: "code" },
+        { path: "src/changed.ts", isTest: false, pathRole: "code", fileRole: "code" },
       ],
       edges: [
         {
           fromPath: "src/core.ts",
           toPath: "src/changed.ts",
           labels: ["buildThing"],
-          kind: "symbol",
+          kind: "references",
         },
       ],
     });
@@ -239,15 +239,15 @@ describe("buildPlanDiagram", () => {
     const diagram = buildPlanDiagram(plan, {
       scope: "diff",
       nodes: [
-        { path: "src/changed.ts", isTest: false, role: "changed" },
-        { path: "src/unchanged.ts", isTest: false, role: "context" },
+        { path: "src/changed.ts", isTest: false, role: "changed", pathRole: "code", fileRole: "code" },
+        { path: "src/unchanged.ts", isTest: false, role: "context", pathRole: "code", fileRole: "code" },
       ],
       edges: [
         {
           fromPath: "src/changed.ts",
           toPath: "src/unchanged.ts",
           labels: ["helper"],
-          kind: "symbol",
+          kind: "references",
         },
       ],
     });

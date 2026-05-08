@@ -76,6 +76,57 @@ export interface DiffFile {
   postChangeText?: string;
 }
 
+export type FileRole =
+  | "component"
+  | "hook"
+  | "route"
+  | "test"
+  | "entity"
+  | "type-def"
+  | "schema"
+  | "migration"
+  | "config"
+  | "fixture"
+  | "prompt"
+  | "doc"
+  | "style"
+  | "code";
+
+export type EdgeKind = "imports" | "tests" | "uses-hook" | "uses-type" | "references";
+
+export interface SymbolShape {
+  classes?: number;
+  interfaces?: number;
+  methods?: number;
+  properties?: number;
+  functions?: number;
+  variables?: number;
+  constants?: number;
+  enums?: number;
+  types?: number;
+  modules?: number;
+  namespaces?: number;
+}
+
+export type SymbolSummaryKind =
+  | "Class"
+  | "Interface"
+  | "Method"
+  | "Property"
+  | "Function"
+  | "Variable"
+  | "Constant"
+  | "Enum"
+  | "Module"
+  | "Namespace"
+  | "Type";
+
+export interface SymbolSummary {
+  name: string;
+  kind: SymbolSummaryKind;
+  line: number;
+}
+
 export interface CodeGraphNode {
   path: string;
   isTest: boolean;
@@ -88,13 +139,26 @@ export interface CodeGraphNode {
    * treat as `"changed"` for back-compat.
    */
   role?: "changed" | "context";
+  /** Path/extension classifier output alone — never overridden. */
+  pathRole: FileRole;
+  /** Final classifier output after the LSP-shape upgrade. Equals
+   *  `pathRole` when no LSP ran. The renderer uses this; the hover
+   *  reveals disagreement when they differ. */
+  fileRole: FileRole;
+  /** LSP per-file symbol-kind tally. Absent on regex-only nodes. */
+  shape?: SymbolShape;
+  /** Top-level symbols, for hover-to-peek. Absent on regex-only nodes. */
+  symbols?: SymbolSummary[];
+  /** Distinct using-file count (post-filtered, matches what the diagram
+   *  shows). Absent on regex-only nodes. */
+  fanIn?: number;
 }
 
 export interface CodeGraphEdge {
   fromPath: string;
   toPath: string;
   labels: string[];
-  kind: "import" | "symbol";
+  kind: EdgeKind;
 }
 
 export interface CodeGraph {

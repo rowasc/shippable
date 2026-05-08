@@ -109,9 +109,9 @@ describe("resolveCodeGraph (LSP-derived edges)", () => {
       .map((e) => ({ from: e.fromPath, to: e.toPath, labels: e.labels, kind: e.kind }))
       .sort((a, b) => `${a.from}->${a.to}`.localeCompare(`${b.from}->${b.to}`));
     expect(edges).toEqual([
-      { from: "Cart.php", to: "Routes.php", labels: ["Cart"], kind: "symbol" },
-      { from: "Order.php", to: "Routes.php", labels: ["Order"], kind: "symbol" },
-      { from: "OrderRepository.php", to: "Routes.php", labels: ["OrderRepository"], kind: "symbol" },
+      { from: "Cart.php", to: "Routes.php", labels: ["Cart"], kind: "references" },
+      { from: "Order.php", to: "Routes.php", labels: ["Order"], kind: "references" },
+      { from: "OrderRepository.php", to: "Routes.php", labels: ["OrderRepository"], kind: "references" },
     ]);
   });
 
@@ -145,7 +145,7 @@ describe("resolveCodeGraph (LSP-derived edges)", () => {
     });
 
     expect(result.graph.edges).toEqual([
-      { fromPath: "Utils.php", toPath: "Caller.php", labels: ["Builder", "Helper"], kind: "symbol" },
+      { fromPath: "Utils.php", toPath: "Caller.php", labels: ["Builder", "Helper"], kind: "references" },
     ]);
   });
 
@@ -405,6 +405,114 @@ describe("resolveCodeGraph (resolver mixing)", () => {
     expect(edgePairs).toContain("Cart.php->Routes.php"); // LSP-derived
     expect(edgePairs).toContain("b.ts->a.ts"); // regex-derived
     expect(new Set(edgePairs).size).toBe(edgePairs.length); // no duplicates
+  });
+});
+
+describe("resolveCodeGraph (node enrichment)", () => {
+  it("populates pathRole, fileRole, shape, symbols, fanIn from LSP results", async () => {
+    const cartPath = writeFile("Cart.php", "<?php\nclass Cart {}\n");
+    const repoPath = writeFile(
+      "OrderRepository.php",
+      "<?php\nclass OrderRepository {}\n",
+    );
+    const routesPath = writeFile(
+      "Routes.php",
+      "<?php\nuse Cart; use OrderRepository;\n",
+    );
+
+    const stub = makeStub({
+      documentSymbol: {
+        [cartPath]: [
+          { name: "Cart", kind: 5, range: range(1, 6, 10), selectionRange: range(1, 6, 10) },
+          { name: "id", kind: 7, range: range(2, 4, 6), selectionRange: range(2, 4, 6) },
+          { name: "name", kind: 7, range: range(3, 4, 8), selectionRange: range(3, 4, 8) },
+          { name: "price", kind: 7, range: range(4, 4, 9), selectionRange: range(4, 4, 9) },
+          { name: "qty", kind: 7, range: range(5, 4, 7), selectionRange: range(5, 4, 7) },
+          { name: "save", kind: 6, range: range(6, 4, 8), selectionRange: range(6, 4, 8) },
+        ],
+        [repoPath]: [
+          { name: "OrderRepository", kind: 5, range: range(1, 6, 21), selectionRange: range(1, 6, 21) },
+        ],
+        [routesPath]: [],
+      },
+      references: {
+        [`${cartPath}:1:6`]: [{ uri: `file://${routesPath}`, range: range(1, 4, 8) }],
+        [`${cartPath}:2:4`]: [],
+        [`${cartPath}:3:4`]: [],
+        [`${cartPath}:4:4`]: [],
+        [`${cartPath}:5:4`]: [],
+        [`${cartPath}:6:4`]: [],
+        [`${repoPath}:1:6`]: [{ uri: `file://${routesPath}`, range: range(1, 14, 30) }],
+      },
+    });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [
+        { path: "Cart.php", text: "<?php\nclass Cart {}\n" },
+        { path: "OrderRepository.php", text: "<?php\nclass OrderRepository {}\n" },
+        { path: "Routes.php", text: "<?php\nuse Cart; use OrderRepository;\n" },
+      ],
+    });
+
+    const cart = result.graph.nodes.find((n) => n.path === "Cart.php")!;
+    expect(cart.pathRole).toBe("code");
+    expect(cart.fileRole).toBe("entity"); // 1 class, 4 properties, 1 method → upgraded
+    expect(cart.shape).toEqual({ classes: 1, methods: 1, properties: 4 });
+    expect(cart.symbols).toEqual([
+      { name: "Cart", kind: "Class", line: 1 },
+      { name: "id", kind: "Property", line: 2 },
+      { name: "name", kind: "Property", line: 3 },
+      { name: "price", kind: "Property", line: 4 },
+      { name: "qty", kind: "Property", line: 5 },
+      { name: "save", kind: "Method", line: 6 },
+    ]);
+    expect(cart.fanIn).toBe(1);
+
+    const routes = result.graph.nodes.find((n) => n.path === "Routes.php")!;
+    expect(routes.pathRole).toBe("route");
+    expect(routes.fileRole).toBe("route");
+    expect(routes.fanIn).toBeUndefined(); // no outgoing edges from Routes.php
+  });
+
+  it("picks 'tests' edge kind when test path corresponds to a class definer", async () => {
+    const cartPath = writeFile("Cart.php", "<?php\nclass Cart {}\n");
+    const testPath = writeFile("CartTest.php", "<?php\nuse Cart;\n");
+
+    const stub = makeStub({
+      documentSymbol: {
+        [cartPath]: [
+          { name: "Cart", kind: 5, range: range(1, 6, 10), selectionRange: range(1, 6, 10) },
+        ],
+        [testPath]: [],
+      },
+      references: {
+        [`${cartPath}:1:6`]: [{ uri: `file://${testPath}`, range: range(1, 4, 8) }],
+      },
+    });
+    installStubAsPhpLsp(stub);
+
+    const result = await resolveCodeGraph({
+      workspaceRoot,
+      ref: "HEAD",
+      scope: "diff",
+      files: [
+        { path: "Cart.php", text: "<?php\nclass Cart {}\n" },
+        { path: "CartTest.php", text: "<?php\nuse Cart;\n" },
+      ],
+    });
+
+    expect(result.graph.edges).toEqual([
+      {
+        fromPath: "Cart.php",
+        toPath: "CartTest.php",
+        labels: ["Cart"],
+        kind: "tests",
+      },
+    ]);
   });
 });
 
