@@ -1,7 +1,7 @@
 // Thin client over the agent-context endpoints. See server/src/agent-context.ts
 // and docs/concepts/agent-context.md for the design.
 
-import { apiUrl } from "./apiUrl";
+import { getJson, postJson } from "./apiClient";
 import type {
   AgentContextSlice,
   AgentSessionRef,
@@ -13,18 +13,11 @@ import type { PolledAgentReply } from "./state";
 export async function listSessionsForWorktree(
   worktreePath: string,
 ): Promise<AgentSessionRef[]> {
-  const res = await fetch(await apiUrl("/api/worktrees/sessions"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: worktreePath }),
-  });
-  const json = (await res.json()) as
-    | { sessions: AgentSessionRef[] }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.sessions;
+  const { sessions } = await postJson<{ sessions: AgentSessionRef[] }>(
+    "/api/worktrees/sessions",
+    { path: worktreePath },
+  );
+  return sessions;
 }
 
 export async function fetchMcpStatus(): Promise<{
@@ -37,14 +30,9 @@ export async function fetchMcpStatus(): Promise<{
    */
   installCommand: string;
 }> {
-  const res = await fetch(await apiUrl("/api/worktrees/mcp-status"));
-  const json = (await res.json()) as
-    | { installed: boolean; installCommand: string }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
+  return getJson<{ installed: boolean; installCommand: string }>(
+    "/api/worktrees/mcp-status",
+  );
 }
 
 export async function fetchAgentContext(args: {
@@ -52,22 +40,15 @@ export async function fetchAgentContext(args: {
   sessionFilePath: string;
   commitSha?: string | null;
 }): Promise<AgentContextSlice> {
-  const res = await fetch(await apiUrl("/api/worktrees/agent-context"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const { slice } = await postJson<{ slice: AgentContextSlice }>(
+    "/api/worktrees/agent-context",
+    {
       path: args.worktreePath,
       sessionFilePath: args.sessionFilePath,
       commitSha: args.commitSha ?? null,
-    }),
-  });
-  const json = (await res.json()) as
-    | { slice: AgentContextSlice }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.slice;
+    },
+  );
+  return slice;
 }
 
 // ── Agent comment queue (slice 2) ────────────────────────────────────────
@@ -85,73 +66,39 @@ export async function enqueueComment(args: {
     supersedes?: string | null;
   };
 }): Promise<{ id: string }> {
-  const res = await fetch(await apiUrl("/api/agent/enqueue"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      worktreePath: args.worktreePath,
-      commitSha: args.commitSha,
-      comment: args.comment,
-    }),
+  return postJson<{ id: string }>("/api/agent/enqueue", {
+    worktreePath: args.worktreePath,
+    commitSha: args.commitSha,
+    comment: args.comment,
   });
-  const json = (await res.json()) as { id: string } | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
 }
 
 export async function unenqueueComment(args: {
   worktreePath: string;
   id: string;
 }): Promise<{ unenqueued: boolean }> {
-  const res = await fetch(await apiUrl("/api/agent/unenqueue"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      worktreePath: args.worktreePath,
-      id: args.id,
-    }),
+  return postJson<{ unenqueued: boolean }>("/api/agent/unenqueue", {
+    worktreePath: args.worktreePath,
+    id: args.id,
   });
-  const json = (await res.json()) as
-    | { unenqueued: boolean }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
 }
 
 export async function fetchDelivered(
   worktreePath: string,
 ): Promise<DeliveredComment[]> {
-  const url = await apiUrl(
+  const { delivered } = await getJson<{ delivered: DeliveredComment[] }>(
     `/api/agent/delivered?path=${encodeURIComponent(worktreePath)}`,
   );
-  const res = await fetch(url);
-  const json = (await res.json()) as
-    | { delivered: DeliveredComment[] }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.delivered;
+  return delivered;
 }
 
 export async function fetchAgentReplies(
   worktreePath: string,
 ): Promise<PolledAgentReply[]> {
-  const url = await apiUrl(
+  const { replies } = await getJson<{ replies: PolledAgentReply[] }>(
     `/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
   );
-  const res = await fetch(url);
-  const json = (await res.json()) as
-    | { replies: PolledAgentReply[] }
-    | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.replies;
+  return replies;
 }
 
 /**

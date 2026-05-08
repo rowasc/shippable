@@ -28,7 +28,7 @@ import {
 import { useTheme } from "./useTheme";
 import { useWorktreeLiveReload } from "./useWorktreeLiveReload";
 import { parseDiff } from "./parseDiff";
-import { apiUrl } from "./apiUrl";
+import { postJson } from "./apiClient";
 import { fetchDiffCodeGraph } from "./codeGraphClient";
 
 interface BootSeed {
@@ -196,25 +196,18 @@ export default function App() {
     setBusyReloading(true);
     try {
       const wantDirty = staleNext?.dirty ?? false;
-      const res = await fetch(await apiUrl("/api/worktrees/changeset"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: provenance.path, dirty: wantDirty }),
+      const json = await postJson<{
+        diff: string;
+        sha: string;
+        subject: string;
+        author: string;
+        branch: string | null;
+        fileContents?: Record<string, string>;
+        state: WorktreeState;
+      }>("/api/worktrees/changeset", {
+        path: provenance.path,
+        dirty: wantDirty,
       });
-      const json = (await res.json()) as
-        | {
-            diff: string;
-            sha: string;
-            subject: string;
-            author: string;
-            branch: string | null;
-            fileContents?: Record<string, string>;
-            state: WorktreeState;
-          }
-        | { error: string };
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
       const newCs = parseDiff(json.diff, {
         id: `wt-${json.sha.slice(0, 12)}`,
         title:

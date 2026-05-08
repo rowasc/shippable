@@ -1,9 +1,4 @@
-import { apiUrl } from "./apiUrl";
-
-interface FileAtResponse {
-  content: string;
-}
-type ErrorResponse = { error: string };
+import { postJson } from "./apiClient";
 
 /**
  * Fetch a file's contents at a specific commit, via `git show <sha>:<file>`
@@ -15,18 +10,13 @@ export async function fetchFileAt(args: {
   sha: string;
   file: string;
 }): Promise<string> {
-  const res = await fetch(await apiUrl("/api/worktrees/file-at"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  const { content } = await postJson<{ content: string }>(
+    "/api/worktrees/file-at",
+    {
       path: args.worktreePath,
       sha: args.sha,
       file: args.file,
-    }),
-  });
-  const json = (await res.json()) as FileAtResponse | ErrorResponse;
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.content;
+    },
+  );
+  return content;
 }

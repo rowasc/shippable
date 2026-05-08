@@ -1,4 +1,5 @@
 import { apiUrl } from "./apiUrl";
+import { getJson } from "./apiClient";
 export {
   findCapabilityForLanguage,
   isProgrammingLanguage,
@@ -17,12 +18,7 @@ import type {
 } from "./definitionTypes";
 
 export async function fetchDefinitionCapabilities(): Promise<DefinitionCapabilities> {
-  const res = await fetch(await apiUrl("/api/definition/capabilities"));
-  const json = (await res.json()) as DefinitionCapabilities | { error: string };
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json;
+  return getJson<DefinitionCapabilities>("/api/definition/capabilities");
 }
 
 export async function fetchDefinition(

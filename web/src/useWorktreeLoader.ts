@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "./apiUrl";
+import { postJson } from "./apiClient";
 import {
+  EmptyDiffError,
   fetchWorktreeChangeset,
   fetchWorktreeCommits,
 } from "./worktreeChangeset";
@@ -18,8 +20,6 @@ export interface Worktree {
   isMain: boolean;
 }
 
-type ErrorResponse = { error: string };
-
 interface Props {
   onLoad: (cs: ChangeSet, source: RecentSource) => void;
 }
@@ -35,6 +35,10 @@ export function useWorktreeLoader({ onLoad }: Props) {
   const [wtList, setWtList] = useState<Worktree[] | null>(null);
   const [wtLoadingPath, setWtLoadingPath] = useState<string | null>(null);
   const [showManualPath, setShowManualPath] = useState(false);
+  const [wtEmpty, setWtEmpty] = useState<{
+    path: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,19 +62,14 @@ export function useWorktreeLoader({ onLoad }: Props) {
     setWtBusy(true);
     setWtList(null);
     try {
-      const res = await fetch(await apiUrl("/api/worktrees/list"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dir }),
-      });
-      const json = (await res.json()) as { worktrees: Worktree[] } | ErrorResponse;
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
+      const { worktrees } = await postJson<{ worktrees: Worktree[] }>(
+        "/api/worktrees/list",
+        { dir },
+      );
       localStorage.setItem(WORKTREES_DIR_KEY, dir);
       setWtDir(dir);
-      setWtList(json.worktrees);
-      if (json.worktrees.length === 0) {
+      setWtList(worktrees);
+      if (worktrees.length === 0) {
         setErr(`No worktrees found in ${dir}.`);
       }
     } catch (e) {
@@ -85,18 +84,11 @@ export function useWorktreeLoader({ onLoad }: Props) {
     setErr(null);
     setWtPickerBusy(true);
     try {
-      const res = await fetch(await apiUrl("/api/worktrees/pick-directory"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startPath: wtDir.trim() || undefined }),
+      const json = await postJson<
+        { path: string } | { cancelled: true }
+      >("/api/worktrees/pick-directory", {
+        startPath: wtDir.trim() || undefined,
       });
-      const json = (await res.json()) as
-        | { path: string }
-        | { cancelled: true }
-        | ErrorResponse;
-      if (!res.ok || "error" in json) {
-        throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-      }
       if ("cancelled" in json) return;
       setShowManualPath(false);
       await scanWorktrees(json.path);
@@ -111,6 +103,7 @@ export function useWorktreeLoader({ onLoad }: Props) {
 
   async function loadFromWorktree(wt: Worktree, opts?: LoadOpts) {
     setErr(null);
+    setWtEmpty(null);
     setWtLoadingPath(wt.path);
     try {
       // Warm the LSP index before the diff fetch so the first diagram
@@ -121,8 +114,12 @@ export function useWorktreeLoader({ onLoad }: Props) {
       const cs = await fetchWorktreeChangeset(wt, opts);
       onLoad(cs, { kind: "worktree", path: wt.path, branch: wt.branch });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(`Load failed: ${msg}`);
+      if (e instanceof EmptyDiffError) {
+        setWtEmpty({ path: wt.path, message: e.summary });
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setErr(`Load failed: ${msg}`);
+      }
     } finally {
       setWtLoadingPath(null);
     }
@@ -140,6 +137,8 @@ export function useWorktreeLoader({ onLoad }: Props) {
     showManualPath,
     wtBusy,
     wtDir,
+    wtEmpty,
+    clearWtEmpty: () => setWtEmpty(null),
     wtList,
     wtLoadingPath,
     wtPickerBusy,

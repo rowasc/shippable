@@ -1,4 +1,4 @@
-import { apiUrl } from "./apiUrl";
+import { postJson } from "./apiClient";
 import { fetchDiffCodeGraph } from "./codeGraphClient";
 import { parseDiff } from "./parseDiff";
 import type { ChangeSet, WorktreeState } from "./types";
@@ -10,11 +10,53 @@ interface WorktreeChangesetResponse {
   author: string;
   date: string;
   branch: string | null;
+  parentSha?: string | null;
   fileContents?: Record<string, string>;
   state?: WorktreeState;
 }
 
-type ErrorResponse = { error: string };
+/**
+ * Thrown when the server returns a valid changeset but the diff is empty —
+ * branch at parity with its base, an explicitly picked merge commit, a clean
+ * working tree, etc. Distinct from parse failures so callers can surface a
+ * soft "no changes here, pick a different range" UI instead of a hard error.
+ */
+export class EmptyDiffError extends Error {
+  readonly summary: string;
+  constructor(summary: string) {
+    super(summary);
+    this.name = "EmptyDiffError";
+    this.summary = summary;
+  }
+}
+
+function summariseEmpty(
+  opts: LoadOpts | undefined,
+  branch: string | null,
+  parentSha: string | null | undefined,
+): string {
+  if (opts?.kind === "range") {
+    const from = opts.fromRef.length > 7 ? opts.fromRef.slice(0, 7) : opts.fromRef;
+    const to = opts.toRef.length > 7 ? opts.toRef.slice(0, 7) : opts.toRef;
+    return `No changes between ${from} and ${to}.`;
+  }
+  if (opts?.kind === "ref") {
+    const r = opts.ref.length > 7 ? opts.ref.slice(0, 7) : opts.ref;
+    return `No changes in commit ${r} (empty commit or merge?).`;
+  }
+  if (opts?.kind === "dirty") {
+    return "No uncommitted changes.";
+  }
+  // Default branch view.
+  const branchLabel = branch ?? "this branch";
+  if (parentSha === "working tree") {
+    return `No uncommitted changes on ${branchLabel}.`;
+  }
+  if (parentSha) {
+    return `No new changes on ${branchLabel} since base ${parentSha}.`;
+  }
+  return `No changes on ${branchLabel} (no base detected).`;
+}
 
 export interface CommitInfo {
   sha: string;
@@ -29,16 +71,11 @@ export async function fetchWorktreeCommits(
   worktreePath: string,
   limit?: number,
 ): Promise<CommitInfo[]> {
-  const res = await fetch(await apiUrl("/api/worktrees/commits"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: worktreePath, ...(limit ? { limit } : {}) }),
-  });
-  const json = (await res.json()) as { commits: CommitInfo[] } | ErrorResponse;
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
-  return json.commits;
+  const { commits } = await postJson<{ commits: CommitInfo[] }>(
+    "/api/worktrees/commits",
+    { path: worktreePath, ...(limit ? { limit } : {}) },
+  );
+  return commits;
 }
 
 export type LoadOpts =
@@ -73,15 +110,10 @@ export async function fetchWorktreeChangeset(
     body.dirty = true;
   }
 
-  const res = await fetch(await apiUrl("/api/worktrees/changeset"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json()) as WorktreeChangesetResponse | ErrorResponse;
-  if (!res.ok || "error" in json) {
-    throw new Error("error" in json ? json.error : `HTTP ${res.status}`);
-  }
+  const json = await postJson<WorktreeChangesetResponse>(
+    "/api/worktrees/changeset",
+    body,
+  );
 
   // Range loads use a deterministic id so two reviews of the same slice land
   // on the same ChangeSet identity (matters for ReviewState persistence).
@@ -101,7 +133,7 @@ export async function fetchWorktreeChangeset(
     fileContents: json.fileContents,
   });
   if (cs.files.length === 0) {
-    throw new Error("Latest commit produced no parseable diff (empty or merge?).");
+    throw new EmptyDiffError(summariseEmpty(opts, json.branch, json.parentSha));
   }
   const lspGraph = await fetchDiffCodeGraph(wt.path, json.sha, cs.files);
   if (lspGraph) cs.graph = lspGraph;
