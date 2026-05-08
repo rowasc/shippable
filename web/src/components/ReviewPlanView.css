@@ -195,6 +195,41 @@
 .plan__commit-body .markdown-body :last-child {
   margin-bottom: 0;
 }
+.plan__commit-fold {
+  margin: 0;
+}
+.plan__commit-fold > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--fg-mute);
+  text-transform: lowercase;
+  user-select: none;
+}
+.plan__commit-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.plan__commit-fold > summary::before {
+  content: "▸";
+  font-size: 9px;
+  width: 10px;
+  display: inline-block;
+  color: var(--fg-mute);
+}
+.plan__commit-fold[open] > summary::before {
+  content: "▾";
+}
+.plan__commit-fold > summary:hover {
+  color: var(--fg-dim);
+}
+.plan__commit-fold[open] > .plan__commit-body,
+.plan__commit-fold[open] > .plan__desc-files {
+  margin-top: 4px;
+}
 
 /* intent claims */
 .plan__claims {

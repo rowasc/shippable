@@ -239,6 +239,9 @@ function CommitGroups({
 }) {
   const nodeByPath = useGraphNodes(changeset.graph);
   const commits = changeset.commits ?? [];
+  // Collapse bodies by default once a list has more than one commit — single
+  // commits stay inline because there's no clutter to hide.
+  const collapsibleBody = commits.length > 1;
   return (
     <ol className="plan__commits">
       {commits.map((c) => (
@@ -248,6 +251,7 @@ function CommitGroups({
           nodeByPath={nodeByPath}
           imageAssets={changeset.imageAssets}
           onNavigate={onNavigate}
+          collapsibleBody={collapsibleBody}
         />
       ))}
     </ol>
@@ -259,38 +263,55 @@ function CommitGroup({
   nodeByPath,
   imageAssets,
   onNavigate,
+  collapsibleBody,
 }: {
   commit: ChangeSetCommit;
   nodeByPath: Map<string, CodeGraphNode>;
   imageAssets?: Record<string, string>;
   onNavigate?: (ev: EvidenceRef) => void;
+  collapsibleBody: boolean;
 }) {
+  const body = commit.body && (
+    <div className="plan__commit-body">
+      <MarkdownView
+        source={commit.body}
+        basePath=""
+        imageAssets={imageAssets}
+      />
+    </div>
+  );
+
   return (
     <li className="plan__commit">
       <div className="plan__commit-h">
         <code className="plan__commit-sha">{commit.shortSha}</code>
         <span className="plan__commit-subject">{commit.subject}</span>
       </div>
-      {commit.body && (
-        <div className="plan__commit-body">
-          <MarkdownView
-            source={commit.body}
-            basePath=""
-            imageAssets={imageAssets}
-          />
-        </div>
-      )}
+      {commit.body &&
+        (collapsibleBody ? (
+          <details className="plan__commit-fold">
+            <summary className="plan__commit-fold-summary">description</summary>
+            {body}
+          </details>
+        ) : (
+          body
+        ))}
       {commit.files.length > 0 && (
-        <ul className="plan__desc-files">
-          {commit.files.map((p) => (
-            <FileLine
-              key={p}
-              path={p}
-              nodeByPath={nodeByPath}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </ul>
+        <details className="plan__commit-fold">
+          <summary className="plan__commit-fold-summary">
+            files ({commit.files.length})
+          </summary>
+          <ul className="plan__desc-files">
+            {commit.files.map((p) => (
+              <FileLine
+                key={p}
+                path={p}
+                nodeByPath={nodeByPath}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </ul>
+        </details>
       )}
     </li>
   );
