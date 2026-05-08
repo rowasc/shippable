@@ -21,8 +21,9 @@ interface Props {
 interface PositionedEdge extends PlanDiagramEdge {
   fromPoint: { x: number; y: number };
   toPoint: { x: number; y: number };
+  fromBendOffset: number;
+  toBendOffset: number;
   tone: EdgeTone;
-  strokeWidth: number;
   label: string;
 }
 
@@ -150,7 +151,10 @@ function DiagramEdgeView({ edge }: { edge: PositionedEdge }) {
   const startY = edge.fromPoint.y;
   const endX = edge.toPoint.x;
   const endY = edge.toPoint.y;
-  const bend = Math.max(48, Math.abs(endX - startX) / 2);
+  const baseBend = Math.min(48, Math.abs(endX - startX) / 2);
+  const sourceBend = Math.max(16, baseBend + edge.fromBendOffset);
+  const targetBend = Math.max(16, baseBend + edge.toBendOffset);
+  const sign = endX >= startX ? 1 : -1;
   const labelX = startX + (endX - startX) / 2;
   const labelY = startY + (endY - startY) / 2 - 12;
   const labelWidth = Math.max(52, edge.label.length * 7 + 18);
@@ -158,10 +162,9 @@ function DiagramEdgeView({ edge }: { edge: PositionedEdge }) {
   return (
     <g className={`plan-diagram__edge plan-diagram__edge--${edge.tone}`}>
       <path
-        d={`M ${startX} ${startY} C ${startX + bend} ${startY}, ${endX - bend} ${endY}, ${endX} ${endY}`}
+        d={`M ${startX} ${startY} C ${startX + sign * sourceBend} ${startY}, ${endX - sign * targetBend} ${endY}, ${endX} ${endY}`}
         className="plan-diagram__edge-path"
         markerEnd={`url(#plan-diagram-arrow-${edge.tone})`}
-        style={{ strokeWidth: edge.strokeWidth }}
       />
       <rect
         className="plan-diagram__edge-label-bg"
@@ -280,6 +283,10 @@ function positionEdges(
     const to = positions.get(edge.to);
     if (!from || !to) return [];
 
+    const fromCol = nodeById.get(edge.from)?.column ?? 0;
+    const toCol = nodeById.get(edge.to)?.column ?? 0;
+    const isBackward = fromCol > toCol;
+
     const outgoing = outgoingByNode.get(edge.from) ?? [edge];
     const incoming = incomingByNode.get(edge.to) ?? [edge];
     const outgoingIndex = outgoing.findIndex((candidate) => candidate.id === edge.id);
@@ -289,15 +296,16 @@ function positionEdges(
     return [{
       ...edge,
       fromPoint: {
-        x: from.x + NODE_WIDTH,
+        x: isBackward ? from.x : from.x + NODE_WIDTH,
         y: from.y + NODE_HEIGHT / 2 + laneOffset(outgoing.length, outgoingIndex),
       },
       toPoint: {
-        x: to.x,
+        x: isBackward ? to.x + NODE_WIDTH : to.x,
         y: to.y + NODE_HEIGHT / 2 + laneOffset(incoming.length, incomingIndex),
       },
+      fromBendOffset: laneBendOffset(outgoing.length, outgoingIndex),
+      toBendOffset: laneBendOffset(incoming.length, incomingIndex),
       tone: edgeTone(edge),
-      strokeWidth: edgeStrokeWidth(edge.labels.length),
       label,
     }];
   });
@@ -320,15 +328,15 @@ function laneOffset(total: number, index: number): number {
   return (index - (total - 1) / 2) * spacing;
 }
 
+function laneBendOffset(total: number, index: number): number {
+  if (total <= 1) return 0;
+  const stride = 10;
+  return (index - (total - 1) / 2) * stride;
+}
+
 function edgeTone(edge: PlanDiagramEdge): EdgeTone {
-  const key = `${edge.from}>${edge.to}:${edge.labels.join(",")}`;
   let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < edge.from.length; i++) hash = (hash * 31 + edge.from.charCodeAt(i)) >>> 0;
   return EDGE_TONES[hash % EDGE_TONES.length];
 }
 
-function edgeStrokeWidth(labelCount: number): number {
-  if (labelCount >= 3) return 1.4;
-  if (labelCount === 2) return 1.2;
-  return 1;
-}
