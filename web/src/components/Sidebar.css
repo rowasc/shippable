@@ -160,7 +160,8 @@
   font-size: 11px;
   font-family: inherit;
   white-space: pre;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: 200px;
   border-radius: 2px;
 }
 .detached-entry__caption {

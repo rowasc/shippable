@@ -237,6 +237,35 @@ describe("loadPr — outdated comments become DetachedReply", () => {
     expect(d.reply.anchorContext!.length).toBeGreaterThan(0);
   });
 
+  it("caps anchorContext at 10 lines centered on the anchor", async () => {
+    // 30-line diff_hunk simulating a long multi-line comment span.
+    const longBody = Array.from({ length: 30 }, (_, i) => ` line${i + 1}`).join("\n");
+    const longHunk = `@@ -1,30 +1,30 @@\n${longBody}`;
+    const huge = {
+      id: 104,
+      user: { login: "reviewer" },
+      body: "comment on a long range",
+      path: "src/foo.ts",
+      line: null,
+      original_line: 20,
+      start_line: null,
+      original_commit_id: "oldsha2",
+      diff_hunk: longHunk,
+      created_at: "2024-01-01T00:00:00Z",
+      html_url: "https://github.com/owner/repo/pull/42#discussion_r104",
+      side: "RIGHT",
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    stubHappyPath(PR_FILES, [huge as any], ISSUE_COMMENTS);
+    const { prDetached } = await loadPr(COORDS, TOKEN);
+
+    expect(prDetached).toHaveLength(1);
+    const ctx = prDetached[0].reply.anchorContext!;
+    expect(ctx.length).toBeLessThanOrEqual(10);
+    // The window should include the anchor line (newNo === 20).
+    expect(ctx.some((l) => l.newNo === 20)).toBe(true);
+  });
+
   it("comment whose line is no longer in the diff becomes detached too", async () => {
     const offPatch = {
       id: 103,

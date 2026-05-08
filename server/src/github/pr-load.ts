@@ -120,17 +120,41 @@ function buildPositionIndex(
   return index;
 }
 
+/** Reply.anchorContext is documented as "up to 10 lines centered on the
+ *  anchor". We honor that here so the Sidebar's detached snippet stays a
+ *  glance, not a wall of code. */
+const ANCHOR_CONTEXT_BEFORE = 5;
+const ANCHOR_CONTEXT_AFTER = 4;
+
 /**
  * Parse a GitHub `diff_hunk` string (a single unified-diff hunk fragment) into
- * `DiffLine[]` so it can ride on a DetachedReply's `anchorContext`. Reuses the
- * shared diff parser by wrapping the fragment as a minimal valid diff.
+ * `DiffLine[]` and window it to the lines near the comment's anchor. Reuses
+ * the shared diff parser by wrapping the fragment as a minimal valid diff.
+ *
+ * GitHub's `diff_hunk` for a multi-line PR comment can be 30+ lines; without
+ * windowing the detached-entry snippet dominates the sidebar.
  */
-function parseDiffHunkLines(diffHunk: string, path: string): DiffLine[] {
+function parseDiffHunkLines(
+  diffHunk: string,
+  path: string,
+  anchor: { line: number; side: "LEFT" | "RIGHT" },
+): DiffLine[] {
   const wrapped = `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${diffHunk}`;
   const cs = parseDiff(wrapped, { id: "anchor", title: "anchor" });
   const file = cs.files[0];
   if (!file || file.hunks.length === 0) return [];
-  return file.hunks[0].lines;
+  const lines = file.hunks[0].lines;
+
+  // Locate the anchor: RIGHT side comments live on add/context lines (newNo);
+  // LEFT side on del/context lines (oldNo). Fall back to the last line, which
+  // is GitHub's typical convention for diff_hunk.
+  const anchorIdx = lines.findIndex((l) =>
+    anchor.side === "RIGHT" ? l.newNo === anchor.line : l.oldNo === anchor.line,
+  );
+  const center = anchorIdx >= 0 ? anchorIdx : lines.length - 1;
+  const lo = Math.max(0, center - ANCHOR_CONTEXT_BEFORE);
+  const hi = Math.min(lines.length, center + ANCHOR_CONTEXT_AFTER + 1);
+  return lines.slice(lo, hi);
 }
 
 export async function loadPr(
@@ -227,7 +251,12 @@ export async function loadPr(
     if (!hit) {
       // Outdated (line === null) or anchor moved off the patch view —
       // render as a DetachedReply so the user sees the original context.
-      const anchorContext = c.diff_hunk ? parseDiffHunkLines(c.diff_hunk, c.path) : [];
+      const anchorContext = c.diff_hunk
+        ? parseDiffHunkLines(c.diff_hunk, c.path, {
+            line: c.original_line,
+            side: c.side,
+          })
+        : [];
       const detachedReply: Reply = {
         ...baseReply,
         anchorPath: c.path,

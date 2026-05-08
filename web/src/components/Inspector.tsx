@@ -887,7 +887,7 @@ function PrConversationSection({ items }: { items: PrConversationItem[] }) {
         {items.map((item) => (
           <li key={item.id} className="ainote ainote--info">
             <div className="ainote__head">
-              <span className="ainote__sev">@{item.author}</span>
+              <span className="inspector__pr-conv-author">@{item.author}</span>
               <span className="ainote__summary ainote__summary--muted">
                 <time dateTime={item.createdAt} title={item.createdAt}>
                   {humanAgo(item.createdAt)}

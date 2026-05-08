@@ -303,3 +303,7 @@
 .inspector__pr-conv[open] .inspector__pr-conv-summary {
   margin-bottom: 6px;
 }
+.inspector__pr-conv-author {
+  color: var(--blue);
+  font-size: 11px;
+}
