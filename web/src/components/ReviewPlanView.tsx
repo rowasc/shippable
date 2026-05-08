@@ -226,6 +226,7 @@ function MapSection({
           diagram={diagram}
           includeMarkdown={includeMarkdown}
           onToggleMarkdown={onToggleMarkdown}
+          onNavigate={onNavigate}
         />
       )}
     </section>

@@ -60,187 +60,86 @@
 
 .plan-diagram__canvas {
   overflow-x: auto;
-  padding: 10px;
+  padding: 14px;
 }
 
-.plan-diagram__svg {
-  display: block;
-  min-width: 100%;
+.plan-diagram__mermaid {
+  display: flex;
+  justify-content: center;
+  min-height: 64px;
+}
+
+.plan-diagram__mermaid svg {
+  max-width: 100%;
   height: auto;
 }
 
-.plan-diagram__edge-path {
-  fill: none;
-  stroke: color-mix(in srgb, var(--accent) 55%, var(--border));
-  stroke-linecap: round;
-  opacity: 0.92;
-}
-
-.plan-diagram__arrowhead {
-  fill: color-mix(in srgb, var(--accent) 55%, var(--border));
-}
-
-.plan-diagram__arrowhead--accent {
-  fill: color-mix(in srgb, var(--accent) 72%, var(--border));
-}
-
-.plan-diagram__arrowhead--blue {
-  fill: color-mix(in srgb, var(--blue) 70%, var(--border));
-}
-
-.plan-diagram__arrowhead--magenta {
-  fill: color-mix(in srgb, var(--magenta) 70%, var(--border));
-}
-
-.plan-diagram__arrowhead--green {
-  fill: color-mix(in srgb, var(--green) 68%, var(--border));
-}
-
-.plan-diagram__arrowhead--yellow {
-  fill: color-mix(in srgb, var(--yellow) 78%, var(--border));
-}
-
-.plan-diagram__arrowhead--mute {
-  fill: color-mix(in srgb, var(--border) 80%, transparent);
-}
-
-/* Edge styling per kind. references == default tone; imports muted;
- * tests dashed; uses-hook gets the magenta accent; uses-type the blue accent.
- * `data-kind` lets the kind also drive cursor / hover behaviour later. */
-.plan-diagram__edge--imports .plan-diagram__edge-path {
-  stroke: color-mix(in srgb, var(--border) 80%, transparent);
-  stroke-dasharray: 1 4;
-}
-
-.plan-diagram__edge--references .plan-diagram__edge-path {
-  stroke: color-mix(in srgb, var(--accent) 65%, var(--border));
-}
-
-.plan-diagram__edge--tests .plan-diagram__edge-path {
-  stroke: color-mix(in srgb, var(--blue) 70%, var(--border));
-  stroke-dasharray: 5 4;
-}
-
-.plan-diagram__edge--uses-hook .plan-diagram__edge-path {
-  stroke: color-mix(in srgb, var(--magenta) 78%, var(--border));
-}
-
-.plan-diagram__edge--uses-type .plan-diagram__edge-path {
-  stroke: color-mix(in srgb, var(--blue) 65%, var(--border));
-}
-
-.plan-diagram__edge-label-bg {
-  fill: color-mix(in srgb, var(--bg) 92%, transparent);
-  stroke: color-mix(in srgb, var(--border) 80%, transparent);
-  stroke-width: 1;
-}
-
-.plan-diagram__edge-label {
-  fill: var(--fg-dim);
-  font-size: 11px;
-  text-anchor: middle;
-  dominant-baseline: middle;
-}
-
-.plan-diagram__node rect {
-  fill: var(--bg-1);
-  stroke: var(--border);
-  stroke-width: 1.2;
-}
-
-.plan-diagram__node[data-status="added"] rect {
-  fill: color-mix(in srgb, var(--green) 10%, var(--bg-1));
-  stroke: color-mix(in srgb, var(--green) 60%, var(--border));
-}
-
-.plan-diagram__node[data-entry="true"] rect {
-  stroke: color-mix(in srgb, #b7791f 70%, var(--border));
-  stroke-width: 1.8;
-}
-
-.plan-diagram__node[data-test="true"] rect {
-  stroke-dasharray: 4 3;
-}
-
-.plan-diagram__node[data-role="context"] {
-  opacity: 0.55;
-}
-
-.plan-diagram__node[data-role="context"] rect {
-  fill: color-mix(in srgb, var(--bg-1) 80%, transparent);
-  stroke: color-mix(in srgb, var(--border) 60%, transparent);
-  stroke-dasharray: 2 4;
-}
-
-.plan-diagram__node[data-role="context"] .plan-diagram__node-base,
-.plan-diagram__node[data-role="context"] .plan-diagram__node-dir,
-.plan-diagram__node[data-role="context"] .plan-diagram__node-meta {
-  font-style: italic;
-}
-
-.plan-diagram__node-dir {
-  fill: var(--fg-mute);
-  font-size: 11px;
-}
-
-.plan-diagram__node-base {
-  fill: var(--fg);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.plan-diagram__node-glyph {
-  fill: var(--fg);
+.plan-diagram__mermaid .nodeLabel {
   font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
-  dominant-baseline: middle;
+  font-size: 12px;
 }
 
-.plan-diagram__node-shape {
-  fill: var(--fg-mute);
-  font-size: 10px;
+/* Hover affordance — mermaid emits <g class="node clickable"> for nodes
+ * with `click <id>` directives. */
+.plan-diagram__mermaid .node.clickable {
+  cursor: pointer;
 }
 
-.plan-diagram__node-role {
-  fill: var(--fg-dim);
-  font-size: 10px;
-  text-anchor: end;
-  text-transform: lowercase;
-  letter-spacing: 0.04em;
+.plan-diagram__mermaid .node.clickable:hover rect,
+.plan-diagram__mermaid .node.clickable:hover polygon,
+.plan-diagram__mermaid .node.clickable:hover circle {
+  filter: brightness(1.05);
+  stroke-width: 1.6px;
 }
 
-.plan-diagram__node-meta {
-  fill: var(--fg-dim);
-  font-size: 10px;
-  text-anchor: end;
-  text-transform: lowercase;
+.plan-diagram__error {
+  background: color-mix(in srgb, var(--magenta) 10%, var(--bg-1));
+  border: 1px solid color-mix(in srgb, var(--magenta) 35%, var(--border));
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 11px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
 }
 
-/* Role-tone accents on the node frame. Multiple roles share a tone — the
- * glyph + role chip do disambiguation, the tone groups related kinds. */
-.plan-diagram__node[data-tone="accent"] rect {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  stroke: color-mix(in srgb, var(--accent) 50%, var(--border));
+.plan-diagram__error pre {
+  font-size: 11px;
+  margin: 6px 0 0;
+  white-space: pre-wrap;
 }
-.plan-diagram__node[data-tone="blue"] rect {
-  stroke: color-mix(in srgb, var(--blue) 55%, var(--border));
+
+.plan-diagram__legend {
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  padding: 10px 14px 12px;
+  color: var(--fg-dim);
 }
-.plan-diagram__node[data-tone="magenta"] rect {
-  stroke: color-mix(in srgb, var(--magenta) 55%, var(--border));
+
+.plan-diagram__legend-title {
+  color: var(--fg);
+  font-weight: 600;
+  margin-bottom: 6px;
 }
-.plan-diagram__node[data-tone="green"] rect {
-  stroke: color-mix(in srgb, var(--green) 55%, var(--border));
+
+.plan-diagram__legend ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
-.plan-diagram__node[data-tone="yellow"] rect {
-  stroke: color-mix(in srgb, var(--yellow) 55%, var(--border));
+
+.plan-diagram__legend li {
+  line-height: 1.55;
 }
-.plan-diagram__node[data-tone="mute"] rect {
-  stroke: color-mix(in srgb, var(--border) 90%, transparent);
+
+.plan-diagram__legend code {
+  background: var(--bg-3);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 0 4px;
 }
 
 /* Diagram-type tabs. Map is the only enabled tab today; the others are
- * static placeholders and explain why on hover. See plan doc. */
+ * static placeholders and explain why on hover. */
 .plan-diagram__tabs {
   display: flex;
   gap: 2px;

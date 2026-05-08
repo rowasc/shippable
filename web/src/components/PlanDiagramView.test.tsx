@@ -6,7 +6,22 @@ import type { PlanDiagram } from "../planDiagram";
 function makeDiagram(): PlanDiagram {
   return {
     scope: "diff",
-    mermaid: "flowchart LR",
+    mermaid: [
+      "flowchart LR",
+      '  subgraph g0["src"]',
+      '    f0["Cart.php"]',
+      '    f1["Routes.php"]',
+      '    f2["CartTest.php"]',
+      "  end",
+      '  f0 -->|"Cart"| f1',
+      '  f0 -. "Cart (tests)" .-> f2',
+      "  classDef role-entity fill:#e9f9ee,stroke:#1a7f37;",
+      "  classDef role-route fill:#fff1cc,stroke:#9a6700,stroke-width:1.5px;",
+      "  classDef role-test fill:#eef6ff,stroke:#1f6feb,stroke-dasharray:4 3;",
+      "  class f0 role-entity;",
+      "  class f1 role-route;",
+      "  class f2 role-test;",
+    ].join("\n"),
     markdownCount: 0,
     nodes: [
       {
@@ -52,7 +67,7 @@ function makeDiagram(): PlanDiagram {
   };
 }
 
-describe("PlanDiagramView (typed file graph)", () => {
+describe("PlanDiagramView (mermaid renderer)", () => {
   const html = renderToStaticMarkup(
     <PlanDiagramView
       diagram={makeDiagram()}
@@ -61,31 +76,47 @@ describe("PlanDiagramView (typed file graph)", () => {
     />,
   );
 
-  it("renders the role chip per node", () => {
-    expect(html).toContain('data-file-role="entity"');
-    expect(html).toContain('data-file-role="route"');
-    expect(html).toContain('data-file-role="test"');
-  });
-
-  it("renders the shape subtitle when LSP shape is present", () => {
-    expect(html).toContain("1 class");
-    expect(html).toContain("4 properties");
-  });
-
-  it("styles edges by kind", () => {
-    expect(html).toContain("plan-diagram__edge--references");
-    expect(html).toContain("plan-diagram__edge--tests");
-  });
-
-  it("renders the static diagram-type tabs with the three disabled placeholders", () => {
+  it("renders the static diagram-type tab strip with the four disabled placeholders", () => {
     expect(html).toContain("plan-diagram__tab--active");
     expect(html).toContain("Class");
+    expect(html).toContain("State");
     expect(html).toContain("Sequence");
     expect(html).toContain("ER");
     expect(html).toContain('aria-disabled="true"');
   });
 
-  it("surfaces classifier disagreement on the tooltip when pathRole !== fileRole", () => {
+  it("emits the mermaid source augmented with click directives wired to onNavigate", () => {
+    expect(html).toContain("flowchart LR");
+    expect(html).toContain("classDef role-entity");
+    expect(html).toContain("classDef role-route");
+    expect(html).toContain("classDef role-test");
+    // One click directive per node — mermaid resolves the callback name
+    // against window when the diagram is rendered. The source is shown
+    // inside a <code> block so quotes round-trip as `&quot;`.
+    expect(html).toMatch(/click f0 __shippableDiagramClick (?:"|&quot;)src\/Cart\.php(?:"|&quot;)/);
+    expect(html).toMatch(/click f1 __shippableDiagramClick (?:"|&quot;)src\/Routes\.php(?:"|&quot;)/);
+    expect(html).toMatch(/click f2 __shippableDiagramClick (?:"|&quot;)src\/CartTest\.php(?:"|&quot;)/);
+  });
+
+  it("offers a 'copy mermaid source' affordance", () => {
+    expect(html).toContain("Copy Mermaid diagram source");
+  });
+
+  it("does not render the disagreement legend when pathRole === fileRole everywhere", () => {
+    const diagram = makeDiagram();
+    diagram.nodes[0].pathRole = "entity";
+    diagram.nodes[0].fileRole = "entity";
+    const out = renderToStaticMarkup(
+      <PlanDiagramView
+        diagram={diagram}
+        includeMarkdown={false}
+        onToggleMarkdown={() => {}}
+      />,
+    );
+    expect(out).not.toContain("plan-diagram__legend");
+  });
+
+  it("renders the disagreement legend when at least one node was upgraded by LSP", () => {
     const diagram = makeDiagram();
     diagram.nodes[0].pathRole = "code";
     diagram.nodes[0].fileRole = "entity";
@@ -96,7 +127,26 @@ describe("PlanDiagramView (typed file graph)", () => {
         onToggleMarkdown={() => {}}
       />,
     );
-    expect(out).toContain("Classified as entity by LSP shape");
-    expect(out).toContain("path looked like code");
+    expect(out).toContain("plan-diagram__legend");
+    expect(out).toContain("classified as <strong>entity</strong>");
+    expect(out).toContain("path looked like <em>code</em>");
+  });
+
+  it("renders the empty state when the diagram has no nodes", () => {
+    const diagram: PlanDiagram = {
+      scope: "diff",
+      mermaid: "flowchart LR",
+      markdownCount: 0,
+      nodes: [],
+      edges: [],
+    };
+    const out = renderToStaticMarkup(
+      <PlanDiagramView
+        diagram={diagram}
+        includeMarkdown={false}
+        onToggleMarkdown={() => {}}
+      />,
+    );
+    expect(out).toContain("No files in this change.");
   });
 });

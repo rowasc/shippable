@@ -26,6 +26,7 @@
     "esbuild-wasm": "^0.28.0",
     "github-markdown-css": "^5.9.0",
     "hast-util-to-jsx-runtime": "^2.3.6",
+    "mermaid": "^11.14.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.1.0",
