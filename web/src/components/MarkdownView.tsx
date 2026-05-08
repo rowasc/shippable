@@ -1,7 +1,7 @@
 import "./MarkdownView.css";
 import githubMarkdownLightCss from "github-markdown-css/github-markdown-light.css?raw";
 import githubMarkdownDarkCss from "github-markdown-css/github-markdown-dark.css?raw";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkAlert } from "remark-github-blockquote-alert";
@@ -88,24 +88,18 @@ function CodeBlock({
 }
 
 function ShikiBlock({ code, language }: { code: string; language: string }) {
-  const [html, setHtml] = useState<string | null>(null);
+  const [node, setNode] = useState<ReactNode>(null);
 
   useEffect(() => {
     let cancelled = false;
     void highlightCode(code, language).then((result) => {
-      if (!cancelled) setHtml(result.html);
+      if (!cancelled) setNode(result.node);
     });
     return () => { cancelled = true; };
   }, [code, language]);
 
-  if (html) {
-    return (
-      <span
-        className="md-preview__shiki"
-        // Shiki returns a complete <pre><code>…</code></pre> tree.
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    );
+  if (node) {
+    return <span className="md-preview__shiki">{node}</span>;
   }
   return (
     <pre className="md-preview__code-fallback">

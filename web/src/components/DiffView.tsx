@@ -1,5 +1,5 @@
 import "./DiffView.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { highlightLines } from "../highlight";
 import type { DefinitionClickTarget } from "../definitionNav";
 import type { DiffLine } from "../types";
@@ -594,13 +594,13 @@ function ContextLine({
   filePath,
   language,
   line,
-  highlightedHtml,
+  highlightedNode,
   onSymbolClick,
 }: {
   filePath: string;
   language: string;
   line: DiffLine;
-  highlightedHtml?: string;
+  highlightedNode?: ReactNode;
   onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
   return (
@@ -614,7 +614,7 @@ function ContextLine({
         language={language}
         text={line.text}
         sourceLine={line.newNo ?? null}
-        highlightedHtml={highlightedHtml}
+        highlightedNode={highlightedNode}
         onSymbolClick={onSymbolClick}
       />
     </div>
@@ -664,7 +664,7 @@ function FullFileView({
               language={language}
               text={line.text}
               sourceLine={line.newNo ?? null}
-              highlightedHtml={highlightedLines?.[i]}
+              highlightedNode={highlightedLines?.[i]}
               onSymbolClick={onSymbolClick}
             />
           </div>
@@ -679,7 +679,7 @@ function Line({
   language,
   line,
   lineIdx,
-  highlightedHtml,
+  highlightedNode,
   cursorRef,
   onSymbolClick,
 }: {
@@ -687,7 +687,7 @@ function Line({
   language: string;
   line: DiffLineViewModel;
   lineIdx: number;
-  highlightedHtml?: string;
+  highlightedNode?: ReactNode;
   cursorRef?: React.RefObject<HTMLDivElement | null>;
   onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
@@ -717,7 +717,7 @@ function Line({
         language={language}
         text={line.text}
         sourceLine={line.newNo ?? null}
-        highlightedHtml={highlightedHtml}
+        highlightedNode={highlightedNode}
         onSymbolClick={onSymbolClick}
       />
     </div>
@@ -755,7 +755,7 @@ function ContextLinesBlock({
           filePath={path}
           language={language}
           line={line}
-          highlightedHtml={highlightedLines?.[i]}
+          highlightedNode={highlightedLines?.[i]}
           onSymbolClick={onSymbolClick}
         />
       ))}
@@ -799,7 +799,7 @@ function HunkLinesBlock({
           language={language}
           line={line}
           lineIdx={i}
-          highlightedHtml={highlightedLines?.[i]}
+          highlightedNode={highlightedLines?.[i]}
           cursorRef={line.isCursor ? cursorRef : undefined}
           onSymbolClick={onSymbolClick}
         />
@@ -813,17 +813,17 @@ function LineText({
   language,
   text,
   sourceLine,
-  highlightedHtml,
+  highlightedNode,
   onSymbolClick,
 }: {
   filePath: string;
   language: string;
   text: string;
   sourceLine: number | null;
-  highlightedHtml?: string;
+  highlightedNode?: ReactNode;
   onSymbolClick?: (target: DefinitionClickTarget) => void;
 }) {
-  if (!highlightedHtml) {
+  if (!highlightedNode) {
     return <span className="line__text">{text || " "}</span>;
   }
 
@@ -851,8 +851,9 @@ function LineText({
         if (event.key !== "Enter" && event.key !== " ") return;
         activateSymbol(event.target);
       }}
-      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-    />
+    >
+      {highlightedNode}
+    </span>
   );
 }
 
@@ -861,14 +862,14 @@ function useHighlightedLines(
   language: string,
   clickableSymbols?: ReadonlySet<string>,
   allowAnyIdentifier?: boolean,
-): string[] | null {
+): ReactNode[] | null {
   const lineTexts = useMemo(() => lines.map((line) => line.text), [lines]);
   const symbolKey = useMemo(
     () => [...(clickableSymbols ?? [])].sort().join(","),
     [clickableSymbols],
   );
   const requestKey = `${language}::${symbolKey}::${allowAnyIdentifier ? "any" : "known"}\u0000${lineTexts.join("\n")}`;
-  const [result, setResult] = useState<{ key: string; lines: string[] } | null>(null);
+  const [result, setResult] = useState<{ key: string; lines: ReactNode[] } | null>(null);
 
   useEffect(() => {
     let cancelled = false;

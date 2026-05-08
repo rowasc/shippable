@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { Fragment } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Dispatch } from "react";
@@ -51,19 +52,29 @@ vi.mock("../highlight", () => ({
       const clickable = new Set(options?.clickableSymbols ?? []);
       return {
         language: language ?? "text",
-        lines: lines.map((line) => {
+        lines: lines.map((line, lineIdx) => {
           const candidates = options?.allowAnyIdentifier
             ? line.match(/[A-Za-z_$][\w$]*/g) ?? []
             : [...clickable];
           const symbol = candidates.find((candidate) => line.includes(`${candidate}(`))
             ?? candidates.find((candidate) => line.includes(candidate));
-          if (symbol) {
-            return line.replace(
-              symbol,
-              `<span class="shiki-token shiki-token--symbol" data-symbol="${symbol}" data-token-col="7" role="button" tabindex="0">${symbol}</span>`,
-            );
-          }
-          return line;
+          if (!symbol) return line;
+          const idx = line.indexOf(symbol);
+          return (
+            <Fragment key={lineIdx}>
+              {line.slice(0, idx)}
+              <span
+                className="shiki-token shiki-token--symbol"
+                data-symbol={symbol}
+                data-token-col={7}
+                role="button"
+                tabIndex={0}
+              >
+                {symbol}
+              </span>
+              {line.slice(idx + symbol.length)}
+            </Fragment>
+          );
         }),
       };
     },

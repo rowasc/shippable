@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactElement } from "react";
 import { highlightLines } from "./highlight";
+
+function renderLine(node: unknown): string {
+  return renderToStaticMarkup(node as ReactElement);
+}
 
 describe("highlightLines symbol tokens", () => {
   it("marks known function-call symbols as clickable", async () => {
@@ -10,8 +16,9 @@ describe("highlightLines symbol tokens", () => {
       { clickableSymbols: ["loadPrefs"] },
     );
 
-    expect(result.lines[0]).toContain('data-symbol="loadPrefs"');
-    expect(result.lines[0]).toContain("shiki-token--symbol");
+    const html = renderLine(result.lines[0]);
+    expect(html).toContain('data-symbol="loadPrefs"');
+    expect(html).toContain("shiki-token--symbol");
   });
 
   it("does not mark string literals as clickable symbols", async () => {
@@ -22,7 +29,7 @@ describe("highlightLines symbol tokens", () => {
       { clickableSymbols: ["loadPrefs"] },
     );
 
-    expect(result.lines[0]).not.toContain('data-symbol="loadPrefs"');
+    expect(renderLine(result.lines[0])).not.toContain('data-symbol="loadPrefs"');
   });
 
   it("can mark scoped identifiers clickable without fixture symbol metadata", async () => {
@@ -33,7 +40,8 @@ describe("highlightLines symbol tokens", () => {
       { allowAnyIdentifier: true },
     );
 
-    expect(result.lines[0]).toContain('data-symbol="loadPrefs"');
-    expect(result.lines[0]).toContain('data-token-col="7"');
+    const html = renderLine(result.lines[0]);
+    expect(html).toContain('data-symbol="loadPrefs"');
+    expect(html).toContain('data-token-col="7"');
   });
 });

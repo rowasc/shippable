@@ -7,9 +7,18 @@ import type { DiffViewModel } from "../view";
 vi.mock("../highlight", () => ({
   highlightLines: vi.fn(async (lines: string[], language?: string) => ({
     language: language ?? "text",
-    lines: lines.map(
-      () => '<span class="shiki-token shiki-token--symbol" data-symbol="loadPrefs" data-token-col="7" role="button" tabindex="0">loadPrefs</span>',
-    ),
+    lines: lines.map((_line, i) => (
+      <span
+        key={i}
+        className="shiki-token shiki-token--symbol"
+        data-symbol="loadPrefs"
+        data-token-col={7}
+        role="button"
+        tabIndex={0}
+      >
+        loadPrefs
+      </span>
+    )),
   })),
 }));
 
