@@ -6,13 +6,13 @@ Load a GitHub (or GitHub Enterprise) pull request directly into Shippable by pas
 
 ## Try it
 
-Open LoadModal → **From a GitHub PR**, paste a URL like:
+Open LoadModal → **From URL**, paste a URL like:
 
 ```
 https://github.com/wordpress/gutenberg/pull/12345
 ```
 
-Submit. Shippable prompts for a Personal Access Token if one isn't already stored for that host, then loads the PR. The changeset header shows the PR title, state (open / closed / merged), base→head refs, and a **Refresh** button to re-fetch on demand.
+Submit. Shippable accepts HTTPS PR URLs only, prompts for a Personal Access Token if one isn't already stored for that host, then loads the PR. For GitHub Enterprise hosts, Shippable first asks you to confirm that the host is trusted and shows the exact API base URL the token will be sent to. The changeset header shows the PR title, state (open / closed / merged), base→head refs, and a **Refresh** button to re-fetch on demand.
 
 ## Worktree↔PR overlay
 
@@ -42,6 +42,8 @@ All PR comments are read-only and re-fetched with every Refresh — they are not
 ## Token setup
 
 The token modal opens automatically the first time you load a PR from a new host. Enter a PAT with `repo` scope (for private repos; any valid token works for public PRs).
+
+GitHub Enterprise hosts require a one-time local trust confirmation before the token field appears. `github.com` skips this extra step.
 
 - **Desktop app:** token is written to macOS Keychain (`service=shippable, account=GITHUB_TOKEN:<host>`) and survives restarts.
 - **Browser dev mode:** token is held in server memory only; re-enter it whenever the server restarts.

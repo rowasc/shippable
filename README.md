@@ -189,7 +189,7 @@ To load a PR by URL, Shippable needs a PAT for each GitHub host you review from.
 
 The web app never holds the token in `localStorage` or across page reloads — it pushes the token to the local server once, and the server uses it for all GitHub API calls in that session.
 
-**First use:** open LoadModal → "From a GitHub PR", paste a PR URL, and submit. Shippable will prompt for the token if one isn't already stored for that host. Enter it once; the desktop app writes it to Keychain automatically.
+**First use:** open LoadModal → "From URL", paste an HTTPS PR URL, and submit. Shippable will prompt for the token if one isn't already stored for that host. For GitHub Enterprise hosts, Shippable first asks you to confirm the host and shows the exact API base URL the token will be sent to. Enter the token once; the desktop app writes it to Keychain automatically.
 
 **Behind a corporate proxy?** Set `HTTPS_PROXY` (or `https_proxy`) before starting the server and Shippable will route GitHub API calls through it. `NO_PROXY` is honored as a comma-separated list of hostnames (exact or `.suffix` match).
 

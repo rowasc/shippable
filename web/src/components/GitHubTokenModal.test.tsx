@@ -4,7 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { GitHubTokenModal } from "./GitHubTokenModal";
 import { within } from "@testing-library/dom";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 describe("GitHubTokenModal", () => {
   it("calls onSubmit with host and token when the user types a token and clicks save", async () => {
@@ -98,7 +101,45 @@ describe("GitHubTokenModal", () => {
     expect(link.getAttribute("href")).toBe("https://github.com/settings/tokens");
   });
 
-  it("renders a PAT help link pointing to the GHE host for non-github.com hosts", () => {
+  it("requires host trust before showing the token input for non-github.com hosts", () => {
+    render(
+      <GitHubTokenModal
+        host="git.example.com"
+        reason="first-time"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/confirm that git\.example\.com/i)).toBeTruthy();
+    expect(screen.getByText(/https:\/\/git\.example\.com\/api\/v3/i)).toBeTruthy();
+    expect(screen.queryByPlaceholderText("ghp_…")).toBeNull();
+  });
+
+  it("stores GHE host trust and then shows the token form", () => {
+    render(
+      <GitHubTokenModal
+        host="git.example.com"
+        reason="first-time"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /i trust git\.example\.com/i }));
+
+    expect(screen.getByPlaceholderText("ghp_…")).toBeTruthy();
+    expect(window.localStorage.getItem("shippable:githubTrustedHosts:v1")).toBe(
+      JSON.stringify(["git.example.com"]),
+    );
+  });
+
+  it("renders a PAT help link pointing to the GHE host after that host is trusted", () => {
+    window.localStorage.setItem(
+      "shippable:githubTrustedHosts:v1",
+      JSON.stringify(["git.example.com"]),
+    );
+
     render(
       <GitHubTokenModal
         host="git.example.com"
@@ -110,6 +151,7 @@ describe("GitHubTokenModal", () => {
 
     const link = screen.getByRole("link", { name: /how to create a PAT/i });
     expect(link.getAttribute("href")).toBe("https://git.example.com/settings/tokens");
+    expect(screen.getByText(/Token destination:/i)).toBeTruthy();
   });
 
   it("renders into document.body via createPortal (not into the provided container)", () => {

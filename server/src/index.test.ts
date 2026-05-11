@@ -890,6 +890,15 @@ describe("POST /api/github/pr/load", () => {
     expect(r.body.error).toBe("invalid_pr_url");
   });
 
+  it("returns 400 invalid_pr_url for an http:// PR URL", async () => {
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "http://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("invalid_pr_url");
+    expect(r.body.detail).toMatch(/scheme must be https/);
+  });
+
   it("returns 401 github_token_required when no token is stored", async () => {
     const r = await postJson(`${baseUrl}/api/github/pr/load`, {
       prUrl: "https://github.com/owner/repo/pull/1",

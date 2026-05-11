@@ -103,10 +103,16 @@ describe("parsePrUrl", () => {
     expect(() => parsePrUrl("not a url at all")).toThrow(/invalid PR URL/);
   });
 
-  it("throws when the scheme is not http or https (file://)", () => {
+  it("throws when the scheme is http", () => {
+    expect(() =>
+      parsePrUrl("http://github.com/owner/repo/pull/1"),
+    ).toThrow(/invalid PR URL: scheme must be https/);
+  });
+
+  it("throws when the scheme is not https (file://)", () => {
     expect(() =>
       parsePrUrl("file:///owner/repo/pull/1"),
-    ).toThrow(/invalid PR URL: scheme must be http or https/);
+    ).toThrow(/invalid PR URL: scheme must be https/);
   });
 });
 

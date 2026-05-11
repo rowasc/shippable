@@ -21,9 +21,9 @@ export function parsePrUrl(input: string): PrCoords {
     throw new Error(`invalid PR URL: not parseable as a URL`);
   }
 
-  if (url.protocol !== "https:" && url.protocol !== "http:") {
+  if (url.protocol !== "https:") {
     throw new Error(
-      `invalid PR URL: scheme must be http or https (got "${url.protocol}")`,
+      `invalid PR URL: scheme must be https (got "${url.protocol}")`,
     );
   }
 
