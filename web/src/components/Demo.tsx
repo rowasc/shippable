@@ -1649,6 +1649,7 @@ function WorkspaceStage({
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
+            replies: state.replies,
             detachedReplies: state.detachedReplies,
           })}
           onPickFile={(fileId) => {

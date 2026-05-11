@@ -322,6 +322,7 @@ function WorkspaceFrame({
               currentFileId: state.cursor.fileId,
               readLines: state.readLines,
               reviewedFiles: state.reviewedFiles,
+              replies: state.replies,
             })}
             onPickFile={() => {}}
             runs={[]}

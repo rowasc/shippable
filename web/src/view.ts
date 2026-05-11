@@ -347,6 +347,11 @@ export interface SidebarFileItem {
   meterBar: string;
   /** True when this is the file the cursor is currently in. */
   isCurrent: boolean;
+  /**
+   * Number of replies posted across this file's hunks — any thread kind
+   * (user/block/note/hunkSummary/teammate). 0 when the file has none.
+   */
+  commentCount: number;
 }
 
 export interface SidebarDetachedEntry {
@@ -410,10 +415,42 @@ export interface BuildSidebarViewModelArgs {
   readLines: Record<string, Set<number>>;
   reviewedFiles: Set<string>;
   /**
+   * Reply threads, keyed as in `types.ts` (`user:HUNK:LINE`, `block:HUNK:LO-HI`,
+   * `note:HUNK:LINE`, `hunkSummary:HUNK`, `teammate:HUNK`). Used to compute
+   * each file's comment count. Defaults to none.
+   */
+  replies?: Record<string, Reply[]>;
+  /**
    * Replies whose anchor didn't survive the latest reload. Grouped by
    * file path in the output. Pass `[]` when nothing is detached.
    */
   detachedReplies?: DetachedReply[];
+}
+
+/**
+ * Count replies whose thread keys resolve to one of the files. The hunk id
+ * is the segment after the first colon in the key; we assume hunk ids don't
+ * themselves contain `:` (they're `${csId}/${path}#h${idx}` — paths with
+ * colons are a Windows-only edge case we'll handle if it ever surfaces).
+ */
+function buildCommentCounts(
+  files: BuildSidebarViewModelArgs["files"],
+  replies: Record<string, Reply[]>,
+): Map<string, number> {
+  const hunkToFile = new Map<string, string>();
+  for (const f of files) for (const h of f.hunks) hunkToFile.set(h.id, f.id);
+  const counts = new Map<string, number>();
+  for (const [key, list] of Object.entries(replies)) {
+    const firstColon = key.indexOf(":");
+    if (firstColon < 0) continue;
+    const after = firstColon + 1;
+    const secondColon = key.indexOf(":", after);
+    const hunkId = secondColon < 0 ? key.slice(after) : key.slice(after, secondColon);
+    const fileId = hunkToFile.get(hunkId);
+    if (!fileId) continue;
+    counts.set(fileId, (counts.get(fileId) ?? 0) + list.length);
+  }
+  return counts;
 }
 
 function buildDetachedGroups(
@@ -458,8 +495,10 @@ export function buildSidebarViewModel({
   currentFileId,
   readLines,
   reviewedFiles,
+  replies = {},
   detachedReplies = [],
 }: BuildSidebarViewModelArgs): SidebarViewModel {
+  const commentCounts = buildCommentCounts(files, replies);
   const fileItems: SidebarFileItem[] = files.map((f) => {
     const readCoverage = fileCoverage(f, readLines);
     const readPct = Math.round(readCoverage * 100);
@@ -477,6 +516,7 @@ export function buildSidebarViewModel({
       readPct,
       meterBar,
       isCurrent: f.id === currentFileId,
+      commentCount: commentCounts.get(f.id) ?? 0,
     };
   });
 

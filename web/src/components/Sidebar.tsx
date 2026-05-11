@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import "./Sidebar.css";
-import type { SidebarDetachedEntry, SidebarViewModel } from "../view";
+import type { SidebarDetachedEntry, SidebarFileItem, SidebarViewModel } from "../view";
 import { PromptRunsPanel, type PromptRunView } from "./PromptRunsPanel";
 import { CodeText } from "./CodeText";
 import { fetchFileAt } from "../fileAt";
@@ -48,11 +48,7 @@ export function Sidebar({
                   f.isReviewed ? "row--file-reviewed" : ""
                 }`}
                 onClick={() => onPickFile(f.fileId)}
-                title={
-                  f.isReviewed
-                    ? `${f.path} — reviewed · read ${f.readPct}%`
-                    : `${f.path} — read ${f.readPct}%`
-                }
+                title={titleFor(f)}
               >
                 <span
                   className="row__check"
@@ -65,6 +61,15 @@ export function Sidebar({
                   {f.statusChar}
                 </span>
                 <span className="row__label">{f.path}</span>
+                {f.commentCount > 0 && (
+                  <span
+                    className="row__comments"
+                    aria-label={`${f.commentCount} comment${f.commentCount === 1 ? "" : "s"}`}
+                  >
+                    <span className="row__comments-glyph" aria-hidden="true">❝</span>
+                    <span className="row__comments-count">{f.commentCount}</span>
+                  </span>
+                )}
               </button>
             </li>
           ))}
@@ -101,6 +106,16 @@ export function Sidebar({
       )}
     </aside>
   );
+}
+
+function titleFor(f: SidebarFileItem): string {
+  const parts = [f.path];
+  if (f.isReviewed) parts.push("reviewed");
+  parts.push(`read ${f.readPct}%`);
+  if (f.commentCount > 0) {
+    parts.push(`${f.commentCount} comment${f.commentCount === 1 ? "" : "s"}`);
+  }
+  return parts.join(" — ");
 }
 
 function DetachedEntryRow({
