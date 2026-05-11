@@ -80,7 +80,7 @@ fn start_sidecar(app: tauri::AppHandle) {
         }
     };
 
-    let mut sidecar = match app.shell().sidecar("shippable-server") {
+    let sidecar = match app.shell().sidecar("shippable-server") {
         Ok(sidecar) => sidecar,
         Err(e) => {
             log::warn!(
@@ -91,11 +91,13 @@ fn start_sidecar(app: tauri::AppHandle) {
         }
     }
     .env("PORT", port.to_string())
-    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
-
-    if let Some(key) = key {
-        sidecar = sidecar.env("ANTHROPIC_API_KEY", key);
-    }
+    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS)
+    // Always set ANTHROPIC_API_KEY — empty when Keychain has none — so the
+    // sidecar doesn't silently inherit one from the .app's launch
+    // environment. Keychain is the single source of truth on desktop;
+    // letting parent env leak through made the prompt unreachable when the
+    // shell had the var set.
+    .env("ANTHROPIC_API_KEY", key.unwrap_or_default());
 
     // The Bun-compiled sidecar binary can't resolve the `library/` dir
     // from `import.meta.url` the way `tsx` can, so point it at the
