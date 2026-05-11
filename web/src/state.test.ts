@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  buildCommentStops,
   changesetCoverage,
   fileCoverage,
   hunkCoverage,
@@ -20,7 +21,7 @@ import type {
   ReviewState,
   WorktreeSource,
 } from "./types";
-import { noteKey, userCommentKey } from "./types";
+import { blockCommentKey, noteKey, userCommentKey } from "./types";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 // Tiny hand-built ChangeSets keep these tests isolated from the gallery
@@ -239,6 +240,131 @@ describe("MOVE_FILE", () => {
     const sel = reducer(s0, { type: "MOVE_LINE", delta: 1, extend: true });
     const s = reducer(sel, { type: "MOVE_FILE", delta: 1 });
     expect(s.selection).toBeNull();
+  });
+});
+
+// ── MOVE_TO_COMMENT ────────────────────────────────────────────────────────
+// A "comment stop" is any line with an AI note OR with a user/block comment
+// reply. Hand-built fixtures keep the assertions readable; the helper itself
+// is also covered directly via buildCommentStops.
+
+function makeAiNoteLine(text: string): DiffLine {
+  return {
+    kind: "context",
+    text,
+    oldNo: 1,
+    newNo: 1,
+    aiNote: { severity: "info", summary: "n" },
+  };
+}
+
+function csWithComments(): {
+  cs: ChangeSet;
+  replies: Record<string, Reply[]>;
+} {
+  // f1#h1 lines: [ctx, AI@1, ctx], f1#h2 lines: [ctx, ctx, ctx]
+  // f2#h1 lines: [ctx, ctx]; user comment at f2#h1:0; block at f1#h2:1-2.
+  const f1h1: Hunk = {
+    ...makeHunk("cs1/f1#h1", 3),
+    lines: [
+      { kind: "context", text: "a", oldNo: 1, newNo: 1 },
+      makeAiNoteLine("b"),
+      { kind: "context", text: "c", oldNo: 3, newNo: 3 },
+    ],
+  };
+  const cs = makeChangeset("cs1", [
+    makeFile("cs1/f1", [f1h1, makeHunk("cs1/f1#h2", 3)]),
+    makeFile("cs1/f2", [makeHunk("cs1/f2#h1", 2)]),
+  ]);
+  const dummyReply = (id: string): Reply => ({
+    id,
+    author: "you",
+    body: "x",
+    createdAt: "2026-04-30T00:00:00.000Z",
+  });
+  const replies: Record<string, Reply[]> = {
+    [userCommentKey("cs1/f2#h1", 0)]: [dummyReply("r1")],
+    [blockCommentKey("cs1/f1#h2", 1, 2)]: [dummyReply("r2")],
+    // Empty array — should be ignored (no actual comment).
+    [userCommentKey("cs1/f1#h1", 2)]: [],
+  };
+  return { cs, replies };
+}
+
+describe("buildCommentStops", () => {
+  it("orders stops by file → hunk → lineIdx and merges AI + user sources", () => {
+    const { cs, replies } = csWithComments();
+    expect(buildCommentStops(cs, replies)).toEqual([
+      { fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 1 }, // AI note
+      { fileId: "cs1/f1", hunkId: "cs1/f1#h2", lineIdx: 1 }, // block start
+      { fileId: "cs1/f2", hunkId: "cs1/f2#h1", lineIdx: 0 }, // user comment
+    ]);
+  });
+
+  it("ignores reply keys whose array is empty", () => {
+    const { cs, replies } = csWithComments();
+    const stops = buildCommentStops(cs, replies);
+    // The empty user:cs1/f1#h1:2 must NOT appear.
+    expect(stops.some((s) => s.hunkId === "cs1/f1#h1" && s.lineIdx === 2)).toBe(false);
+  });
+});
+
+describe("MOVE_TO_COMMENT", () => {
+  it("jumps from initial cursor to the first comment", () => {
+    const { cs, replies } = csWithComments();
+    const seeded: ReviewState = {
+      ...initialState([cs]),
+      replies,
+    };
+    const s = reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 });
+    expect(s.cursor).toEqual({
+      changesetId: "cs1",
+      fileId: "cs1/f1",
+      hunkId: "cs1/f1#h1",
+      lineIdx: 1,
+    });
+  });
+
+  it("walks across files in order", () => {
+    const { cs, replies } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), replies };
+    const a = reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 });
+    const b = reducer(a, { type: "MOVE_TO_COMMENT", delta: 1 });
+    const c = reducer(b, { type: "MOVE_TO_COMMENT", delta: 1 });
+    expect(b.cursor.hunkId).toBe("cs1/f1#h2");
+    expect(b.cursor.lineIdx).toBe(1);
+    expect(c.cursor.fileId).toBe("cs1/f2");
+    expect(c.cursor.lineIdx).toBe(0);
+  });
+
+  it("clamps at the last comment (no further next)", () => {
+    const { cs, replies } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), replies };
+    let s = seeded;
+    for (let i = 0; i < 5; i++) s = reducer(s, { type: "MOVE_TO_COMMENT", delta: 1 });
+    const stuck = reducer(s, { type: "MOVE_TO_COMMENT", delta: 1 });
+    expect(stuck).toBe(s);
+  });
+
+  it("walks backwards", () => {
+    const { cs, replies } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), replies };
+    const last = reducer(
+      reducer(reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 }), {
+        type: "MOVE_TO_COMMENT",
+        delta: 1,
+      }),
+      { type: "MOVE_TO_COMMENT", delta: 1 },
+    );
+    const prev = reducer(last, { type: "MOVE_TO_COMMENT", delta: -1 });
+    expect(prev.cursor.fileId).toBe("cs1/f1");
+    expect(prev.cursor.hunkId).toBe("cs1/f1#h2");
+    expect(prev.cursor.lineIdx).toBe(1);
+  });
+
+  it("is a no-op when there are no comments", () => {
+    const s = reducer(s0, { type: "MOVE_TO_COMMENT", delta: 1 });
+    expect(s).toBe(s0);
   });
 });
 

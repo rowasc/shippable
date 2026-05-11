@@ -15,6 +15,8 @@ export type ActionId =
   | "MOVE_HUNK_UP"
   | "MOVE_FILE_NEXT"
   | "MOVE_FILE_PREV"
+  | "NEXT_COMMENT"
+  | "PREV_COMMENT"
   | "COLLAPSE_SELECTION"
   | "TOGGLE_HELP"
   | "TOGGLE_INSPECTOR"
@@ -86,6 +88,9 @@ export const KEYMAP: KeyEntry[] = [
   { key: "]",         label: "next file",            group: "navigation", action: "MOVE_FILE_NEXT" },
   { key: "[",         label: "previous file",        group: "navigation", action: "MOVE_FILE_PREV" },
   { key: "Escape", when: "hasSelection", label: "collapse selection", group: "navigation", action: "COLLAPSE_SELECTION" },
+  // Defined here for help-table grouping; the n/N entries are placed below
+  // the guide section so guide-dismiss-with-n still wins when a suggestion
+  // is showing (KEYMAP.find returns the first match).
 
   // ── review ──────────────────────────────────────────────────────────────────
   { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK" },
@@ -99,6 +104,10 @@ export const KEYMAP: KeyEntry[] = [
   { key: "y",      label: "accept guide", group: "guide", action: "ACCEPT_GUIDE",  when: "hasSuggestion" },
   { key: "Escape", label: "dismiss guide", group: "guide", action: "DISMISS_GUIDE", when: "hasSuggestion" },
   { key: "n",      label: "dismiss guide", group: "guide", action: "DISMISS_GUIDE", when: "hasSuggestion" },
+
+  // ── comment navigation (placed after guide so n falls through cleanly) ─────
+  { key: "n",         label: "next comment",     group: "navigation", action: "NEXT_COMMENT", palette: "global" },
+  { key: "N", shift: true, label: "previous comment", group: "navigation", action: "PREV_COMMENT", palette: "global" },
 
   // ── ui ──────────────────────────────────────────────────────────────────────
   { key: "?",      label: "see keybindings",    group: "ui", action: "TOGGLE_HELP", palette: "global" },

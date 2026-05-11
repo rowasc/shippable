@@ -69,6 +69,9 @@ function renderInspector(
   return render(
     <Inspector
       viewModel={minimalViewModel()}
+      commentCount={0}
+      onPrevComment={NOOP}
+      onNextComment={NOOP}
       symbols={EMPTY_SYMBOLS}
       draftBodies={{}}
       onJump={NOOP}
@@ -392,6 +395,9 @@ describe("Inspector — pill cleared on worktreePath change", () => {
     rerender(
       <Inspector
         viewModel={minimalViewModel()}
+        commentCount={0}
+        onPrevComment={NOOP}
+        onNextComment={NOOP}
         symbols={EMPTY_SYMBOLS}
         draftBodies={{}}
         onJump={NOOP}

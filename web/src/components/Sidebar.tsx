@@ -9,6 +9,8 @@ import { guessLanguage } from "../parseDiff";
 interface Props {
   viewModel: SidebarViewModel;
   onPickFile: (fileId: string) => void;
+  /** Click on a file's comment badge — jumps to the first comment in that file. */
+  onJumpToFirstComment: (fileId: string) => void;
   runs: PromptRunView[];
   onCloseRun: (id: string) => void;
   wide: boolean;
@@ -24,6 +26,7 @@ interface Props {
 export function Sidebar({
   viewModel,
   onPickFile,
+  onJumpToFirstComment,
   runs,
   onCloseRun,
   wide,
@@ -42,7 +45,12 @@ export function Sidebar({
         <header className="panel__h">Files</header>
         <ul className="panel__list">
           {viewModel.files.map((f) => (
-            <li key={f.fileId}>
+            <li
+              key={f.fileId}
+              className={`row-wrap ${f.isCurrent ? "row-wrap--active" : ""} ${
+                f.isReviewed ? "row-wrap--file-reviewed" : ""
+              }`}
+            >
               <button
                 className={`row ${f.isCurrent ? "row--active" : ""} ${
                   f.isReviewed ? "row--file-reviewed" : ""
@@ -61,16 +69,19 @@ export function Sidebar({
                   {f.statusChar}
                 </span>
                 <span className="row__label">{f.path}</span>
-                {f.commentCount > 0 && (
-                  <span
-                    className="row__comments"
-                    aria-label={`${f.commentCount} comment${f.commentCount === 1 ? "" : "s"}`}
-                  >
-                    <span className="row__comments-glyph" aria-hidden="true">❝</span>
-                    <span className="row__comments-count">{f.commentCount}</span>
-                  </span>
-                )}
               </button>
+              {f.commentCount > 0 && (
+                <button
+                  type="button"
+                  className="row__comments"
+                  onClick={() => onJumpToFirstComment(f.fileId)}
+                  aria-label={`jump to first of ${f.commentCount} comment${f.commentCount === 1 ? "" : "s"}`}
+                  title={`jump to first comment (${f.commentCount} in this file)`}
+                >
+                  <span className="row__comments-glyph" aria-hidden="true">❝</span>
+                  <span className="row__comments-count">{f.commentCount}</span>
+                </button>
+              )}
             </li>
           ))}
         </ul>

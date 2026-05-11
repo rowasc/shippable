@@ -173,6 +173,10 @@ interface Props {
    * from a GitHub PR; absent/empty otherwise.
    */
   prConversation?: PrConversationItem[];
+  /** Number of comment stops in the changeset; 0 disables the nav buttons. */
+  commentCount: number;
+  onPrevComment: () => void;
+  onNextComment: () => void;
 }
 
 export function Inspector({
@@ -196,6 +200,9 @@ export function Inspector({
   onMergePrOverlay,
   changesetId,
   onAuthError,
+  commentCount,
+  onPrevComment,
+  onNextComment,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -293,6 +300,39 @@ export function Inspector({
       <header className="inspector__h">
         <span className="inspector__h-label">inspector</span>
         <span className="inspector__h-viewer">viewing as @you</span>
+        <span className="inspector__h-nav" aria-label="comment navigation">
+          <button
+            type="button"
+            className="inspector__h-nav-btn"
+            onClick={onPrevComment}
+            disabled={commentCount === 0}
+            title={
+              commentCount === 0
+                ? "no comments in this changeset"
+                : "previous comment (N)"
+            }
+            aria-label="previous comment"
+          >
+            ‹
+          </button>
+          <span className="inspector__h-nav-label">
+            {commentCount === 0 ? "no comments" : `${commentCount} comment${commentCount === 1 ? "" : "s"}`}
+          </span>
+          <button
+            type="button"
+            className="inspector__h-nav-btn"
+            onClick={onNextComment}
+            disabled={commentCount === 0}
+            title={
+              commentCount === 0
+                ? "no comments in this changeset"
+                : "next comment (n)"
+            }
+            aria-label="next comment"
+          >
+            ›
+          </button>
+        </span>
         <span className="inspector__h-hint">
           <kbd>i</kbd> · <kbd>a</kbd> ack · <kbd>r</kbd> reply
         </span>

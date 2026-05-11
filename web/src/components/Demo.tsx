@@ -3,6 +3,7 @@ import { CS_42, REPLIES_42 } from "../fixtures/cs-42-preferences";
 import { CS_72, REPLIES_72 } from "../fixtures/cs-72-docs-preview";
 import { CS_91, REPLIES_91 } from "../fixtures/cs-91-agent-flow";
 import {
+  buildCommentStops,
   initialState,
   reducer,
   changesetCoverage,
@@ -1665,6 +1666,21 @@ function WorkspaceStage({
               },
             });
           }}
+          onJumpToFirstComment={(fileId) => {
+            const stop = buildCommentStops(cs, state.replies).find(
+              (s) => s.fileId === fileId,
+            );
+            if (!stop) return;
+            dispatch({
+              type: "SET_CURSOR",
+              cursor: {
+                changesetId: cs.id,
+                fileId: stop.fileId,
+                hunkId: stop.hunkId,
+                lineIdx: stop.lineIdx,
+              },
+            });
+          }}
           runs={runs}
           onCloseRun={closePromptRun}
           wide={sidebarWide}
@@ -1708,6 +1724,9 @@ function WorkspaceStage({
               replies: state.replies,
               draftingKey,
             })}
+            commentCount={buildCommentStops(cs, state.replies).length}
+            onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
+            onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
             symbols={symbolIndex}
             draftBodies={drafts}
             onJump={jumpTo}

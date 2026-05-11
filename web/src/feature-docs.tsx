@@ -325,6 +325,7 @@ function WorkspaceFrame({
               replies: state.replies,
             })}
             onPickFile={() => {}}
+            onJumpToFirstComment={() => {}}
             runs={[]}
             onCloseRun={() => {}}
             wide={false}
@@ -361,6 +362,9 @@ function WorkspaceFrame({
                 replies: state.replies,
                 draftingKey: null,
               })}
+              commentCount={0}
+              onPrevComment={() => {}}
+              onNextComment={() => {}}
               symbols={symbolIndex}
               draftBodies={{}}
               onJump={() => {}}

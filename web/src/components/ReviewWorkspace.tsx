@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
+import { buildCommentStops, changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
 import type { Action } from "../state";
 import {
   fetchDefinition,
@@ -415,6 +415,12 @@ export function ReviewWorkspace({
         break;
       case "MOVE_FILE_PREV":
         dispatch({ type: "MOVE_FILE", delta: -1 });
+        break;
+      case "NEXT_COMMENT":
+        dispatch({ type: "MOVE_TO_COMMENT", delta: 1 });
+        break;
+      case "PREV_COMMENT":
+        dispatch({ type: "MOVE_TO_COMMENT", delta: -1 });
         break;
       case "TOGGLE_HELP":
         setShowHelp((v) => !v);
@@ -1015,6 +1021,21 @@ export function ReviewWorkspace({
               },
             });
           }}
+          onJumpToFirstComment={(fileId) => {
+            const stop = buildCommentStops(cs, state.replies).find(
+              (s) => s.fileId === fileId,
+            );
+            if (!stop) return;
+            dispatch({
+              type: "SET_CURSOR",
+              cursor: {
+                changesetId: cs.id,
+                fileId: stop.fileId,
+                hunkId: stop.hunkId,
+                lineIdx: stop.lineIdx,
+              },
+            });
+          }}
           runs={runs}
           onCloseRun={closePromptRun}
           wide={sidebarWide}
@@ -1150,6 +1171,9 @@ export function ReviewWorkspace({
               replies: state.replies,
               draftingKey,
             })}
+            commentCount={buildCommentStops(cs, state.replies).length}
+            onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
+            onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
             symbols={symbolIndex}
             draftBodies={drafts}
             onJump={jumpTo}

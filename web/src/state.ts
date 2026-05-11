@@ -105,6 +105,7 @@ export type Action =
     }
   | { type: "MOVE_HUNK"; delta: number }
   | { type: "MOVE_FILE"; delta: number }
+  | { type: "MOVE_TO_COMMENT"; delta: number }
   | { type: "SET_CURSOR"; cursor: Cursor; selection?: LineSelection | null }
   | { type: "COLLAPSE_SELECTION" }
   | { type: "SWITCH_CHANGESET"; changesetId: string }
@@ -236,6 +237,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       return moveHunk(state, action.delta);
     case "MOVE_FILE":
       return moveFile(state, action.delta);
+    case "MOVE_TO_COMMENT":
+      return moveToComment(state, action.delta);
     case "SET_CURSOR": {
       const applied = applyCursor(state, action.cursor, false);
       if (action.selection === undefined) return applied;
@@ -790,6 +793,115 @@ function moveFile(state: ReviewState, delta: number): ReviewState {
       fileId: nextFile.id,
       hunkId: nextFile.hunks[0].id,
       lineIdx: 0,
+    },
+    false,
+  );
+}
+
+/** A line in the changeset that something is anchored to: an AI note, a
+ *  user line comment, or the start of a user block comment. The badge
+ *  click and the n / N navigation walk this list. */
+export interface CommentStop {
+  fileId: string;
+  hunkId: string;
+  lineIdx: number;
+}
+
+/**
+ * Order: changeset file order → hunk order → line index. Replies-derived
+ * stops use `lastIndexOf(":")` to split off the trailing index, so hunk
+ * ids that contain `:` (Windows paths) survive — `buildCommentCounts`
+ * uses an earlier-colon split that doesn't, but a wrong split there is
+ * a missed badge, not a wrong jump.
+ */
+export function buildCommentStops(
+  cs: ChangeSet,
+  replies: Record<string, Reply[]>,
+): CommentStop[] {
+  const userIdxByHunk = new Map<string, Set<number>>();
+  const addIdx = (hunkId: string, idx: number) => {
+    let s = userIdxByHunk.get(hunkId);
+    if (!s) userIdxByHunk.set(hunkId, (s = new Set()));
+    s.add(idx);
+  };
+  for (const [key, list] of Object.entries(replies)) {
+    if (list.length === 0) continue;
+    if (key.startsWith("user:")) {
+      const tail = key.slice("user:".length);
+      const cut = tail.lastIndexOf(":");
+      if (cut < 0) continue;
+      const idx = Number(tail.slice(cut + 1));
+      if (Number.isNaN(idx)) continue;
+      addIdx(tail.slice(0, cut), idx);
+    } else if (key.startsWith("block:")) {
+      const tail = key.slice("block:".length);
+      const cut = tail.lastIndexOf(":");
+      if (cut < 0) continue;
+      const range = tail.slice(cut + 1);
+      const dash = range.indexOf("-");
+      if (dash < 0) continue;
+      const lo = Number(range.slice(0, dash));
+      if (Number.isNaN(lo)) continue;
+      addIdx(tail.slice(0, cut), lo);
+    }
+  }
+
+  const stops: CommentStop[] = [];
+  for (const f of cs.files) {
+    for (const h of f.hunks) {
+      const idxs = new Set<number>(userIdxByHunk.get(h.id) ?? []);
+      h.lines.forEach((l, i) => {
+        if (l.aiNote) idxs.add(i);
+      });
+      [...idxs]
+        .sort((a, b) => a - b)
+        .forEach((idx) => stops.push({ fileId: f.id, hunkId: h.id, lineIdx: idx }));
+    }
+  }
+  return stops;
+}
+
+function moveToComment(state: ReviewState, delta: number): ReviewState {
+  const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
+  const stops = buildCommentStops(cs, state.replies);
+  if (stops.length === 0) return state;
+
+  const cur = state.cursor;
+  const fileOrder = new Map(cs.files.map((f, i) => [f.id, i]));
+  const hunkOrder = new Map<string, Map<string, number>>();
+  for (const f of cs.files) {
+    hunkOrder.set(f.id, new Map(f.hunks.map((h, i) => [h.id, i])));
+  }
+  const cmpToCursor = (s: CommentStop): number => {
+    const fi = fileOrder.get(s.fileId)!;
+    const fc = fileOrder.get(cur.fileId)!;
+    if (fi !== fc) return fi - fc;
+    const hi = hunkOrder.get(s.fileId)!.get(s.hunkId)!;
+    const hc = hunkOrder.get(cur.fileId)!.get(cur.hunkId) ?? -1;
+    if (hi !== hc) return hi - hc;
+    return s.lineIdx - cur.lineIdx;
+  };
+
+  let target: CommentStop | undefined;
+  if (delta > 0) {
+    target = stops.find((s) => cmpToCursor(s) > 0);
+  } else {
+    for (let i = stops.length - 1; i >= 0; i--) {
+      if (cmpToCursor(stops[i]) < 0) {
+        target = stops[i];
+        break;
+      }
+    }
+  }
+  if (!target) return state;
+
+  return applyCursor(
+    state,
+    {
+      changesetId: cur.changesetId,
+      fileId: target.fileId,
+      hunkId: target.hunkId,
+      lineIdx: target.lineIdx,
     },
     false,
   );
