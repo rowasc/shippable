@@ -93,7 +93,7 @@ export const KEYMAP: KeyEntry[] = [
   // is showing (KEYMAP.find returns the first match).
 
   // ── review ──────────────────────────────────────────────────────────────────
-  { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK" },
+  { key: "a", label: "ack / un-ack AI note on current line", group: "review", action: "TOGGLE_ACK", when: "lineHasAiNote" },
   { key: "r", label: "reply to AI note on current line",     group: "review", action: "START_REPLY",   when: "lineHasAiNote" },
   { key: "c", label: "start a new comment on current line",  group: "review", action: "START_COMMENT" },
   { key: "e", label: "run current hunk (or block selection) in code runner", group: "review", action: "RUN_SELECTION" },

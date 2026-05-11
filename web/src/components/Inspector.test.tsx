@@ -72,6 +72,7 @@ function renderInspector(
       commentCount={0}
       onPrevComment={NOOP}
       onNextComment={NOOP}
+      lineHasAiNote={false}
       symbols={EMPTY_SYMBOLS}
       draftBodies={{}}
       onJump={NOOP}
@@ -398,6 +399,7 @@ describe("Inspector — pill cleared on worktreePath change", () => {
         commentCount={0}
         onPrevComment={NOOP}
         onNextComment={NOOP}
+        lineHasAiNote={false}
         symbols={EMPTY_SYMBOLS}
         draftBodies={{}}
         onJump={NOOP}

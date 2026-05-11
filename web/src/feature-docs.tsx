@@ -365,6 +365,7 @@ function WorkspaceFrame({
               commentCount={0}
               onPrevComment={() => {}}
               onNextComment={() => {}}
+              lineHasAiNote={!!line?.aiNote}
               symbols={symbolIndex}
               draftBodies={{}}
               onJump={() => {}}

@@ -1727,6 +1727,7 @@ function WorkspaceStage({
             commentCount={buildCommentStops(cs, state.replies).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
             onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
+            lineHasAiNote={!!line?.aiNote}
             symbols={symbolIndex}
             draftBodies={drafts}
             onJump={jumpTo}

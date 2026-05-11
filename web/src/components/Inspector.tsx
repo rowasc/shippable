@@ -177,6 +177,8 @@ interface Props {
   commentCount: number;
   onPrevComment: () => void;
   onNextComment: () => void;
+  /** Cursor sits on a line with an AI note — gates the a / r hint chips. */
+  lineHasAiNote: boolean;
 }
 
 export function Inspector({
@@ -203,6 +205,7 @@ export function Inspector({
   commentCount,
   onPrevComment,
   onNextComment,
+  lineHasAiNote,
 }: Props) {
   const vm = viewModel;
   const draftFor = (key: string) => draftBodies[key] ?? "";
@@ -334,7 +337,12 @@ export function Inspector({
           </button>
         </span>
         <span className="inspector__h-hint">
-          <kbd>i</kbd> · <kbd>a</kbd> ack · <kbd>r</kbd> reply
+          <kbd>i</kbd>
+          {lineHasAiNote && (
+            <>
+              {" · "}<kbd>a</kbd> ack · <kbd>r</kbd> reply
+            </>
+          )}
         </span>
       </header>
 
