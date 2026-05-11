@@ -46,18 +46,13 @@ body,
      topbar might not span the full viewport (split panes, embedded chrome). */
   container: topbar / inline-size;
 }
-.topbar__metadata,
-.topbar__actions {
+.topbar__metadata {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-}
-/* Below ~870px the plan chip and def chip can't fit inside the metadata
-   column. Clip cleanly at the column boundary instead of letting them
-   render over the actions cluster. Step 3 will move chips into a
-   priority+ overflow menu. */
-.topbar__metadata {
+  /* Clip overflowing children (plan chip, def chip) at the column boundary
+     instead of letting them render over the actions cluster on the right. */
   overflow: hidden;
 }
 .topbar__brand {
