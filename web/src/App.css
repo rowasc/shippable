@@ -31,11 +31,15 @@ body,
 .topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   min-width: 0;
+  /* Establish a query container so descendants can adapt to the topbar's
+     own width rather than the window's. Survives future layouts where the
+     topbar might not span the full viewport (split panes, embedded chrome). */
+  container: topbar / inline-size;
 }
 .topbar__brand {
   color: var(--magenta);
@@ -75,6 +79,12 @@ body,
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Stay readable when the topbar shrinks: ellipsize before collapsing
+     past ~11 chars, instead of squishing to a single letter or wrapping. */
+  min-width: 11ch;
 }
 .topbar__meta-chip--ok {
   color: var(--green);
@@ -133,7 +143,6 @@ body,
   padding: 1px 8px;
   border-radius: 2px;
   cursor: pointer;
-  margin-left: 10px;
   flex-shrink: 0;
 }
 .topbar__btn:hover:not(:disabled) {
@@ -155,6 +164,14 @@ body,
 .topbar__btn kbd {
   color: var(--fg-mute);
 }
+/* When the topbar gets crowded the kbd hints are the cheapest thing to
+   drop — the title attribute on each button still spells out the
+   shortcut. Scoped to the topbar's own width via container queries. */
+@container topbar (max-width: 1100px) {
+  .topbar__btn kbd {
+    display: none;
+  }
+}
 /* Destructive action — visible at rest, not just on hover. Borders the
    button in red but dimmed; sits with extra left margin so it doesn't
    sit flush against benign neighbors like 'help'. */
@@ -162,7 +179,7 @@ body,
   color: var(--red);
   border-color: var(--red);
   opacity: 0.55;
-  margin-left: 18px;
+  margin-left: 8px;
 }
 .topbar__btn--danger:hover:not(:disabled) {
   color: var(--red);

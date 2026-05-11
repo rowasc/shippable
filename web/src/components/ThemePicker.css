@@ -13,6 +13,16 @@
   color: var(--fg-mute);
 }
 
+/* Below ~1200px the topbar gets crowded enough that the destructive
+   reset button starts clipping. The select itself has an aria-label, so
+   hide the redundant visible label first. Scoped to the topbar's own
+   width — picker is always rendered inside the topbar query container. */
+@container topbar (max-width: 1200px) {
+  .theme-picker__label {
+    display: none;
+  }
+}
+
 .theme-picker__select {
   background: var(--bg-3);
   border: 1px solid var(--border);
