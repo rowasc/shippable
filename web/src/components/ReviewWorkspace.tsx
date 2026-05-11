@@ -25,7 +25,7 @@ import { RangePicker } from "./RangePicker";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
 import { ThemePicker } from "./ThemePicker";
-import { TopbarActions, type TopbarAction } from "./TopbarActions";
+import { TopbarActions } from "./TopbarActions";
 import { PromptPicker } from "./PromptPicker";
 import { CommandPalette } from "./CommandPalette";
 import { type PromptRunView } from "./PromptRunsPanel";
@@ -855,35 +855,74 @@ export function ReviewWorkspace({
             node: <ThemePicker value={themeId} onChange={setThemeId} />,
             menuLabel: "theme",
           }}
-          items={buildTopbarActions({
-            showInspector,
-            toggleInspector: () => {
-              flashMouseTip("i", "the inspector");
-              setShowInspector((v) => !v);
+          items={[
+            {
+              id: "inspector",
+              label: "inspector",
+              glyph: "◫",
+              kbd: "i",
+              title: "toggle the inspector (i)",
+              active: showInspector,
+              priority: 30,
+              onClick: () => {
+                flashMouseTip("i", "the inspector");
+                setShowInspector((v) => !v);
+              },
             },
-            openRunner: () => {
-              flashMouseTip("⇧R", "the free code runner");
-              setFreeRunnerOpen(true);
+            {
+              id: "run",
+              label: "run",
+              glyph: "▷",
+              kbd: "⇧R",
+              title: "open a free code runner — type or paste a snippet (shift+R)",
+              priority: 20,
+              onClick: () => {
+                flashMouseTip("⇧R", "the free code runner");
+                setFreeRunnerOpen(true);
+              },
             },
-            openLoad: () => {
-              flashMouseTip("⇧L", "load changeset");
-              setShowLoad(true);
+            {
+              id: "load",
+              label: "load",
+              glyph: "+",
+              kbd: "⇧L",
+              title: "load a changeset from URL, file, or paste (shift+L)",
+              priority: 50,
+              onClick: () => {
+                flashMouseTip("⇧L", "load changeset");
+                setShowLoad(true);
+              },
             },
-            openHelp: () => {
-              flashMouseTip("?", "help");
-              setShowHelp(true);
+            {
+              id: "help",
+              label: "help",
+              kbd: "?",
+              title: "open shortcut help (?)",
+              priority: 10,
+              onClick: () => {
+                flashMouseTip("?", "help");
+                setShowHelp(true);
+              },
             },
-            resetReview: () => {
-              if (
-                window.confirm(
-                  "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
-                )
-              ) {
-                clearSession();
-                window.location.reload();
-              }
+            {
+              id: "reset",
+              label: "reset review",
+              title: "clear persisted progress and reload",
+              danger: true,
+              pinned: true,
+              priority: 100,
+              onClick: () => {
+                if (
+                  window.confirm(
+                    "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
+                  )
+                ) {
+                  clearSession();
+                  window.location.reload();
+                }
+              },
             },
-          })}
+          ]}
         />
       </header>
 
@@ -1926,67 +1965,6 @@ function PrTopbarMeta({
       </button>
     </>
   );
-}
-
-/* Priority order for the topbar actions: the destructive reset is pinned
- * (never overflows). Load is the gateway to switching changesets so it
- * survives next. Help is the first to drop into the kebab. The leading
- * theme picker collapses before any of these. */
-function buildTopbarActions(opts: {
-  showInspector: boolean;
-  toggleInspector: () => void;
-  openRunner: () => void;
-  openLoad: () => void;
-  openHelp: () => void;
-  resetReview: () => void;
-}): TopbarAction[] {
-  return [
-    {
-      id: "inspector",
-      label: "inspector",
-      glyph: "◫",
-      kbd: "i",
-      title: "toggle the inspector (i)",
-      active: opts.showInspector,
-      priority: 30,
-      onClick: opts.toggleInspector,
-    },
-    {
-      id: "run",
-      label: "run",
-      glyph: "▷",
-      kbd: "⇧R",
-      title: "open a free code runner — type or paste a snippet (shift+R)",
-      priority: 20,
-      onClick: opts.openRunner,
-    },
-    {
-      id: "load",
-      label: "load",
-      glyph: "+",
-      kbd: "⇧L",
-      title: "load a changeset from URL, file, or paste (shift+L)",
-      priority: 50,
-      onClick: opts.openLoad,
-    },
-    {
-      id: "help",
-      label: "help",
-      kbd: "?",
-      title: "open shortcut help (?)",
-      priority: 10,
-      onClick: opts.openHelp,
-    },
-    {
-      id: "reset",
-      label: "reset review",
-      title: "clear persisted progress and reload",
-      danger: true,
-      pinned: true,
-      priority: 100,
-      onClick: opts.resetReview,
-    },
-  ];
 }
 
 function formatHHMM(iso: string): string {

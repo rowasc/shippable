@@ -156,9 +156,8 @@ export function TopbarActions({ items, leading }: Props) {
   const showKebab = overflowItems.length > 0 || (leadingOverflowed && !!leading);
 
   // Close the menu if its contents disappear (everything fits again).
-  useEffect(() => {
-    if (!showKebab && menuOpen) setMenuOpen(false);
-  }, [showKebab, menuOpen]);
+  // Reset during render rather than in an effect to avoid a cascading render.
+  if (!showKebab && menuOpen) setMenuOpen(false);
 
   return (
     <div ref={containerRef} className="topbar-actions">
