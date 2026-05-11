@@ -117,6 +117,20 @@
   color: var(--accent);
 }
 
+.key-setup__shell {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.key-setup__shell code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--fg);
+}
+
 .key-setup__saved-title {
   color: var(--accent);
   margin: 0 0 12px;

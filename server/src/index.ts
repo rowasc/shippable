@@ -148,7 +148,12 @@ export function createApp(): Server {
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(
+        JSON.stringify({
+          ok: true,
+          anthropic: process.env.ANTHROPIC_API_KEY ? "present" : "missing",
+        }),
+      );
       return;
     }
     writeCorsHeaders(res, origin);
@@ -1538,10 +1543,14 @@ function writeCorsHeaders(res: ServerResponse, origin: string | null) {
 
 function main() {
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.error(
-      "[server] ANTHROPIC_API_KEY is not set in the environment. See README — recommended path on macOS is `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
+    // AI-backed endpoints (/api/plan, /api/review) return 503 individually;
+    // worktree ingest, prompt library, and the rule-based plan don't need a
+    // key, so refusing to boot just to enforce the AI key punishes the
+    // non-AI paths. The web gate surfaces the missing-key state via
+    // /api/health.
+    console.warn(
+      "[server] ANTHROPIC_API_KEY is not set; AI-backed endpoints will return 503 until one is provided. On macOS: `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
     );
-    process.exit(1);
   }
   const server = createApp();
   server.listen(PORT, HOST, () => {
