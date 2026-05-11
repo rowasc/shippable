@@ -138,6 +138,15 @@
   color: var(--accent);
   border-color: var(--accent);
 }
+.modal__btn--danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+.modal__btn--danger:hover {
+  color: var(--red);
+  border-color: var(--red);
+  background: var(--red-bg);
+}
 .modal__btn:disabled {
   color: var(--fg-mute);
   border-color: var(--border);

@@ -28,6 +28,7 @@ import { ThemePicker } from "./ThemePicker";
 import { TopbarActions } from "./TopbarActions";
 import { PromptPicker } from "./PromptPicker";
 import { CommandPalette } from "./CommandPalette";
+import { ConfirmModal } from "./ConfirmModal";
 import { type PromptRunView } from "./PromptRunsPanel";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
 import { runPrompt } from "../promptRun";
@@ -112,6 +113,7 @@ export function ReviewWorkspace({
   liveReloadBar,
 }: Props) {
   const [showHelp, setShowHelp] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
   const [showRangePicker, setShowRangePicker] = useState(false);
@@ -911,16 +913,7 @@ export function ReviewWorkspace({
               danger: true,
               pinned: true,
               priority: 100,
-              onClick: () => {
-                if (
-                  window.confirm(
-                    "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
-                  )
-                ) {
-                  clearSession();
-                  window.location.reload();
-                }
-              },
+              onClick: () => setShowResetConfirm(true),
             },
           ]}
         />
@@ -1524,6 +1517,19 @@ export function ReviewWorkspace({
             setShowCommandPalette(false);
             runAction(action);
           }}
+        />
+      )}
+      {showResetConfirm && (
+        <ConfirmModal
+          title="Reset review session?"
+          message="Read marks, sign-offs, comments, and drafts will be cleared."
+          confirmLabel="reset"
+          danger
+          onConfirm={() => {
+            clearSession();
+            window.location.reload();
+          }}
+          onCancel={() => setShowResetConfirm(false)}
         />
       )}
       {showHelp && (
