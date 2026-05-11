@@ -28,10 +28,15 @@ body,
 }
 
 /* topbar ------------------------------------------------------------------ */
+/* Split layout: metadata absorbs all the shrinking (minmax(0,1fr)) while
+   actions stay at their natural width. Each region is its own flex row,
+   so title ellipsizing on the left never squeezes the destructive reset
+   on the right. */
 .topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
@@ -40,6 +45,20 @@ body,
      own width rather than the window's. Survives future layouts where the
      topbar might not span the full viewport (split panes, embedded chrome). */
   container: topbar / inline-size;
+}
+.topbar__metadata,
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* Below ~870px the plan chip and def chip can't fit inside the metadata
+   column. Clip cleanly at the column boundary instead of letting them
+   render over the actions cluster. Step 3 will move chips into a
+   priority+ overflow menu. */
+.topbar__metadata {
+  overflow: hidden;
 }
 .topbar__brand {
   color: var(--magenta);
@@ -119,10 +138,6 @@ body,
   padding: 0;
   text-decoration: underline;
 }
-.topbar__spacer {
-  flex: 1;
-  min-width: 0;
-}
 .topbar__author {
   color: var(--blue);
   white-space: nowrap;
@@ -173,8 +188,8 @@ body,
   }
 }
 /* Destructive action — visible at rest, not just on hover. Borders the
-   button in red but dimmed; sits with extra left margin so it doesn't
-   sit flush against benign neighbors like 'help'. */
+   button in red but dimmed; an extra left margin separates it from the
+   benign neighbors like 'help' inside the actions cluster. */
 .topbar__btn--danger {
   color: var(--red);
   border-color: var(--red);

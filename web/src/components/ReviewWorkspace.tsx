@@ -794,121 +794,124 @@ export function ReviewWorkspace({
   return (
     <div className="app">
       <header className="topbar">
-        <span className="topbar__brand">shippable</span>
-        <span className="topbar__sep">│</span>
-        <span className="topbar__id">{cs.id}</span>
-        <span className="topbar__title">
-          {cs.prSource ? cs.prSource.title : cs.title}
-        </span>
-        <PlanChip
-          isOpen={showPlan}
-          plan={plan}
-          reviewedFiles={state.reviewedFiles}
-          onToggle={() => {
-            flashMouseTip("p", "the review plan");
-            setShowPlan((v) => !v);
-          }}
-        />
-        <span className="topbar__sep">│</span>
-        {cs.prSource ? (
-          <PrTopbarMeta
-            prSource={cs.prSource}
-            refreshBusy={prRefreshBusy}
-            onRefresh={() => handlePrRefresh(cs.prSource!.htmlUrl)}
+        <div className="topbar__metadata">
+          <span className="topbar__brand">shippable</span>
+          <span className="topbar__sep">│</span>
+          <span className="topbar__id">{cs.id}</span>
+          <span className="topbar__title">
+            {cs.prSource ? cs.prSource.title : cs.title}
+          </span>
+          <PlanChip
+            isOpen={showPlan}
+            plan={plan}
+            reviewedFiles={state.reviewedFiles}
+            onToggle={() => {
+              flashMouseTip("p", "the review plan");
+              setShowPlan((v) => !v);
+            }}
           />
-        ) : (
-          <>
-            <span className="topbar__branch">
-              {cs.branch} → {cs.base}
-            </span>
-            {cs.worktreeSource && (
-              <button
-                type="button"
-                className={`topbar__btn topbar__btn--range ${showRangePicker ? "topbar__btn--on" : ""}`}
-                onClick={() => setShowRangePicker((v) => !v)}
-                title="pick a SHA range to review"
-                disabled={rangePickerBusy}
-              >
-                <span className="topbar__btn-label">⇄ range</span>
-              </button>
-            )}
-          </>
-        )}
-        <DefinitionStatusChip
-          currentSource={currentSource}
-          fileLanguage={file.language}
-          capabilities={definitionCapabilities}
-          fetchError={definitionCapabilitiesError}
-        />
-        <span className="topbar__spacer" />
-        <span className="topbar__author">@{cs.author}</span>
-        <ThemePicker value={themeId} onChange={setThemeId} />
-        <button
-          type="button"
-          className={`topbar__btn ${showInspector ? "topbar__btn--on" : ""}`}
-          onClick={() => {
-            flashMouseTip("i", "the inspector");
-            setShowInspector((v) => !v);
-          }}
-          title="toggle the inspector (i)"
-        >
-          <span className="topbar__btn-label">◫ inspector</span>
-          <kbd>i</kbd>
-        </button>
-        <button
-          type="button"
-          className="topbar__btn"
-          onClick={() => {
-            flashMouseTip("⇧R", "the free code runner");
-            setFreeRunnerOpen(true);
-          }}
-          title="open a free code runner — type or paste a snippet (shift+R)"
-        >
-          <span className="topbar__btn-label">▷ run</span>
-          <kbd>⇧R</kbd>
-        </button>
-        <button
-          type="button"
-          className="topbar__btn"
-          onClick={() => {
-            flashMouseTip("⇧L", "load changeset");
-            setShowLoad(true);
-          }}
-          title="load a changeset from URL, file, or paste (shift+L)"
-        >
-          <span className="topbar__btn-label">+ load</span>
-          <kbd>⇧L</kbd>
-        </button>
-        <button
-          type="button"
-          className="topbar__btn"
-          onClick={() => {
-            flashMouseTip("?", "help");
-            setShowHelp(true);
-          }}
-          title="open shortcut help (?)"
-        >
-          <span className="topbar__btn-label">help</span>
-          <kbd>?</kbd>
-        </button>
-        <button
-          type="button"
-          className="topbar__btn topbar__btn--danger"
-          onClick={() => {
-            if (
-              window.confirm(
-                "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
-              )
-            ) {
-              clearSession();
-              window.location.reload();
-            }
-          }}
-          title="clear persisted progress and reload"
-          aria-label="reset review session (destructive)"
-        >
-          <span className="topbar__btn-label">reset review</span>
-        </button>
+          <span className="topbar__sep">│</span>
+          {cs.prSource ? (
+            <PrTopbarMeta
+              prSource={cs.prSource}
+              refreshBusy={prRefreshBusy}
+              onRefresh={() => handlePrRefresh(cs.prSource!.htmlUrl)}
+            />
+          ) : (
+            <>
+              <span className="topbar__branch">
+                {cs.branch} → {cs.base}
+              </span>
+              {cs.worktreeSource && (
+                <button
+                  type="button"
+                  className={`topbar__btn topbar__btn--range ${showRangePicker ? "topbar__btn--on" : ""}`}
+                  onClick={() => setShowRangePicker((v) => !v)}
+                  title="pick a SHA range to review"
+                  disabled={rangePickerBusy}
+                >
+                  <span className="topbar__btn-label">⇄ range</span>
+                </button>
+              )}
+            </>
+          )}
+          <DefinitionStatusChip
+            currentSource={currentSource}
+            fileLanguage={file.language}
+            capabilities={definitionCapabilities}
+            fetchError={definitionCapabilitiesError}
+          />
+          <span className="topbar__author">@{cs.author}</span>
+        </div>
+        <div className="topbar__actions">
+          <ThemePicker value={themeId} onChange={setThemeId} />
+          <button
+            type="button"
+            className={`topbar__btn ${showInspector ? "topbar__btn--on" : ""}`}
+            onClick={() => {
+              flashMouseTip("i", "the inspector");
+              setShowInspector((v) => !v);
+            }}
+            title="toggle the inspector (i)"
+          >
+            <span className="topbar__btn-label">◫ inspector</span>
+            <kbd>i</kbd>
+          </button>
+          <button
+            type="button"
+            className="topbar__btn"
+            onClick={() => {
+              flashMouseTip("⇧R", "the free code runner");
+              setFreeRunnerOpen(true);
+            }}
+            title="open a free code runner — type or paste a snippet (shift+R)"
+          >
+            <span className="topbar__btn-label">▷ run</span>
+            <kbd>⇧R</kbd>
+          </button>
+          <button
+            type="button"
+            className="topbar__btn"
+            onClick={() => {
+              flashMouseTip("⇧L", "load changeset");
+              setShowLoad(true);
+            }}
+            title="load a changeset from URL, file, or paste (shift+L)"
+          >
+            <span className="topbar__btn-label">+ load</span>
+            <kbd>⇧L</kbd>
+          </button>
+          <button
+            type="button"
+            className="topbar__btn"
+            onClick={() => {
+              flashMouseTip("?", "help");
+              setShowHelp(true);
+            }}
+            title="open shortcut help (?)"
+          >
+            <span className="topbar__btn-label">help</span>
+            <kbd>?</kbd>
+          </button>
+          <button
+            type="button"
+            className="topbar__btn topbar__btn--danger"
+            onClick={() => {
+              if (
+                window.confirm(
+                  "Reset this review session? Read marks, sign-offs, comments, and drafts will be cleared.",
+                )
+              ) {
+                clearSession();
+                window.location.reload();
+              }
+            }}
+            title="clear persisted progress and reload"
+            aria-label="reset review session (destructive)"
+          >
+            <span className="topbar__btn-label">reset review</span>
+          </button>
+        </div>
       </header>
 
       {showRangePicker && cs.worktreeSource && (
