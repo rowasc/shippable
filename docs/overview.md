@@ -17,10 +17,10 @@ A code review tool that walks you through a diff. Built for the case where you j
 
 ## What it isn't yet
 
-- It only takes pasted or uploaded diffs. No URL ingest, no GitHub/GitLab integration.
+- GitHub PR ingest is here; GitLab isn't. No write-back to the host yet — reviews don't post comments back to the PR.
 - Reviews live in localStorage. Nothing syncs anywhere; teammates can't see each other's reviews.
 - Only Claude. The server defaults to `claude-sonnet-4-6`; override with the `CLAUDE_MODEL` env var.
-- No tests, no CI. `npm run build` is the typecheck.
+- No CI yet. Tests exist (vitest, under `web/` and `server/`) but nothing runs them on push.
 - The `.dmg` is unsigned.
 
 ## Why it exists
