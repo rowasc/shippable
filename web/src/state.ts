@@ -7,6 +7,7 @@ import type {
   DiffFile,
   Hunk,
   LineSelection,
+  ParsedReplyKey,
   Reply,
   ReviewState,
 } from "./types";
@@ -15,6 +16,7 @@ import {
   hunkSummaryReplyKey,
   lineNoteReplyKey,
   noteKey,
+  parseReplyKey,
   teammateReplyKey,
   userCommentKey,
 } from "./types";
@@ -634,56 +636,6 @@ function reloadChangeset(
   };
 }
 
-type ParsedReplyKey =
-  | { kind: "note"; hunkId: string; lineIdx: number }
-  | { kind: "user"; hunkId: string; lineIdx: number }
-  | { kind: "block"; hunkId: string; lo: number; hi: number; lineIdx: number }
-  | { kind: "hunkSummary"; hunkId: string; lineIdx: 0 }
-  | { kind: "teammate"; hunkId: string; lineIdx: 0 };
-
-/**
- * Reply keys embed a hunkId that can itself contain `:` and `/` (see
- * types.ts). Split off the prefix first; for hunk-line keys, the line
- * (or lo-hi range) is the trailing component after the LAST colon.
- */
-function parseReplyKey(key: string): ParsedReplyKey | null {
-  const colon = key.indexOf(":");
-  if (colon < 0) return null;
-  const prefix = key.slice(0, colon);
-  const rest = key.slice(colon + 1);
-  switch (prefix) {
-    case "note":
-    case "user": {
-      const last = rest.lastIndexOf(":");
-      if (last < 0) return null;
-      const hunkId = rest.slice(0, last);
-      const lineIdx = parseInt(rest.slice(last + 1), 10);
-      if (!Number.isFinite(lineIdx)) return null;
-      return prefix === "note"
-        ? { kind: "note", hunkId, lineIdx }
-        : { kind: "user", hunkId, lineIdx };
-    }
-    case "block": {
-      const last = rest.lastIndexOf(":");
-      if (last < 0) return null;
-      const hunkId = rest.slice(0, last);
-      const range = rest.slice(last + 1);
-      const dash = range.indexOf("-");
-      if (dash < 0) return null;
-      const lo = parseInt(range.slice(0, dash), 10);
-      const hi = parseInt(range.slice(dash + 1), 10);
-      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-      return { kind: "block", hunkId, lo, hi, lineIdx: lo };
-    }
-    case "hunkSummary":
-      return { kind: "hunkSummary", hunkId: rest, lineIdx: 0 };
-    case "teammate":
-      return { kind: "teammate", hunkId: rest, lineIdx: 0 };
-    default:
-      return null;
-  }
-}
-
 /** Re-emit a reply key against `newHunkId` at `newLineIdx`. Block ranges
  *  preserve their original size, clamped to the new hunk's line count. */
 function rekey(
@@ -808,11 +760,9 @@ export interface CommentStop {
 }
 
 /**
- * Order: changeset file order → hunk order → line index. Replies-derived
- * stops use `lastIndexOf(":")` to split off the trailing index, so hunk
- * ids that contain `:` (Windows paths) survive — `buildCommentCounts`
- * uses an earlier-colon split that doesn't, but a wrong split there is
- * a missed badge, not a wrong jump.
+ * Order: changeset file order → hunk order → line index. Reply-derived stops
+ * come only from `user:` and `block:` keys; `parseReplyKey` handles the
+ * colon-bearing hunk ids that PR csIds introduce.
  */
 export function buildCommentStops(
   cs: ChangeSet,
@@ -826,23 +776,12 @@ export function buildCommentStops(
   };
   for (const [key, list] of Object.entries(replies)) {
     if (list.length === 0) continue;
-    if (key.startsWith("user:")) {
-      const tail = key.slice("user:".length);
-      const cut = tail.lastIndexOf(":");
-      if (cut < 0) continue;
-      const idx = Number(tail.slice(cut + 1));
-      if (Number.isNaN(idx)) continue;
-      addIdx(tail.slice(0, cut), idx);
-    } else if (key.startsWith("block:")) {
-      const tail = key.slice("block:".length);
-      const cut = tail.lastIndexOf(":");
-      if (cut < 0) continue;
-      const range = tail.slice(cut + 1);
-      const dash = range.indexOf("-");
-      if (dash < 0) continue;
-      const lo = Number(range.slice(0, dash));
-      if (Number.isNaN(lo)) continue;
-      addIdx(tail.slice(0, cut), lo);
+    const parsed = parseReplyKey(key);
+    if (!parsed) continue;
+    if (parsed.kind === "user") {
+      addIdx(parsed.hunkId, parsed.lineIdx);
+    } else if (parsed.kind === "block") {
+      addIdx(parsed.hunkId, parsed.lo);
     }
   }
 

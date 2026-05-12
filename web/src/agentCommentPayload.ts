@@ -5,6 +5,7 @@
 // shape — `lines` is a string of file line numbers, not array indices.
 
 import type { ChangeSet, CommentKind } from "./types";
+import { parseReplyKey } from "./types";
 
 export interface DerivedCommentPayload {
   kind: CommentKind;
@@ -24,45 +25,25 @@ export function deriveCommentPayload(
   targetKey: string,
   cs: ChangeSet,
 ): DerivedCommentPayload | null {
-  const colon = targetKey.indexOf(":");
-  if (colon < 0) return null;
-  const prefix = targetKey.slice(0, colon);
-  const rest = targetKey.slice(colon + 1);
+  const parsed = parseReplyKey(targetKey);
+  if (!parsed) return null;
+  const located = locateHunk(cs, parsed.hunkId);
+  if (!located) return null;
 
-  switch (prefix) {
+  switch (parsed.kind) {
     case "note":
     case "user": {
-      // `note:hunkId:lineIdx` / `user:hunkId:lineIdx` — last colon splits
-      // hunkId from lineIdx (hunk ids may contain `/` and `#`, but no `:`).
-      const lastColon = rest.lastIndexOf(":");
-      if (lastColon < 0) return null;
-      const hunkId = rest.slice(0, lastColon);
-      const lineIdx = Number(rest.slice(lastColon + 1));
-      if (!Number.isFinite(lineIdx)) return null;
-      const located = locateHunk(cs, hunkId);
-      if (!located) return null;
-      const line = located.hunk.lines[lineIdx];
+      const line = located.hunk.lines[parsed.lineIdx];
       const lineNo = line?.newNo ?? line?.oldNo;
-      const kind: CommentKind = prefix === "note" ? "reply-to-ai-note" : "line";
+      const kind: CommentKind =
+        parsed.kind === "note" ? "reply-to-ai-note" : "line";
       const out: DerivedCommentPayload = { kind, file: located.file.path };
       if (typeof lineNo === "number") out.lines = String(lineNo);
       return out;
     }
     case "block": {
-      // `block:hunkId:lo-hi` — array indices into the hunk's lines.
-      const lastColon = rest.lastIndexOf(":");
-      if (lastColon < 0) return null;
-      const hunkId = rest.slice(0, lastColon);
-      const range = rest.slice(lastColon + 1);
-      const dash = range.indexOf("-");
-      if (dash < 0) return null;
-      const lo = Number(range.slice(0, dash));
-      const hi = Number(range.slice(dash + 1));
-      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
-      const located = locateHunk(cs, hunkId);
-      if (!located) return null;
-      const loLine = located.hunk.lines[lo];
-      const hiLine = located.hunk.lines[hi];
+      const loLine = located.hunk.lines[parsed.lo];
+      const hiLine = located.hunk.lines[parsed.hi];
       const loNo = loLine?.newNo ?? loLine?.oldNo;
       const hiNo = hiLine?.newNo ?? hiLine?.oldNo;
       const out: DerivedCommentPayload = {
@@ -74,18 +55,10 @@ export function deriveCommentPayload(
       }
       return out;
     }
-    case "hunkSummary": {
-      const located = locateHunk(cs, rest);
-      if (!located) return null;
+    case "hunkSummary":
       return { kind: "reply-to-hunk-summary", file: located.file.path };
-    }
-    case "teammate": {
-      const located = locateHunk(cs, rest);
-      if (!located) return null;
+    case "teammate":
       return { kind: "reply-to-teammate", file: located.file.path };
-    }
-    default:
-      return null;
   }
 }
 

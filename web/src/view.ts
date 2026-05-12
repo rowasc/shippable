@@ -7,7 +7,7 @@
  */
 
 import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, DetachedReply, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
-import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey, blockCommentKey } from "./types";
+import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey, blockCommentKey, parseReplyKey } from "./types";
 import { hunkCoverage, fileCoverage } from "./state";
 import type { GuideSuggestion } from "./guide";
 import type { SymbolIndex } from "./symbols";
@@ -428,10 +428,8 @@ export interface BuildSidebarViewModelArgs {
 }
 
 /**
- * Count replies whose thread keys resolve to one of the files. The hunk id
- * is the segment after the first colon in the key; we assume hunk ids don't
- * themselves contain `:` (they're `${csId}/${path}#h${idx}` — paths with
- * colons are a Windows-only edge case we'll handle if it ever surfaces).
+ * Count replies whose thread keys resolve to one of the files. Key parsing
+ * lives in `parseReplyKey`; we just need the hunkId.
  */
 function buildCommentCounts(
   files: BuildSidebarViewModelArgs["files"],
@@ -441,12 +439,9 @@ function buildCommentCounts(
   for (const f of files) for (const h of f.hunks) hunkToFile.set(h.id, f.id);
   const counts = new Map<string, number>();
   for (const [key, list] of Object.entries(replies)) {
-    const firstColon = key.indexOf(":");
-    if (firstColon < 0) continue;
-    const after = firstColon + 1;
-    const secondColon = key.indexOf(":", after);
-    const hunkId = secondColon < 0 ? key.slice(after) : key.slice(after, secondColon);
-    const fileId = hunkToFile.get(hunkId);
+    const parsed = parseReplyKey(key);
+    if (!parsed) continue;
+    const fileId = hunkToFile.get(parsed.hunkId);
     if (!fileId) continue;
     counts.set(fileId, (counts.get(fileId) ?? 0) + list.length);
   }

@@ -622,6 +622,65 @@ export function blockCommentKey(hunkId: string, lo: number, hi: number): string 
   return `block:${hunkId}:${lo}-${hi}`;
 }
 
+/**
+ * Parsed shape of a reply key. `lineIdx` is the anchor line (0 for thread
+ * kinds with no line context); block keys also expose lo/hi for the range.
+ */
+export type ParsedReplyKey =
+  | { kind: "note"; hunkId: string; lineIdx: number }
+  | { kind: "user"; hunkId: string; lineIdx: number }
+  | { kind: "block"; hunkId: string; lo: number; hi: number; lineIdx: number }
+  | { kind: "hunkSummary"; hunkId: string; lineIdx: 0 }
+  | { kind: "teammate"; hunkId: string; lineIdx: 0 };
+
+/**
+ * Single source of truth for splitting reply keys back into their parts.
+ * Hunk ids may contain `:` (PR csIds are `pr:host:owner:repo:N`), so for
+ * suffix-bearing kinds we strip the trailing line/range with `lastIndexOf`.
+ * Returns null for unknown kinds or malformed keys.
+ */
+export function parseReplyKey(key: string): ParsedReplyKey | null {
+  const colon = key.indexOf(":");
+  if (colon < 0) return null;
+  const prefix = key.slice(0, colon);
+  const rest = key.slice(colon + 1);
+  switch (prefix) {
+    case "note":
+    case "user": {
+      const last = rest.lastIndexOf(":");
+      if (last < 0) return null;
+      const hunkId = rest.slice(0, last);
+      if (hunkId.length === 0) return null;
+      const lineIdx = parseInt(rest.slice(last + 1), 10);
+      if (!Number.isFinite(lineIdx)) return null;
+      return prefix === "note"
+        ? { kind: "note", hunkId, lineIdx }
+        : { kind: "user", hunkId, lineIdx };
+    }
+    case "block": {
+      const last = rest.lastIndexOf(":");
+      if (last < 0) return null;
+      const hunkId = rest.slice(0, last);
+      if (hunkId.length === 0) return null;
+      const range = rest.slice(last + 1);
+      const dash = range.indexOf("-");
+      if (dash < 0) return null;
+      const lo = parseInt(range.slice(0, dash), 10);
+      const hi = parseInt(range.slice(dash + 1), 10);
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+      return { kind: "block", hunkId, lo, hi, lineIdx: lo };
+    }
+    case "hunkSummary":
+      if (rest.length === 0) return null;
+      return { kind: "hunkSummary", hunkId: rest, lineIdx: 0 };
+    case "teammate":
+      if (rest.length === 0) return null;
+      return { kind: "teammate", hunkId: rest, lineIdx: 0 };
+    default:
+      return null;
+  }
+}
+
 // ── Agent comment queue (mirror of server/src/agent-queue.ts) ────────────
 // These shapes travel verbatim across the `/api/agent/*` endpoints. Keep in
 // sync with the server-side definitions; they're the wire format for the
