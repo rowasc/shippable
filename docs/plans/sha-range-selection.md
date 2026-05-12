@@ -1,5 +1,11 @@
 # SHA range selection for worktrees
 
+## Status: shipped
+
+`listCommits` / `listCommitsWithFiles` live in `server/src/worktrees.ts:650`. `POST /api/worktrees/commits` is wired (`server/src/index.ts:87`). `web/src/components/RangePicker.tsx` is shared between LoadModal and the topbar. This is slice (b) of [`docs/plans/worktrees.md`](./worktrees.md).
+
+The remainder of this doc is the original plan.
+
 ## Context
 
 Today, clicking a worktree in `LoadModal` immediately loads `branchChangeset(path)` — the cumulative `base..working-tree` view. There is no way to narrow that to a specific commit, a range of commits, or "everything from a SHA up to HEAD plus my uncommitted edits". This is exactly slice (b) of [`docs/plans/worktrees.md`](./worktrees.md) line 29 ("commit picker per worktree with range selector — `HEAD~N..HEAD`, or `<sha>..HEAD`"), still in backlog.
