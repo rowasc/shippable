@@ -1,55 +1,39 @@
 import { useEffect, useState, type ReactNode } from "react";
 import "./ServerHealthGate.css";
 import { apiUrl, waitForSidecarReady } from "../apiUrl";
-import { useApiKey } from "../useApiKey";
 import { CopyButton } from "./CopyButton";
-import { KeySetup } from "./KeySetup";
+import { CredentialsPanel } from "./CredentialsPanel";
+import { useCredentials } from "../auth/useCredentials";
 
 type GateState = "checking" | "ready" | "unreachable";
-type ServerKey = "unknown" | "present" | "missing";
 
 /**
  * Boot-time gate. The local Node sidecar is a hard dependency in every
  * deployment shape we ship — worktree ingest, prompt library, streaming
- * review all live there. Without it the app can’t function, so failing here
+ * review all live there. Without it the app can't function, so failing here
  * is more honest than letting the user load a diff and discover features
  * error out one by one.
  *
- * The Anthropic key, by contrast, is optional: the server boots without it
- * and reports its status via /api/health. When missing, we surface the
- * keychain prompt (Tauri) or shell-env instructions (dev/browser); both
- * paths allow "skip" to fall through to the rule-based plan.
+ * The Anthropic key, by contrast, is optional: the server boots without it.
+ * Credential presence comes from `useCredentials().list`. When the anthropic
+ * row is missing AND the user hasn't dismissed the prompt, we render the
+ * boot CredentialsPanel; otherwise the gate falls through to `children` and
+ * the rule-based plan takes over.
  */
 export function ServerHealthGate({ children }: { children: ReactNode }) {
-  const apiKey = useApiKey();
+  const credentials = useCredentials();
   const [state, setState] = useState<GateState>("checking");
-  const [serverKey, setServerKey] = useState<ServerKey>("unknown");
-  const [shellSkipped, setShellSkipped] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
   const [trackedAttempt, setTrackedAttempt] = useState(attempt);
 
-  // Don't run the health probe until we've resolved the keychain state in
-  // Tauri — otherwise we race with sidecar startup and surface a generic
-  // "unreachable" instead of the specific "missing key" path. "skipped" is
-  // a deliberate dismissal, so the gate proceeds and the rule-based plan
-  // takes over for AI features.
-  const blockedByMissingKey =
-    apiKey.status.kind === "missing" ||
-    apiKey.status.kind === "saved-pending-restart";
-  const waitingForKeycheck = apiKey.status.kind === "loading";
-
-  // Reset state when the user clicks Retry. The during-render setState
-  // pattern keeps these resets out of the effect body (which would cascade).
   if (attempt !== trackedAttempt) {
     setTrackedAttempt(attempt);
     setState("checking");
-    setServerKey("unknown");
     setError(undefined);
   }
 
   useEffect(() => {
-    if (blockedByMissingKey || waitingForKeycheck) return;
     let cancelled = false;
     (async () => {
       try {
@@ -66,10 +50,6 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
         const res = await fetch(await apiUrl("/api/health"));
         if (cancelled) return;
         if (res.ok) {
-          const { anthropic } = (await res.json()) as {
-            anthropic: "present" | "missing";
-          };
-          setServerKey(anthropic);
           setState("ready");
         } else {
           setState("unreachable");
@@ -84,50 +64,26 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, blockedByMissingKey, waitingForKeycheck]);
+  }, [attempt]);
 
-  if (blockedByMissingKey) {
-    return (
-      <div className="boot-gate">
-        <div
-          className="boot-gate__box"
-          role="dialog"
-          aria-modal="true"
-          aria-label="set up Anthropic API key"
-        >
-          <KeySetup
-            onSave={apiKey.save}
-            onSkip={apiKey.skip}
-            saved={apiKey.status.kind === "saved-pending-restart"}
-          />
+  if (state === "ready") {
+    const hasAnthropic = credentials.list.some((c) => c.kind === "anthropic");
+    if (!hasAnthropic && !credentials.anthropicSkipped) {
+      return (
+        <div className="boot-gate">
+          <div
+            className="boot-gate__box"
+            role="dialog"
+            aria-modal="true"
+            aria-label="set up Anthropic API key"
+          >
+            <CredentialsPanel mode="boot" />
+          </div>
         </div>
-      </div>
-    );
+      );
+    }
+    return <>{children}</>;
   }
-
-  // Browser/dev mode: server is up but reports no key. Show the same prompt
-  // pattern as Tauri, but with shell-env instructions instead of a save flow.
-  // Skip falls through to children (rule-based plan stays usable).
-  if (state === "ready" && serverKey === "missing" && !shellSkipped) {
-    return (
-      <div className="boot-gate">
-        <div
-          className="boot-gate__box"
-          role="dialog"
-          aria-modal="true"
-          aria-label="set up Anthropic API key"
-        >
-          <KeySetup
-            mode="shell"
-            saved={false}
-            onSkip={() => setShellSkipped(true)}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (state === "ready") return <>{children}</>;
 
   return (
     <div className="boot-gate">

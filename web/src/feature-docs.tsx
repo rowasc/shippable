@@ -40,7 +40,8 @@ import { LoadModal } from "./components/LoadModal";
 import { ThemePicker } from "./components/ThemePicker";
 import { SyntaxShowcase } from "./components/SyntaxShowcase";
 import { CodeRunner } from "./components/CodeRunner";
-import { KeySetup } from "./components/KeySetup";
+import { CredentialsPanel } from "./components/CredentialsPanel";
+import { CredentialsProvider } from "./auth/useCredentials";
 import { PromptPicker } from "./components/PromptPicker";
 import { PromptEditor } from "./components/PromptEditor";
 import {
@@ -559,10 +560,9 @@ function App() {
     return (
       <div className="feature-docs">
         <div className="feature-docs__stage">
-          <KeySetup
-            onSave={async () => {}}
-            saved={view === "key-setup-saved"}
-          />
+          <CredentialsProvider>
+            <CredentialsPanel mode="boot" />
+          </CredentialsProvider>
         </div>
       </div>
     );

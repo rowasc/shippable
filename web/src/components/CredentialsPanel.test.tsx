@@ -1,0 +1,182 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { CredentialsPanel } from "./CredentialsPanel";
+import { CredentialsProvider } from "../auth/useCredentials";
+
+vi.mock("../auth/client", () => ({
+  authList: vi.fn(),
+  authSet: vi.fn(),
+  authClear: vi.fn(),
+}));
+vi.mock("../keychain", () => ({
+  isTauri: vi.fn(() => false),
+  keychainGet: vi.fn().mockResolvedValue(null),
+  keychainSet: vi.fn().mockResolvedValue(undefined),
+  keychainRemove: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../githubHostTrust", async () => {
+  const actual = await vi.importActual<typeof import("../githubHostTrust")>(
+    "../githubHostTrust",
+  );
+  return {
+    ...actual,
+    readTrustedGithubHosts: vi.fn(() => []),
+    trustGithubHost: vi.fn(),
+  };
+});
+
+import * as client from "../auth/client";
+import * as hostTrust from "../githubHostTrust";
+
+function Wrap({ children }: { children: ReactNode }) {
+  return <CredentialsProvider>{children}</CredentialsProvider>;
+}
+
+beforeEach(() => {
+  vi.mocked(client.authList).mockResolvedValue([]);
+  vi.mocked(client.authSet).mockResolvedValue();
+  vi.mocked(client.authClear).mockResolvedValue();
+  vi.mocked(hostTrust.readTrustedGithubHosts).mockReturnValue([]);
+  vi.mocked(hostTrust.trustGithubHost).mockReset();
+  window.localStorage.clear();
+});
+
+afterEach(() => cleanup());
+
+describe("CredentialsPanel mode=boot", () => {
+  it("renders an anthropic input + a Skip button", async () => {
+    render(
+      <Wrap>
+        <CredentialsPanel mode="boot" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    expect(screen.getByPlaceholderText(/sk-ant-/i)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /skip/i }),
+    ).toBeTruthy();
+    // No "Add GitHub host" in boot mode.
+    expect(screen.queryByRole("button", { name: /add github host/i })).toBeNull();
+  });
+
+  it("calls skipAnthropic when the Skip button is clicked", async () => {
+    render(
+      <Wrap>
+        <CredentialsPanel mode="boot" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /skip/i }));
+    expect(window.localStorage.getItem("shippable:anthropic:skip")).toBe(
+      "true",
+    );
+  });
+
+  it("submits the anthropic credential via set()", async () => {
+    render(
+      <Wrap>
+        <CredentialsPanel mode="boot" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    fireEvent.change(screen.getByPlaceholderText(/sk-ant-/i), {
+      target: { value: "sk-new" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save/i }));
+    await waitFor(() =>
+      expect(client.authSet).toHaveBeenCalledWith(
+        { kind: "anthropic" },
+        "sk-new",
+      ),
+    );
+  });
+});
+
+describe("CredentialsPanel mode=settings", () => {
+  it("renders an anthropic row, each configured github host, and the Add button", async () => {
+    vi.mocked(client.authList).mockResolvedValue([
+      { kind: "anthropic" },
+      { kind: "github", host: "github.com" },
+      { kind: "github", host: "ghe.example.com" },
+    ]);
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    expect(screen.getByText("anthropic")).toBeTruthy();
+    expect(screen.getByText("github.com")).toBeTruthy();
+    expect(screen.getByText("ghe.example.com")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /add github host/i }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /skip/i })).toBeNull();
+  });
+
+  it("calls clear() when the user clicks Clear on a row", async () => {
+    vi.mocked(client.authList).mockResolvedValue([
+      { kind: "github", host: "github.com" },
+    ]);
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    const clearBtn = screen.getByRole("button", {
+      name: /clear github.com/i,
+    });
+    fireEvent.click(clearBtn);
+    await waitFor(() =>
+      expect(client.authClear).toHaveBeenCalledWith({
+        kind: "github",
+        host: "github.com",
+      }),
+    );
+  });
+
+  it("rotate opens an inline editor; submit calls set()", async () => {
+    vi.mocked(client.authList).mockResolvedValue([
+      { kind: "github", host: "github.com" },
+    ]);
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: /rotate github.com/i }));
+    const input = screen.getByPlaceholderText(/ghp_/);
+    fireEvent.change(input, { target: { value: "ghp_new" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(client.authSet).toHaveBeenCalledWith(
+        { kind: "github", host: "github.com" },
+        "ghp_new",
+      ),
+    );
+  });
+
+  it("Add GitHub host triggers host-trust interstitial for a non-github.com host", async () => {
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    fireEvent.click(
+      screen.getByRole("button", { name: /add github host/i }),
+    );
+    fireEvent.change(screen.getByPlaceholderText(/host/i), {
+      target: { value: "ghe.example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    // The trust interstitial should appear, not the token input.
+    expect(screen.getByText(/i trust ghe\.example\.com/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /i trust/i }));
+    expect(hostTrust.trustGithubHost).toHaveBeenCalledWith("ghe.example.com");
+  });
+});

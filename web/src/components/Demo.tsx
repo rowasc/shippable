@@ -21,7 +21,8 @@ import { GuidePrompt } from "./GuidePrompt";
 import { HelpOverlay } from "./HelpOverlay";
 import { LoadModal } from "./LoadModal";
 import { CodeRunner } from "./CodeRunner";
-import { KeySetup } from "./KeySetup";
+import { CredentialsPanel } from "./CredentialsPanel";
+import { CredentialsProvider } from "../auth/useCredentials";
 import { PromptPicker } from "./PromptPicker";
 import { PromptEditor } from "./PromptEditor";
 import { type PromptRunView } from "./PromptRunsPanel";
@@ -927,7 +928,7 @@ function DemoFrame({
     return <WelcomeStage />;
   }
   if (frame.kind === "keySetup") {
-    return <KeySetupStage saved={frame.saved ?? false} />;
+    return <KeySetupStage />;
   }
   if (frame.kind === "promptEditor") {
     return <PromptEditorStage />;
@@ -1011,13 +1012,12 @@ function WelcomeStage() {
   );
 }
 
-function KeySetupStage({ saved }: { saved: boolean }) {
+function KeySetupStage() {
   return (
     <div className="demo__app demo__center-stage">
-      <KeySetup
-        onSave={async () => {}}
-        saved={saved}
-      />
+      <CredentialsProvider>
+        <CredentialsPanel mode="boot" />
+      </CredentialsProvider>
     </div>
   );
 }

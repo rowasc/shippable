@@ -24,3 +24,8 @@ export async function keychainSet(
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke<void>("keychain_set", { account, password });
 }
+
+export async function keychainRemove(account: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke<void>("keychain_remove", { account });
+}

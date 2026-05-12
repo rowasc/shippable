@@ -105,14 +105,6 @@ vi.mock("../definitionNav", () => ({
     caps?.languages?.find((c) => c.languageIds.includes(language)) ?? null,
 }));
 
-vi.mock("../useApiKey", () => ({
-  useApiKey: () => ({
-    status: { kind: "present" },
-    save: async () => undefined,
-    skip: () => undefined,
-  }),
-}));
-
 vi.mock("./Sidebar", () => ({
   Sidebar: () => null,
 }));
@@ -131,10 +123,6 @@ vi.mock("./HelpOverlay", () => ({
 
 vi.mock("./Inspector", () => ({
   Inspector: () => null,
-}));
-
-vi.mock("./KeySetup", () => ({
-  KeySetup: () => null,
 }));
 
 vi.mock("./LoadModal", () => ({
