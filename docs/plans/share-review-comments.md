@@ -1,5 +1,13 @@
 # Sharing review comments with the agent
 
+## Status: shipped (v0)
+
+All five v0 slices landed (see `share-review-comments-tasks.md` for the per-task ledger). `server/src/agent-queue.ts` hosts the per-worktree queue and the agent-reply store; the `/api/agent/{enqueue,pull,unenqueue,replies}` and `/api/agent/{delivered,replies}` endpoints are wired in `server/src/index.ts`. `mcp-server/` is the standalone MCP server exposing `shippable_check_review_comments` and `shippable_post_review_reply` — agent replies thread under the original comment in the panel (see `docs/sdd/agent-reply-support/spec.md`). Open follow-ups (durable queue, multi-channel pip, server-side install verification) are listed at the bottom of this doc.
+
+The remainder of this doc is the original plan.
+
+---
+
 The reviewer already lets you write structured comments on a diff — line comments, block comments, replies to AI notes, replies to teammate notes, replies to hunk summaries. Those comments live in `ReviewState` and never leave the browser. The agent that produced the diff has no idea the reviewer said anything.
 
 This plan closes that loop with a **pull channel**: the reviewer authors comments in Shippable, then asks their agent — Claude Code, Codex, Cursor, any MCP-speaking harness — to check the queue. The agent calls a `shippable_check_review_comments` MCP tool, fetches pending comments, and emits them as `<reviewer-feedback>` for the model to act on.
