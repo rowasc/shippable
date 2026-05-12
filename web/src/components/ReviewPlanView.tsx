@@ -35,6 +35,9 @@ interface Props {
    *  leaves the user's machine. */
   onGenerateAi?: () => void;
   changeset?: ChangeSet;
+  /** Reload the diff filtered to a single commit. When provided, commit SHAs
+   *  in the per-commit list render as clickable buttons. */
+  onFilterToCommit?: (sha: string) => void;
 }
 
 export function ReviewPlanView({
@@ -45,6 +48,7 @@ export function ReviewPlanView({
   error,
   onGenerateAi,
   changeset,
+  onFilterToCommit,
 }: Props) {
   const [showDiagram, setShowDiagram] = useState(false);
   const [includeMarkdown, setIncludeMarkdown] = useState(false);
@@ -93,6 +97,7 @@ export function ReviewPlanView({
         intent={plan.intent}
         changeset={changeset}
         onNavigate={onNavigate}
+        onFilterToCommit={onFilterToCommit}
       />
       <MapSection
         map={plan.map}
@@ -117,10 +122,12 @@ function IntentSection({
   intent,
   changeset,
   onNavigate,
+  onFilterToCommit,
 }: {
   intent: Claim[];
   changeset?: ChangeSet;
   onNavigate?: (ev: EvidenceRef) => void;
+  onFilterToCommit?: (sha: string) => void;
 }) {
   // AI-supplied intent claims always take precedence — they describe the
   // change in a way the description usually doesn't.
@@ -156,7 +163,11 @@ function IntentSection({
         </div>
       )}
       {changeset && hasCommits && (
-        <CommitGroups changeset={changeset} onNavigate={onNavigate} />
+        <CommitGroups
+          changeset={changeset}
+          onNavigate={onNavigate}
+          onFilterToCommit={onFilterToCommit}
+        />
       )}
       {changeset && !hasCommits && description && (
         <DescriptionFiles changeset={changeset} onNavigate={onNavigate} />
@@ -233,9 +244,11 @@ function DescriptionFiles({
 function CommitGroups({
   changeset,
   onNavigate,
+  onFilterToCommit,
 }: {
   changeset: ChangeSet;
   onNavigate?: (ev: EvidenceRef) => void;
+  onFilterToCommit?: (sha: string) => void;
 }) {
   const nodeByPath = useGraphNodes(changeset.graph);
   const commits = changeset.commits ?? [];
@@ -252,6 +265,7 @@ function CommitGroups({
           imageAssets={changeset.imageAssets}
           onNavigate={onNavigate}
           collapsibleBody={collapsibleBody}
+          onFilterToCommit={onFilterToCommit}
         />
       ))}
     </ol>
@@ -264,12 +278,14 @@ function CommitGroup({
   imageAssets,
   onNavigate,
   collapsibleBody,
+  onFilterToCommit,
 }: {
   commit: ChangeSetCommit;
   nodeByPath: Map<string, CodeGraphNode>;
   imageAssets?: Record<string, string>;
   onNavigate?: (ev: EvidenceRef) => void;
   collapsibleBody: boolean;
+  onFilterToCommit?: (sha: string) => void;
 }) {
   const body = commit.body && (
     <div className="plan__commit-body">
@@ -284,7 +300,18 @@ function CommitGroup({
   return (
     <li className="plan__commit">
       <div className="plan__commit-h">
-        <code className="plan__commit-sha">{commit.shortSha}</code>
+        {onFilterToCommit ? (
+          <button
+            type="button"
+            className="plan__commit-sha plan__commit-sha--btn"
+            onClick={() => onFilterToCommit(commit.sha)}
+            title="Show diff for this commit only"
+          >
+            {commit.shortSha}
+          </button>
+        ) : (
+          <code className="plan__commit-sha">{commit.shortSha}</code>
+        )}
         <span className="plan__commit-subject">{commit.subject}</span>
       </div>
       {commit.body &&

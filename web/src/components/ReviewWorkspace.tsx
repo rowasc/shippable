@@ -1427,6 +1427,30 @@ export function ReviewWorkspace({
                 dispatch({ type: "SET_CURSOR", cursor: target });
                 setShowPlan(false);
               }}
+              onFilterToCommit={
+                cs.worktreeSource
+                  ? async (sha) => {
+                      if (!cs.worktreeSource) return;
+                      try {
+                        const newCs = await fetchWorktreeChangeset(
+                          {
+                            path: cs.worktreeSource.worktreePath,
+                            branch: cs.worktreeSource.branch,
+                          },
+                          { kind: "ref", ref: sha },
+                        );
+                        onLoadChangeset(newCs, {}, {
+                          kind: "worktree",
+                          path: cs.worktreeSource.worktreePath,
+                          branch: cs.worktreeSource.branch,
+                        });
+                        setShowPlan(false);
+                      } catch (e) {
+                        console.error("filter to commit failed", e);
+                      }
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>
