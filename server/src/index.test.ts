@@ -55,7 +55,7 @@ beforeAll(async () => {
 
   const indexMod = await import("./index.ts");
   const queueMod = await import("./agent-queue.ts");
-  const authMod = await import("./github/auth-store.ts");
+  const authMod = await import("./auth/store.ts");
   resetForTests = queueMod.resetForTests;
   resetAuthStore = authMod.resetForTests;
 
@@ -880,18 +880,27 @@ describe("POST /api/worktrees/commits and range changeset", () => {
   });
 });
 
-describe("POST /api/github/auth/set", () => {
-  it("returns { ok: true } on a valid host + token", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_test",
+describe("POST /api/auth/set", () => {
+  it("sets an anthropic credential", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "anthropic" },
+      value: "sk-test",
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.ok).toBe(true);
+  });
+
+  it("sets a github credential", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_test",
     });
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
   });
 
   it("rejects an invalid JSON body", async () => {
-    const res = await fetch(`${baseUrl}/api/github/auth/set`, {
+    const res = await fetch(`${baseUrl}/api/auth/set`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "not json",
@@ -899,114 +908,150 @@ describe("POST /api/github/auth/set", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects when host is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
-      token: "ghp_test",
+  it("rejects when credential is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/set`, {
+      value: "sk-test",
     });
     expect(r.status).toBe(400);
-    expect(String(r.body.error)).toBeTruthy();
+    expect(r.body.error).toBe("invalid_credential");
   });
 
-  it("rejects when token is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
+  it("rejects when value is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "anthropic" },
     });
     expect(r.status).toBe(400);
+    expect(r.body.error).toBe("missing_value");
   });
 
-  it("rejects a blocked host (localhost)", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "localhost",
-      token: "tok",
+  it("rejects a blocked github host", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "localhost" },
+      value: "ghp_x",
     });
     expect(r.status).toBe(400);
+    expect(r.body.error).toBe("host_blocked");
   });
 
   it("denies requests with an opaque origin", async () => {
-    const res = await fetch(`${baseUrl}/api/github/auth/set`, {
+    const res = await fetch(`${baseUrl}/api/auth/set`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "null" },
-      body: JSON.stringify({ host: "github.com", token: "tok" }),
+      body: JSON.stringify({
+        credential: { kind: "github", host: "github.com" },
+        value: "tok",
+      }),
     });
     expect(res.status).toBe(403);
   });
 });
 
-describe("POST /api/github/auth/has", () => {
-  it("returns { has: false } when no token is stored", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/has`, {
-      host: "github.com",
+describe("POST /api/auth/has", () => {
+  it("returns { present: false } when not set", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/has`, {
+      credential: { kind: "anthropic" },
     });
     expect(r.status).toBe(200);
-    expect(r.body.has).toBe(false);
+    expect(r.body.present).toBe(false);
   });
 
-  it("returns { has: true } after a token is set", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_test",
+  it("returns { present: true } after set", async () => {
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_test",
     });
-    const r = await postJson(`${baseUrl}/api/github/auth/has`, {
-      host: "github.com",
+    const r = await postJson(`${baseUrl}/api/auth/has`, {
+      credential: { kind: "github", host: "github.com" },
     });
     expect(r.status).toBe(200);
-    expect(r.body.has).toBe(true);
+    expect(r.body.present).toBe(true);
   });
 
-  it("rejects when host is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/has`, {});
+  it("rejects when credential is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/has`, {});
     expect(r.status).toBe(400);
+    expect(r.body.error).toBe("invalid_credential");
   });
 
   it("denies requests with an opaque origin", async () => {
-    const res = await fetch(`${baseUrl}/api/github/auth/has`, {
+    const res = await fetch(`${baseUrl}/api/auth/has`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "null" },
-      body: JSON.stringify({ host: "github.com" }),
+      body: JSON.stringify({ credential: { kind: "anthropic" } }),
     });
     expect(res.status).toBe(403);
   });
 });
 
-describe("POST /api/github/auth/clear", () => {
-  it("clears a stored token and has returns false", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_test",
+describe("POST /api/auth/clear", () => {
+  it("clears a stored credential", async () => {
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_test",
     });
-    const clear = await postJson(`${baseUrl}/api/github/auth/clear`, {
-      host: "github.com",
+    const clear = await postJson(`${baseUrl}/api/auth/clear`, {
+      credential: { kind: "github", host: "github.com" },
     });
     expect(clear.status).toBe(200);
     expect(clear.body.ok).toBe(true);
-
-    const has = await postJson(`${baseUrl}/api/github/auth/has`, {
-      host: "github.com",
+    const has = await postJson(`${baseUrl}/api/auth/has`, {
+      credential: { kind: "github", host: "github.com" },
     });
-    expect(has.body.has).toBe(false);
+    expect(has.body.present).toBe(false);
   });
 
-  it("is a no-op for an unknown host", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/clear`, {
-      host: "unknown.example.com",
+  it("is a no-op for an unset credential", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/clear`, {
+      credential: { kind: "github", host: "unknown.example.com" },
     });
     expect(r.status).toBe(200);
     expect(r.body.ok).toBe(true);
   });
 
-  it("rejects when host is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/github/auth/clear`, {});
+  it("rejects when credential is missing", async () => {
+    const r = await postJson(`${baseUrl}/api/auth/clear`, {});
     expect(r.status).toBe(400);
+    expect(r.body.error).toBe("invalid_credential");
+  });
+});
+
+describe("GET /api/auth/list", () => {
+  it("returns an empty list initially", async () => {
+    const r = await getJson(`${baseUrl}/api/auth/list`);
+    expect(r.status).toBe(200);
+    expect(r.body.credentials).toEqual([]);
   });
 
-  it("denies requests with an opaque origin", async () => {
-    const res = await fetch(`${baseUrl}/api/github/auth/clear`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "null" },
-      body: JSON.stringify({ host: "github.com" }),
+  it("returns identifiers only — never the secret values", async () => {
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "anthropic" },
+      value: "sk-secret",
     });
-    expect(res.status).toBe(403);
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_secret",
+    });
+    const r = await getJson(`${baseUrl}/api/auth/list`);
+    expect(r.status).toBe(200);
+    expect(r.body.credentials).toEqual([
+      { kind: "anthropic" },
+      { kind: "github", host: "github.com" },
+    ]);
+    expect(JSON.stringify(r.body)).not.toContain("secret");
   });
+});
+
+describe("legacy /api/github/auth/* routes are gone", () => {
+  it.each(["set", "has", "clear"] as const)(
+    "POST /api/github/auth/%s returns 404",
+    async (op) => {
+      const r = await postJson(`${baseUrl}/api/github/auth/${op}`, {
+        host: "github.com",
+        token: "ghp",
+      });
+      expect(r.status).toBe(404);
+    },
+  );
 });
 
 // ─── POST /api/github/pr/load ─────────────────────────────────────────────
@@ -1114,9 +1159,9 @@ describe("POST /api/github/pr/load", () => {
   });
 
   it("returns { changeSet } on success", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_integration_test",
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_integration_test",
     });
 
     vi.stubGlobal(
@@ -1145,9 +1190,9 @@ describe("POST /api/github/pr/load", () => {
   });
 
   it("returns 403 github_auth_failed on upstream 403 rate-limit", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_integration_test",
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_integration_test",
     });
 
     vi.stubGlobal(
@@ -1169,9 +1214,9 @@ describe("POST /api/github/pr/load", () => {
   });
 
   it("returns 404 github_pr_not_found on upstream 404", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_integration_test",
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_integration_test",
     });
 
     vi.stubGlobal(
@@ -1192,9 +1237,9 @@ describe("POST /api/github/pr/load", () => {
   });
 
   it("returns 502 github_upstream on 5xx from GitHub", async () => {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_integration_test",
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_integration_test",
     });
 
     vi.stubGlobal(
@@ -1230,9 +1275,9 @@ describe("POST /api/github/pr/branch-lookup", () => {
   });
 
   async function setGithubToken() {
-    await postJson(`${baseUrl}/api/github/auth/set`, {
-      host: "github.com",
-      token: "ghp_branch_lookup_test",
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_branch_lookup_test",
     });
   }
 

@@ -11,7 +11,18 @@ import * as mcpStatus from "./mcp-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
 import { removePortFile, writePortFile } from "./port-file.ts";
-import * as authStore from "./github/auth-store.ts";
+import { getCredential } from "./auth/store.ts";
+import {
+  handleAuthSet,
+  handleAuthHas,
+  handleAuthClear,
+  handleAuthList,
+} from "./auth/endpoints.ts";
+import {
+  RequestBodyTooLargeError,
+  readBody,
+  writeCorsHeaders,
+} from "./http.ts";
 import { parsePrUrl } from "./github/url.ts";
 import { loadPr } from "./github/pr-load.ts";
 import { GithubApiError } from "./github/api-client.ts";
@@ -105,14 +116,17 @@ export function createApp(): Server {
     if (req.method === "GET" && req.url === "/api/worktrees/mcp-status") {
       return await handleWorktreesMcpStatus(req, res, origin);
     }
-    if (req.method === "POST" && req.url === "/api/github/auth/set") {
-      return await handleGithubAuthSet(req, res, origin);
+    if (req.method === "POST" && req.url === "/api/auth/set") {
+      return await handleAuthSet(req, res, origin);
     }
-    if (req.method === "POST" && req.url === "/api/github/auth/has") {
-      return await handleGithubAuthHas(req, res, origin);
+    if (req.method === "POST" && req.url === "/api/auth/has") {
+      return await handleAuthHas(req, res, origin);
     }
-    if (req.method === "POST" && req.url === "/api/github/auth/clear") {
-      return await handleGithubAuthClear(req, res, origin);
+    if (req.method === "POST" && req.url === "/api/auth/clear") {
+      return await handleAuthClear(req, res, origin);
+    }
+    if (req.method === "GET" && req.url === "/api/auth/list") {
+      return await handleAuthList(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/github/pr/load") {
       return await handleGithubPrLoad(req, res, origin);
@@ -846,101 +860,6 @@ const LINES_PATTERN = /^\d+(-\d+)?$/;
  *  per-harness identity (`claude-code`, `codex`, etc.). */
 const MAX_AGENT_LABEL_LENGTH = 64;
 
-async function handleGithubAuthSet(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { host?: unknown; token?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  if (typeof parsed.host !== "string" || !parsed.host) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { host: string, token: string }" }));
-    return;
-  }
-  if (typeof parsed.token !== "string" || !parsed.token) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { host: string, token: string }" }));
-    return;
-  }
-  try {
-    authStore.setToken(parsed.host, parsed.token);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: message }));
-    return;
-  }
-  writeCorsHeaders(res, origin);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: true }));
-}
-
-async function handleGithubAuthHas(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { host?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  if (typeof parsed.host !== "string" || !parsed.host) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { host: string }" }));
-    return;
-  }
-  const has = authStore.hasToken(parsed.host);
-  writeCorsHeaders(res, origin);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ has }));
-}
-
-async function handleGithubAuthClear(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { host?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  if (typeof parsed.host !== "string" || !parsed.host) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "expected { host: string }" }));
-    return;
-  }
-  authStore.clearToken(parsed.host);
-  writeCorsHeaders(res, origin);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ ok: true }));
-}
-
 async function handleGithubPrLoad(
   req: IncomingMessage,
   res: ServerResponse,
@@ -975,7 +894,7 @@ async function handleGithubPrLoad(
     return;
   }
 
-  const token = authStore.getToken(coords.host);
+  const token = getCredential({ kind: "github", host: coords.host });
   if (!token) {
     writeCorsHeaders(res, origin);
     res.writeHead(401, { "Content-Type": "application/json" });
@@ -1054,7 +973,7 @@ async function handleGithubPrBranchLookup(
   try {
     const result = await lookupPrForBranch(
       parsed.worktreePath,
-      authStore.getToken,
+      (host) => getCredential({ kind: "github", host }),
     );
     if (result.kind === "token_required") {
       writeCorsHeaders(res, origin);
@@ -1568,47 +1487,6 @@ async function handleAgentUnenqueue(
 // share the box with anything else on 127.0.0.1, and an agent / browser tab
 // spamming multi-MB POSTs would trivially OOM us otherwise. 1 MiB is a
 // loose upper bound on legitimate review-comment / reply prose.
-const MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024;
-
-class RequestBodyTooLargeError extends Error {
-  constructor(limit: number) {
-    super(`request body exceeds ${limit} bytes`);
-    this.name = "RequestBodyTooLargeError";
-  }
-}
-
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let oversized = false;
-    req.on("data", (chunk: Buffer) => {
-      if (oversized) return;
-      size += chunk.length;
-      if (size > MAX_REQUEST_BODY_BYTES) {
-        // Stop accumulating but let the body finish streaming so the
-        // request/response lifecycle stays in lockstep — fetch clients
-        // may not read our response until they've finished writing the
-        // body. Rejecting here would also work but sometimes lets the
-        // outer catch write 413 before the socket is ready, which some
-        // clients see as a connection reset.
-        oversized = true;
-        chunks.length = 0;
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      if (oversized) {
-        reject(new RequestBodyTooLargeError(MAX_REQUEST_BODY_BYTES));
-        return;
-      }
-      resolve(Buffer.concat(chunks).toString("utf8"));
-    });
-    req.on("error", reject);
-  });
-}
-
 function parseOrigin(value: string): string | null {
   try {
     const url = new URL(value);
@@ -1699,14 +1577,6 @@ function isRequestAllowed(
     case "absent":
       return true;
   }
-}
-
-function writeCorsHeaders(res: ServerResponse, origin: string | null) {
-  if (!origin) return;
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Vary", "Origin");
 }
 
 function main() {

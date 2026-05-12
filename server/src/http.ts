@@ -1,0 +1,54 @@
+// Shared HTTP boundary helpers (body reader + CORS writer) so multiple
+// route modules can speak the same wire dialect as `index.ts` without
+// duplicating the body-size guard.
+
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+export const MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024;
+
+export class RequestBodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`request body exceeds ${limit} bytes`);
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
+export function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let oversized = false;
+    req.on("data", (chunk: Buffer) => {
+      if (oversized) return;
+      size += chunk.length;
+      if (size > MAX_REQUEST_BODY_BYTES) {
+        // Stop accumulating but let the body finish streaming so the
+        // request/response lifecycle stays in lockstep — fetch clients
+        // may not read our response until they've finished writing the
+        // body. Rejecting here would also work but sometimes lets the
+        // outer catch write 413 before the socket is ready, which some
+        // clients see as a connection reset.
+        oversized = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (oversized) {
+        reject(new RequestBodyTooLargeError(MAX_REQUEST_BODY_BYTES));
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", reject);
+  });
+}
+
+export function writeCorsHeaders(res: ServerResponse, origin: string | null) {
+  if (!origin) return;
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+}
