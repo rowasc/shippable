@@ -136,15 +136,15 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/agent/unenqueue") {
       return await handleAgentUnenqueue(req, res, origin);
     }
-    if (req.method === "POST" && req.url === "/api/agent/replies") {
-      return await handleAgentPostReply(req, res, origin);
+    if (req.method === "POST" && req.url === "/api/agent/comments") {
+      return await handleAgentPostComment(req, res, origin);
     }
     if (
       req.method === "GET" &&
       req.url &&
-      req.url.startsWith("/api/agent/replies")
+      req.url.startsWith("/api/agent/comments")
     ) {
-      return await handleAgentListReplies(req, res, origin);
+      return await handleAgentListComments(req, res, origin);
     }
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
@@ -830,6 +830,7 @@ const COMMENT_KINDS: readonly CommentKind[] = [
   "reply-to-ai-note",
   "reply-to-teammate",
   "reply-to-hunk-summary",
+  "reply-to-agent-comment",
 ];
 
 async function handleGithubAuthSet(
@@ -1109,6 +1110,7 @@ async function handleAgentEnqueue(
         lines?: unknown;
         body?: unknown;
         supersedes?: unknown;
+        parentAgentCommentId?: unknown;
       }
     | undefined;
   if (!wtPath || !commitSha || !commentInput || typeof commentInput !== "object") {
@@ -1152,6 +1154,39 @@ async function handleAgentEnqueue(
     res.end(JSON.stringify({ error: "comment.file must be a non-empty string" }));
     return;
   }
+  // The `reply-to-agent-comment` kind links a reviewer reply to its parent
+  // top-level agent comment. Required field; validated against the
+  // worktree's agent-comment store so the agent doesn't see orphans.
+  let parentAgentCommentId: string | undefined;
+  if (commentInput.kind === "reply-to-agent-comment") {
+    if (
+      typeof commentInput.parentAgentCommentId !== "string" ||
+      commentInput.parentAgentCommentId.length === 0
+    ) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error:
+            "comment.parentAgentCommentId is required when kind is 'reply-to-agent-comment'",
+        }),
+      );
+      return;
+    }
+    if (
+      !agentQueue.isAgentCommentId(wtPath, commentInput.parentAgentCommentId)
+    ) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `comment.parentAgentCommentId ${JSON.stringify(commentInput.parentAgentCommentId)} is not an agent comment in this worktree`,
+        }),
+      );
+      return;
+    }
+    parentAgentCommentId = commentInput.parentAgentCommentId;
+  }
   const comment: Omit<Comment, "id" | "enqueuedAt"> = {
     kind: commentInput.kind,
     file: commentInput.file,
@@ -1164,6 +1199,9 @@ async function handleAgentEnqueue(
   };
   if (typeof commentInput.lines === "string" && commentInput.lines.length > 0) {
     comment.lines = commentInput.lines;
+  }
+  if (parentAgentCommentId !== undefined) {
+    comment.parentAgentCommentId = parentAgentCommentId;
   }
   const [id] = agentQueue.enqueue(wtPath, [comment]);
   writeCorsHeaders(res, origin);
@@ -1211,7 +1249,16 @@ async function handleAgentPull(
     undefined,
   );
   const commitSha = earliest?.commitSha ?? "";
-  const payload = agentQueue.formatPayload(resolved, commitSha);
+  // Provide an agent-comment lookup so reply-to-agent-comment entries can
+  // inline the parent's body as <parent>...</parent> for the agent.
+  const agentComments = agentQueue.listAgentComments(wtPath);
+  const lookupAgentComment = (id: string) =>
+    agentComments.find((c) => c.id === id) ?? null;
+  const payload = agentQueue.formatPayload(
+    resolved,
+    commitSha,
+    lookupAgentComment,
+  );
   const ids = resolved.map((c) => c.id);
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });
@@ -1248,7 +1295,7 @@ async function handleAgentDelivered(
   res.end(JSON.stringify({ delivered }));
 }
 
-async function handleAgentPostReply(
+async function handleAgentPostComment(
   req: IncomingMessage,
   res: ServerResponse,
   origin: string | null,
@@ -1256,9 +1303,9 @@ async function handleAgentPostReply(
   const body = await readBody(req);
   let parsed: {
     worktreePath?: unknown;
-    commentId?: unknown;
     body?: unknown;
-    outcome?: unknown;
+    parent?: unknown;
+    anchor?: unknown;
     agentLabel?: unknown;
   };
   try {
@@ -1271,24 +1318,30 @@ async function handleAgentPostReply(
   }
   const wtPath =
     typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
-  const commentId =
-    typeof parsed.commentId === "string" ? parsed.commentId : "";
-  const replyBody = typeof parsed.body === "string" ? parsed.body : "";
-  if (!wtPath || !commentId || replyBody.length === 0) {
+  const commentBody = typeof parsed.body === "string" ? parsed.body : "";
+  if (!wtPath || commentBody.length === 0) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
         error:
-          "expected { worktreePath: string, commentId: string, body: string, outcome: 'addressed' | 'declined' | 'noted' }",
+          "expected { worktreePath: string, body: string, (parent: { commentId, outcome } | anchor: { file, lines }) }",
       }),
     );
     return;
   }
-  if (!isOutcome(parsed.outcome)) {
+  const hasParent = parsed.parent !== undefined && parsed.parent !== null;
+  const hasAnchor = parsed.anchor !== undefined && parsed.anchor !== null;
+  if (hasParent === hasAnchor) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid outcome" }));
+    res.end(
+      JSON.stringify({
+        error: hasParent
+          ? "exactly one of `parent` and `anchor` may be set"
+          : "exactly one of `parent` and `anchor` must be set",
+      }),
+    );
     return;
   }
   try {
@@ -1300,35 +1353,88 @@ async function handleAgentPostReply(
     res.end(JSON.stringify({ error: message }));
     return;
   }
-  // Reject replies whose commentId never appeared in this worktree's
-  // delivered list — an agent posting against a fabricated id is either
-  // confused or talking past us; either way it would silently create an
-  // orphan that the UI merge step drops.
-  if (!agentQueue.isDeliveredCommentId(wtPath, commentId)) {
+  const agentLabel =
+    typeof parsed.agentLabel === "string" && parsed.agentLabel.length > 0
+      ? parsed.agentLabel
+      : undefined;
+
+  if (hasParent) {
+    const parent = parsed.parent as { commentId?: unknown; outcome?: unknown };
+    const commentId =
+      typeof parent.commentId === "string" ? parent.commentId : "";
+    if (!commentId) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({ error: "parent.commentId must be a non-empty string" }),
+      );
+      return;
+    }
+    if (!isOutcome(parent.outcome)) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "invalid parent.outcome" }));
+      return;
+    }
+    // Reject replies whose commentId never appeared in this worktree's
+    // delivered list — an agent posting against a fabricated id is either
+    // confused or talking past us; either way it would silently create an
+    // orphan that the UI merge step drops.
+    if (!agentQueue.isDeliveredCommentId(wtPath, commentId)) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `parent.commentId ${JSON.stringify(commentId)} is not a delivered comment for this worktree`,
+        }),
+      );
+      return;
+    }
+    const id = agentQueue.postAgentComment(wtPath, {
+      parent: { commentId, outcome: parent.outcome },
+      body: commentBody,
+      agentLabel,
+    });
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ id }));
+    return;
+  }
+
+  // hasAnchor === true
+  const anchor = parsed.anchor as { file?: unknown; lines?: unknown };
+  const file = typeof anchor.file === "string" ? anchor.file : "";
+  const lines = typeof anchor.lines === "string" ? anchor.lines : "";
+  if (!file) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "anchor.file must be a non-empty string" }));
+    return;
+  }
+  if (!lines) {
+    // File-level top-level comments are disallowed in v0 — see
+    // docs/sdd/agent-comments/spec.md § Out of Scope.
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        error: `commentId ${JSON.stringify(commentId)} is not a delivered comment for this worktree`,
+        error:
+          "anchor.lines must be a non-empty string (file-level agent comments are not supported)",
       }),
     );
     return;
   }
-  const id = agentQueue.postReply(wtPath, {
-    commentId,
-    body: replyBody,
-    outcome: parsed.outcome,
-    agentLabel:
-      typeof parsed.agentLabel === "string" && parsed.agentLabel.length > 0
-        ? parsed.agentLabel
-        : undefined,
+  const id = agentQueue.postAgentComment(wtPath, {
+    anchor: { file, lines },
+    body: commentBody,
+    agentLabel,
   });
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ id }));
 }
 
-async function handleAgentListReplies(
+async function handleAgentListComments(
   req: IncomingMessage,
   res: ServerResponse,
   origin: string | null,
@@ -1350,10 +1456,10 @@ async function handleAgentListReplies(
     res.end(JSON.stringify({ error: message }));
     return;
   }
-  const replies = agentQueue.listReplies(wtPath);
+  const comments = agentQueue.listAgentComments(wtPath);
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ replies }));
+  res.end(JSON.stringify({ comments }));
 }
 
 async function handleAgentUnenqueue(

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
   handleCheckReviewComments,
-  handlePostReviewReply,
+  handlePostReviewComment,
   NEXT_STEP_HINT,
 } from "./handler.js";
 
@@ -219,14 +219,14 @@ describe("handleCheckReviewComments", () => {
   });
 });
 
-describe("handlePostReviewReply", () => {
-  it("POSTs to /api/agent/replies with the input and returns the assigned id", async () => {
+describe("handlePostReviewComment — reply shape", () => {
+  it("POSTs to /api/agent/comments with the wire-shape parent payload and returns the assigned id", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "reply-1" }));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        commentId: "c1",
+        parentId: "c1",
         replyText: "fixed it",
         outcome: "addressed",
       },
@@ -235,24 +235,24 @@ describe("handlePostReviewReply", () => {
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("reply-1");
+    expect(result.content[0]!.text).toContain("for comment c1");
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toMatch(/\/api\/agent\/replies$/);
+    expect(calls[0]!.url).toMatch(/\/api\/agent\/comments$/);
     // Wire field on the local server endpoint stays `body` — the
     // `replyText` rename is contained to the MCP tool's input schema.
     const body = JSON.parse(String(calls[0]!.init?.body));
     expect(body).toEqual({
       worktreePath: "/repo",
-      commentId: "c1",
+      parent: { commentId: "c1", outcome: "addressed" },
       body: "fixed it",
-      outcome: "addressed",
     });
   });
 
   it("falls back to deps.cwd() when worktreePath is absent", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewReply(
-      { commentId: "c1", replyText: "x", outcome: "noted" },
+    await handlePostReviewComment(
+      { parentId: "c1", replyText: "x", outcome: "noted" },
       { fetchFn, cwd: () => "/tmp/cwd", discoverPort: noDiscovery },
     );
 
@@ -264,10 +264,10 @@ describe("handlePostReviewReply", () => {
   it("returns an error result on HTTP 500 with port and status in the message", async () => {
     const { fetchFn } = makeFetch(new Response("oops", { status: 500 }));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        commentId: "c1",
+        parentId: "c1",
         replyText: "x",
         outcome: "addressed",
       },
@@ -282,10 +282,10 @@ describe("handlePostReviewReply", () => {
   it("returns an error result without throwing on fetch rejection", async () => {
     const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        commentId: "c1",
+        parentId: "c1",
         replyText: "x",
         outcome: "declined",
       },
@@ -301,17 +301,17 @@ describe("handlePostReviewReply", () => {
     vi.stubEnv("SHIPPABLE_PORT", "5050");
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewReply(
+    await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        commentId: "c1",
+        parentId: "c1",
         replyText: "x",
         outcome: "noted",
       },
       { fetchFn },
     );
 
-    expect(calls[0]!.url).toBe("http://127.0.0.1:5050/api/agent/replies");
+    expect(calls[0]!.url).toBe("http://127.0.0.1:5050/api/agent/comments");
   });
 
   it("returns an error result when the response body is not valid JSON", async () => {
@@ -322,10 +322,10 @@ describe("handlePostReviewReply", () => {
       }),
     );
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        commentId: "c1",
+        parentId: "c1",
         replyText: "x",
         outcome: "addressed",
       },
@@ -334,5 +334,64 @@ describe("handlePostReviewReply", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toMatch(/JSON|parse/i);
+  });
+});
+
+describe("handlePostReviewComment — top-level (anchor) shape", () => {
+  it("POSTs to /api/agent/comments with the wire-shape anchor payload and returns the assigned id", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "agent-1" }));
+
+    const result = await handlePostReviewComment(
+      {
+        worktreePath: "/repo",
+        file: "src/foo.ts",
+        lines: "42-58",
+        replyText: "I notice this block lacks tests",
+      },
+      { fetchFn, discoverPort: noDiscovery },
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toContain("agent-1");
+    expect(result.content[0]!.text).toContain("for src/foo.ts:42-58");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toMatch(/\/api\/agent\/comments$/);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body).toEqual({
+      worktreePath: "/repo",
+      anchor: { file: "src/foo.ts", lines: "42-58" },
+      body: "I notice this block lacks tests",
+    });
+  });
+
+  it("falls back to deps.cwd() when worktreePath is absent (anchor form)", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+
+    await handlePostReviewComment(
+      { file: "src/foo.ts", lines: "1", replyText: "x" },
+      { fetchFn, cwd: () => "/tmp/cwd", discoverPort: noDiscovery },
+    );
+
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body.worktreePath).toBe("/tmp/cwd");
+  });
+
+  it("returns an error result without throwing on fetch rejection (anchor form)", async () => {
+    const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
+
+    const result = await handlePostReviewComment(
+      {
+        worktreePath: "/repo",
+        file: "src/foo.ts",
+        lines: "1",
+        replyText: "x",
+      },
+      { fetchFn, port: 7777 },
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("ECONNREFUSED");
+    expect(result.content[0]!.text).toContain("7777");
   });
 });
