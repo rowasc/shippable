@@ -50,7 +50,9 @@ Lean Option B because the dispatcher already branches on `status`, and the "unsu
 
 **Proposal:** keep both endpoints (the chip needs the answer before the user clicks), but make the *lookup* response carry the same capability shape on `unsupported`, so the frontend can update the chip on the fly without a separate refetch.
 
-### 5. Per-language capabilities (blocks PHP work)
+### 5. Per-language capabilities (shipped)
+
+**Status: shipped.** The response shape is `DefinitionCapabilities { languages: DefinitionLanguageCapability[]; requiresWorktree: boolean }` at `web/src/definitionTypes.ts:67`. PHP module is live (`server/src/languages/php.ts`); the chip resolves per-file via `findCapabilityForLanguage`.
 
 `getDefinitionCapabilities()` reports a flat `available: boolean` plus a flat `supportedLanguages: string[]`. With one language and one binary, that's enough. With PHP coming, "TS available, PHP not installed" can't be expressed.
 
@@ -120,11 +122,11 @@ Picking one wholesale is a flag day. Don't do it. *Do* avoid mixing them within 
 
 ## Order of operations
 
-1. Per-language capabilities (#5). Hard prerequisite for the PHP work.
+1. ~~Per-language capabilities (#5).~~ **Shipped** alongside the PHP module.
 2. Structured error codes (#6) — additive, safe to ship in the same PR as the PHP module.
 3. Body key normalization (#2) — additive, deprecation alias kept for one release.
 4. HTTP-vs-discriminator decision (#3). Apply it across the family in one pass once decided.
-5. Capability/lookup response sharing (#4). After #5 lands so the shape is fixed.
-6. README cross-reference (#9). Already partially done in the table; finish when #5 changes the shape.
+5. Capability/lookup response sharing (#4). The capability shape is now fixed, so this is unblocked.
+6. README cross-reference (#9). Already partially done in the table; finish when #4 lands.
 
 Items 7 and 8 land opportunistically; they're not blocking anything.
