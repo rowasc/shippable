@@ -1,4 +1,5 @@
 import type {
+  AgentComment,
   AgentReply,
   CharRange,
   Cursor,
@@ -60,6 +61,7 @@ export function initialState(
       previewedFiles: new Set(),
       selection: null,
       detachedReplies: [],
+      agentComments: [],
     };
   }
   const cs = seed[0];
@@ -79,6 +81,7 @@ export function initialState(
     previewedFiles: new Set(),
     selection: null,
     detachedReplies: [],
+    agentComments: [],
   };
 }
 
@@ -152,6 +155,14 @@ export type Action =
       // ids update in place, new ids append, sorted by postedAt ascending.
       type: "MERGE_AGENT_REPLIES";
       polled: PolledAgentReply[];
+    }
+  | {
+      // Merge a polled batch of top-level (anchor-shaped) agent comments
+      // into `state.agentComments`. Idempotent by id, sorted by postedAt
+      // ascending. Mirrors MERGE_AGENT_REPLIES's invariants — re-merging
+      // the same batch returns the same state reference for React's sake.
+      type: "MERGE_AGENT_COMMENTS";
+      polled: AgentComment[];
     }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
@@ -379,6 +390,8 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "MERGE_AGENT_REPLIES":
       return mergeAgentReplies(state, action.polled);
+    case "MERGE_AGENT_COMMENTS":
+      return mergeAgentComments(state, action.polled);
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
       return {
@@ -557,6 +570,13 @@ function reloadChangeset(
       nextReplies[key] = list;
       continue;
     }
+    // Agent-comment threads aren't hunk-anchored — their key carries the
+    // server-minted AgentComment id directly. Pass them through unchanged;
+    // the reload pass only re-emits hunk-anchored keys.
+    if (parsed.kind === "agentComment") {
+      nextReplies[key] = list;
+      continue;
+    }
     const oldRef = oldHunkInfo.get(parsed.hunkId);
     if (!oldRef) {
       // This reply belongs to a different changeset; pass through.
@@ -658,6 +678,13 @@ function rekey(
       return hunkSummaryReplyKey(newHunkId);
     case "teammate":
       return teammateReplyKey(newHunkId);
+    case "agentComment":
+      // Agent-comment threads aren't hunk-anchored and never reach this
+      // function — the reload loop above passes them through. Guard
+      // defensively so a future caller can't silently drop the key.
+      throw new Error(
+        "rekey called for an agentComment thread; agent-comment threads aren't hunk-anchored",
+      );
   }
 }
 
@@ -958,6 +985,64 @@ function shallowEqualAgentReply(a: AgentReply, b: AgentReply): boolean {
     a.postedAt === b.postedAt &&
     a.agentLabel === b.agentLabel
   );
+}
+
+/**
+ * Idempotent merge of polled top-level agent comments into the
+ * `state.agentComments` slot. Mirrors `mergeAgentReplies`: existing ids
+ * update in place when their content changed; new ids append; entries
+ * sorted by `postedAt` ascending. Re-merging the same batch returns the
+ * same state reference so React subscribers don't re-render on idle polls.
+ *
+ * Reply-shaped (parent-set) entries are filtered out defensively; the
+ * polling-split in `useDeliveredPolling.ts` should never dispatch them
+ * here, but the guard means a future caller can't silently corrupt the
+ * slot.
+ */
+function mergeAgentComments(
+  state: ReviewState,
+  polled: AgentComment[],
+): ReviewState {
+  const incoming = polled.filter((c) => c.anchor !== undefined);
+  if (incoming.length === 0) return state;
+
+  const byId = new Map<string, AgentComment>();
+  for (const e of state.agentComments) byId.set(e.id, e);
+  let changed = false;
+  for (const inc of incoming) {
+    const prev = byId.get(inc.id);
+    if (!prev) {
+      byId.set(inc.id, inc);
+      changed = true;
+      continue;
+    }
+    if (!shallowEqualAgentComment(prev, inc)) {
+      byId.set(inc.id, inc);
+      changed = true;
+    }
+  }
+  if (!changed) return state;
+  const merged = Array.from(byId.values()).sort((a, b) =>
+    a.postedAt.localeCompare(b.postedAt),
+  );
+  return { ...state, agentComments: merged };
+}
+
+function shallowEqualAgentComment(a: AgentComment, b: AgentComment): boolean {
+  if (
+    a.id !== b.id ||
+    a.body !== b.body ||
+    a.postedAt !== b.postedAt ||
+    a.agentLabel !== b.agentLabel
+  ) {
+    return false;
+  }
+  // Anchor-shaped comparison — reply-shaped entries don't reach this slot,
+  // but mirror the same defensive check.
+  if (a.anchor && b.anchor) {
+    return a.anchor.file === b.anchor.file && a.anchor.lines === b.anchor.lines;
+  }
+  return a.anchor === undefined && b.anchor === undefined;
 }
 
 export function hunkCoverage(

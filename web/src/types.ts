@@ -310,6 +310,14 @@ export interface Reply {
 /**
  * An agent's structured reply to a reviewer comment. See
  * `docs/sdd/agent-reply-support/spec.md` for the design.
+ *
+ * Naming note: server-side, both reply-shaped and top-level-shaped entries
+ * are stored as `AgentComment` (discriminated). On the web side we keep this
+ * flat `AgentReply` type for the nested-under-Reply path (see
+ * `Reply.agentReplies`) and use the discriminated `AgentComment` type only
+ * for top-level entries in `state.agentComments`. The polled wire shape is
+ * `AgentComment[]`; we split it client-side. See
+ * `docs/sdd/agent-comments/spec.md` and `…/implementation-notes.md`.
  */
 export interface AgentReply {
   id: string;
@@ -320,6 +328,36 @@ export interface AgentReply {
   /** Optional generic identity surface; reserved for future per-harness label. */
   agentLabel?: string;
 }
+
+/**
+ * Discriminated agent-authored entry — the unified wire shape returned by
+ * `GET /api/agent/comments`. Exactly one of `parent` / `anchor` is set:
+ *
+ *   - `parent` → a reply threaded under a delivered reviewer comment.
+ *   - `anchor` → a top-level comment anchored to file + lines in the diff.
+ *
+ * Only the `anchor`-shaped variant lands in `state.agentComments`. The
+ * `parent`-shaped variant is translated to the flat `AgentReply` shape
+ * before merging into the matching reviewer Reply's `agentReplies[]`.
+ */
+interface AgentCommentBase {
+  id: string;
+  body: string;
+  /** ISO timestamp stamped at post time. */
+  postedAt: string;
+  /** Optional generic identity surface; reserved for future per-harness label. */
+  agentLabel?: string;
+}
+
+export type AgentComment =
+  | (AgentCommentBase & {
+      parent: { commentId: string; outcome: "addressed" | "declined" | "noted" };
+      anchor?: never;
+    })
+  | (AgentCommentBase & {
+      anchor: { file: string; lines: string };
+      parent?: never;
+    });
 
 /**
  * A reply whose anchor no longer matches anywhere in the new diff. Carries
@@ -401,6 +439,13 @@ export interface ReviewState {
    * the line it was attached to is gone.
    */
   detachedReplies: DetachedReply[];
+  /**
+   * Top-level (anchor-shaped) agent comments for the active worktree.
+   * Populated by `MERGE_AGENT_COMMENTS` after a poll of `/api/agent/comments`.
+   * Reply-shaped agent entries merge into `Reply.agentReplies[]` separately.
+   * Keyed by id; we keep the array sorted by `postedAt` ascending.
+   */
+  agentComments: AgentComment[];
 }
 
 // ── Review plan (the "where to begin" primitive) ──────────────────────────
@@ -609,6 +654,15 @@ export function hunkSummaryReplyKey(hunkId: string): string {
 export function teammateReplyKey(hunkId: string): string {
   return `teammate:${hunkId}`;
 }
+/**
+ * Reply-key for a thread under a top-level agent comment. The id is the
+ * server-minted `AgentComment.id`. Distinct from the hunk-anchored keys
+ * above — agent-comment threads are addressed by id directly, not by hunk
+ * position.
+ */
+export function agentCommentReplyKey(agentCommentId: string): string {
+  return `agentComment:${agentCommentId}`;
+}
 /** Fresh user-started comment on a line (not a reply to AI/teammate). */
 export function userCommentKey(hunkId: string, lineIdx: number): string {
   return `user:${hunkId}:${lineIdx}`;
@@ -631,7 +685,8 @@ export type ParsedReplyKey =
   | { kind: "user"; hunkId: string; lineIdx: number }
   | { kind: "block"; hunkId: string; lo: number; hi: number; lineIdx: number }
   | { kind: "hunkSummary"; hunkId: string; lineIdx: 0 }
-  | { kind: "teammate"; hunkId: string; lineIdx: 0 };
+  | { kind: "teammate"; hunkId: string; lineIdx: 0 }
+  | { kind: "agentComment"; agentCommentId: string };
 
 /**
  * Single source of truth for splitting reply keys back into their parts.
@@ -676,6 +731,12 @@ export function parseReplyKey(key: string): ParsedReplyKey | null {
     case "teammate":
       if (rest.length === 0) return null;
       return { kind: "teammate", hunkId: rest, lineIdx: 0 };
+    case "agentComment":
+      // The id is everything after the prefix. We don't enforce a UUID
+      // shape — agent-comment ids are server-minted opaque strings; just
+      // ensure the id portion is non-empty.
+      if (rest.length === 0) return null;
+      return { kind: "agentComment", agentCommentId: rest };
     default:
       return null;
   }
@@ -691,7 +752,8 @@ export type CommentKind =
   | "block"
   | "reply-to-ai-note"
   | "reply-to-teammate"
-  | "reply-to-hunk-summary";
+  | "reply-to-hunk-summary"
+  | "reply-to-agent-comment";
 
 export interface Comment {
   id: string;
@@ -704,6 +766,12 @@ export interface Comment {
   commitSha: string;
   /** Prior comment id this entry replaces. `null` when not an edit. */
   supersedes: string | null;
+  /**
+   * Id of the parent `AgentComment` this entry replies to. Required when
+   * `kind === "reply-to-agent-comment"`, absent otherwise. Distinct from
+   * `supersedes` (which means "replaces a prior version of this comment").
+   */
+  parentAgentCommentId?: string;
   /** ISO timestamp stamped at enqueue. */
   enqueuedAt: string;
 }

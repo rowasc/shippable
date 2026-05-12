@@ -1156,6 +1156,88 @@ describe("MERGE_AGENT_REPLIES", () => {
   });
 });
 
+// ── MERGE_AGENT_COMMENTS ───────────────────────────────────────────────────
+
+describe("MERGE_AGENT_COMMENTS", () => {
+  const tlEntry = (
+    id: string,
+    file: string,
+    lines: string,
+    postedAt: string,
+    body: string = `b-${id}`,
+  ) => ({
+    id,
+    body,
+    postedAt,
+    anchor: { file, lines },
+  });
+
+  it("appends top-level entries into the empty agentComments slot, sorted by postedAt", () => {
+    const merged = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [
+        tlEntry("ac_2", "src/foo.ts", "10", "2026-04-30T00:02:00Z"),
+        tlEntry("ac_1", "src/foo.ts", "5-8", "2026-04-30T00:01:00Z"),
+      ],
+    });
+    expect(merged.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
+    expect(merged.agentComments[0].anchor?.lines).toBe("5-8");
+  });
+
+  it("idempotent: re-merging the same batch returns the same state reference", () => {
+    const batch = [
+      tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z"),
+    ];
+    const s1 = reducer(s0, { type: "MERGE_AGENT_COMMENTS", polled: batch });
+    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: batch });
+    expect(s2).toBe(s1);
+  });
+
+  it("updates existing ids in place when content changes", () => {
+    const s1 = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z", "v1")],
+    });
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z", "v2")],
+    });
+    expect(s2.agentComments).toHaveLength(1);
+    expect(s2.agentComments[0].body).toBe("v2");
+  });
+
+  it("appends late-arriving entries in postedAt order", () => {
+    const s1 = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z")],
+    });
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [
+        tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z"),
+        tlEntry("ac_2", "src/foo.ts", "2", "2026-04-30T00:02:00Z"),
+      ],
+    });
+    expect(s2.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
+  });
+
+  it("ignores reply-shaped entries (defensive — splitter should never send them here)", () => {
+    const merged = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [
+        {
+          id: "ar_1",
+          body: "x",
+          postedAt: "2026-04-30T00:01:00Z",
+          parent: { commentId: "cmt_1", outcome: "noted" },
+        },
+      ],
+    });
+    expect(merged).toBe(s0);
+    expect(merged.agentComments).toEqual([]);
+  });
+});
+
 // ── SET_EXPAND_LEVEL ───────────────────────────────────────────────────────
 
 describe("SET_EXPAND_LEVEL", () => {

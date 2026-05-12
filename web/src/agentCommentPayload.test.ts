@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { deriveCommentPayload } from "./agentCommentPayload";
-import type { ChangeSet, DiffFile, DiffLine, Hunk } from "./types";
+import type { AgentComment, ChangeSet, DiffFile, DiffLine, Hunk } from "./types";
 import {
+  agentCommentReplyKey,
   blockCommentKey,
   hunkSummaryReplyKey,
   lineNoteReplyKey,
@@ -100,5 +101,40 @@ describe("deriveCommentPayload", () => {
   it("returns null for malformed keys", () => {
     expect(deriveCommentPayload("bogus", cs)).toBeNull();
     expect(deriveCommentPayload("user:", cs)).toBeNull();
+  });
+
+  describe("agentComment: prefix", () => {
+    const agentComment: AgentComment = {
+      id: "ac-1",
+      body: "I notice this block lacks tests",
+      postedAt: "2026-04-30T00:01:00Z",
+      anchor: { file: "src/foo.ts", lines: "42-58" },
+    };
+
+    it("returns reply-to-agent-comment with the parent's anchor", () => {
+      const out = deriveCommentPayload(agentCommentReplyKey("ac-1"), cs, [
+        agentComment,
+      ]);
+      expect(out).toEqual({
+        kind: "reply-to-agent-comment",
+        file: "src/foo.ts",
+        lines: "42-58",
+        parentAgentCommentId: "ac-1",
+      });
+    });
+
+    it("returns null when the agent comment isn't in the slot", () => {
+      expect(
+        deriveCommentPayload(agentCommentReplyKey("missing"), cs, [
+          agentComment,
+        ]),
+      ).toBeNull();
+    });
+
+    it("returns null when the agentComments slot is omitted", () => {
+      expect(
+        deriveCommentPayload(agentCommentReplyKey("ac-1"), cs),
+      ).toBeNull();
+    });
   });
 });

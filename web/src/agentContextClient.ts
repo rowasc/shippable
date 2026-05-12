@@ -3,12 +3,12 @@
 
 import { getJson, postJson } from "./apiClient";
 import type {
+  AgentComment,
   AgentContextSlice,
   AgentSessionRef,
   CommentKind,
   DeliveredComment,
 } from "./types";
-import type { PolledAgentReply } from "./state";
 
 export async function listSessionsForWorktree(
   worktreePath: string,
@@ -64,6 +64,13 @@ export async function enqueueComment(args: {
     lines?: string;
     body: string;
     supersedes?: string | null;
+    /**
+     * Required when `kind === "reply-to-agent-comment"`; links the reviewer's
+     * reply to its parent top-level `AgentComment`. The server validates the
+     * id against the worktree's agent-comment store and inlines the parent's
+     * body in the pull envelope so the agent has context for its response.
+     */
+    parentAgentCommentId?: string;
   };
 }): Promise<{ id: string }> {
   return postJson<{ id: string }>("/api/agent/enqueue", {
@@ -92,13 +99,18 @@ export async function fetchDelivered(
   return delivered;
 }
 
-export async function fetchAgentReplies(
+/**
+ * Fetch the worktree's agent-authored entries. The response mixes both
+ * reply-shaped (with `parent`) and top-level-shaped (with `anchor`) entries;
+ * the caller splits them by discriminator in `state.ts`.
+ */
+export async function fetchAgentComments(
   worktreePath: string,
-): Promise<PolledAgentReply[]> {
-  const { replies } = await getJson<{ replies: PolledAgentReply[] }>(
-    `/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
+): Promise<AgentComment[]> {
+  const { comments } = await getJson<{ comments: AgentComment[] }>(
+    `/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
   );
-  return replies;
+  return comments;
 }
 
 /**

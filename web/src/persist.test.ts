@@ -2,8 +2,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { loadSession, peekSession, saveSession } from "./persist";
 import { initialState } from "./state";
-import type { ChangeSet, DiffFile, DiffLine, Hunk, Reply } from "./types";
-import { lineNoteReplyKey } from "./types";
+import type {
+  AgentComment,
+  ChangeSet,
+  DiffFile,
+  DiffLine,
+  Hunk,
+  Reply,
+} from "./types";
+import { agentCommentReplyKey, lineNoteReplyKey } from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
@@ -331,6 +338,62 @@ describe("persist — v2 round-trip with anchor + detached state", () => {
     expect(hydrated.state).not.toBeNull();
     expect(hydrated.state!.detachedReplies).toEqual([]);
     expect(hydrated.state!.replies[key]).toHaveLength(1);
+  });
+
+  it("migrates a v2 snapshot by adding an empty agentComments array", () => {
+    const cs = makeChangeset();
+    const v2 = {
+      v: 2,
+      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
+      readLines: {},
+      reviewedFiles: [],
+      dismissedGuides: [],
+      ackedNotes: [],
+      replies: {},
+      drafts: {},
+      detachedReplies: [],
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(v2));
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state).not.toBeNull();
+    expect(hydrated.state!.agentComments).toEqual([]);
+  });
+
+  it("v3 round-trips state.agentComments through save+load", () => {
+    const cs = makeChangeset();
+    const agentComment: AgentComment = {
+      id: "ac-1",
+      body: "I notice this block lacks tests",
+      postedAt: "2026-04-30T00:01:00.000Z",
+      anchor: { file: "cs1/f1.ts", lines: "1-2" },
+    };
+    const state = {
+      ...initialState([cs]),
+      agentComments: [agentComment],
+    };
+    saveSession(state, {});
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state!.agentComments).toEqual([agentComment]);
+  });
+
+  it("agentComment: reply-key prefix survives rehydrate even though it isn't hunk-anchored", () => {
+    const cs = makeChangeset();
+    const reviewerReply: Reply = {
+      id: "r1",
+      author: "you",
+      body: "agreed, will add",
+      createdAt: "2026-04-30T00:02:00.000Z",
+    };
+    const state = {
+      ...initialState([cs]),
+      replies: { [agentCommentReplyKey("ac-1")]: [reviewerReply] },
+    };
+    saveSession(state, {});
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state!.replies[agentCommentReplyKey("ac-1")]).toHaveLength(1);
+    expect(
+      hydrated.state!.replies[agentCommentReplyKey("ac-1")][0].body,
+    ).toBe("agreed, will add");
   });
 });
 

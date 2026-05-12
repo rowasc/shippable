@@ -18,9 +18,9 @@
 //   - Tests can inject `fetcher` and a fake `setInterval`/clock.
 
 import { useEffect, useRef, useState } from "react";
-import { fetchAgentReplies, fetchDelivered } from "./agentContextClient";
+import { fetchAgentComments, fetchDelivered } from "./agentContextClient";
 import type { PolledAgentReply } from "./state";
-import type { DeliveredComment } from "./types";
+import type { AgentComment, DeliveredComment } from "./types";
 
 /** Match the existing AgentContextSection cadence. */
 export const POLL_INTERVAL_MS = 2000;
@@ -31,8 +31,15 @@ export interface DeliveredPollingResult {
    * Polled agent replies (flat list with `commentId` on each entry). The
    * caller dispatches `MERGE_AGENT_REPLIES` with this on change so the
    * reducer reconciles into the matching reviewer Reply's `agentReplies`.
+   * Derived from the `parent`-shaped entries in the polled `AgentComment[]`.
    */
   agentReplies: PolledAgentReply[];
+  /**
+   * Top-level agent comments (anchor-shaped). The caller dispatches
+   * `MERGE_AGENT_COMMENTS` to fold them into `state.agentComments`.
+   * Derived from the `anchor`-shaped entries in the polled `AgentComment[]`.
+   */
+  agentComments: AgentComment[];
   /** ISO of the last successful fetch; null until the first one lands. */
   lastSuccessfulPollAt: string | null;
   /** True iff the most recent fetch errored. */
@@ -51,19 +58,49 @@ export interface UseDeliveredPollingArgs {
    */
   fetcher?: (worktreePath: string) => Promise<DeliveredComment[]>;
   /**
-   * Override the agent-replies fetcher. Defaults to the real
-   * `fetchAgentReplies` from `agentContextClient`.
+   * Override the agent-comments fetcher. Defaults to the real
+   * `fetchAgentComments` from `agentContextClient`. Returns the mixed
+   * `AgentComment[]` wire shape; the hook splits by discriminator.
    */
-  repliesFetcher?: (worktreePath: string) => Promise<PolledAgentReply[]>;
+  commentsFetcher?: (worktreePath: string) => Promise<AgentComment[]>;
+}
+
+/**
+ * Split a polled `AgentComment[]` into (a) reply-shaped entries translated
+ * to the flat `PolledAgentReply` wire shape consumed by `mergeAgentReplies`,
+ * and (b) anchor-shaped entries kept as-is for `mergeAgentComments`.
+ */
+function splitAgentComments(
+  comments: AgentComment[],
+): { replies: PolledAgentReply[]; topLevel: AgentComment[] } {
+  const replies: PolledAgentReply[] = [];
+  const topLevel: AgentComment[] = [];
+  for (const c of comments) {
+    if (c.parent !== undefined) {
+      const polled: PolledAgentReply = {
+        id: c.id,
+        body: c.body,
+        outcome: c.parent.outcome,
+        postedAt: c.postedAt,
+        commentId: c.parent.commentId,
+      };
+      if (c.agentLabel !== undefined) polled.agentLabel = c.agentLabel;
+      replies.push(polled);
+    } else if (c.anchor !== undefined) {
+      topLevel.push(c);
+    }
+  }
+  return { replies, topLevel };
 }
 
 export function useDeliveredPolling({
   worktreePath,
   fetcher = fetchDelivered,
-  repliesFetcher = fetchAgentReplies,
+  commentsFetcher = fetchAgentComments,
 }: UseDeliveredPollingArgs): DeliveredPollingResult {
   const [delivered, setDelivered] = useState<DeliveredComment[]>([]);
   const [agentReplies, setAgentReplies] = useState<PolledAgentReply[]>([]);
+  const [agentComments, setAgentComments] = useState<AgentComment[]>([]);
   const [lastSuccessfulPollAt, setLastSuccessfulPollAt] = useState<
     string | null
   >(null);
@@ -80,6 +117,7 @@ export function useDeliveredPolling({
     setLastResetWorktree(worktreePath);
     setDelivered([]);
     setAgentReplies([]);
+    setAgentComments([]);
     setLastSuccessfulPollAt(null);
     setError(false);
   }
@@ -88,11 +126,11 @@ export function useDeliveredPolling({
   // a new fetcher reference is passed (parents commonly do this from a
   // closure).
   const fetcherRef = useRef(fetcher);
-  const repliesFetcherRef = useRef(repliesFetcher);
+  const commentsFetcherRef = useRef(commentsFetcher);
   useEffect(() => {
     fetcherRef.current = fetcher;
-    repliesFetcherRef.current = repliesFetcher;
-  }, [fetcher, repliesFetcher]);
+    commentsFetcherRef.current = commentsFetcher;
+  }, [fetcher, commentsFetcher]);
 
   useEffect(() => {
     if (!worktreePath) return;
@@ -103,11 +141,11 @@ export function useDeliveredPolling({
     const tick = async () => {
       if (cancelled) return;
       // Run both endpoints in parallel but handle outcomes independently:
-      // a failed agent-replies fetch shouldn't wipe a successful delivered
+      // a failed agent-comments fetch shouldn't wipe a successful delivered
       // poll, and vice versa.
-      const [deliveredResult, repliesResult] = await Promise.allSettled([
+      const [deliveredResult, commentsResult] = await Promise.allSettled([
         fetcherRef.current(worktreePath),
-        repliesFetcherRef.current(worktreePath),
+        commentsFetcherRef.current(worktreePath),
       ]);
       if (cancelled) return;
       let anyOk = false;
@@ -115,14 +153,19 @@ export function useDeliveredPolling({
         setDelivered(deliveredResult.value);
         anyOk = true;
       }
-      if (repliesResult.status === "fulfilled") {
-        setAgentReplies(repliesResult.value);
+      if (commentsResult.status === "fulfilled") {
+        // Split the polled batch by discriminator: reply-shaped entries
+        // merge under reviewer Replies via mergeAgentReplies; top-level
+        // entries land in state.agentComments via mergeAgentComments.
+        const { replies, topLevel } = splitAgentComments(commentsResult.value);
+        setAgentReplies(replies);
+        setAgentComments(topLevel);
         anyOk = true;
       }
       if (anyOk) setLastSuccessfulPollAt(new Date().toISOString());
       setError(
         deliveredResult.status === "rejected" ||
-          repliesResult.status === "rejected",
+          commentsResult.status === "rejected",
       );
     };
 
@@ -159,5 +202,11 @@ export function useDeliveredPolling({
     };
   }, [worktreePath]);
 
-  return { delivered, agentReplies, lastSuccessfulPollAt, error };
+  return {
+    delivered,
+    agentReplies,
+    agentComments,
+    lastSuccessfulPollAt,
+    error,
+  };
 }
