@@ -2,11 +2,12 @@ use std::net::TcpListener;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use tauri::{Manager, RunEvent, State};
+use tauri::{Emitter, Manager, RunEvent, State};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 mod keychain;
+mod menu;
 
 const ANTHROPIC_KEY_ACCOUNT: &str = "ANTHROPIC_API_KEY";
 
@@ -197,6 +198,15 @@ pub fn run() {
             app.manage(SidecarState {
                 inner: Mutex::new(SidecarRuntime::default()),
             });
+
+            let menu = menu::build(app.handle())?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                if let Some(action) = menu::action_for(event.id()) {
+                    let _ = app.emit("shippable:menu", action);
+                }
+            });
+
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || start_sidecar(app_handle));
             Ok(())

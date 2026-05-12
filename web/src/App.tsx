@@ -5,6 +5,8 @@ import { initialState, reducer } from "./state";
 import { Welcome } from "./components/Welcome";
 import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
+import { FindBar } from "./components/FindBar";
+import { useTauriMenu } from "./useTauriMenu";
 import type {
   ChangeSet,
   DetachedReply,
@@ -89,6 +91,7 @@ function resolveBoot(): BootSeed {
 
 export default function App() {
   const [themeId, setThemeId] = useTheme();
+  const { findOpen, closeFind } = useTauriMenu();
   const [boot] = useState<BootSeed>(() => resolveBoot());
   const [hydrated] = useState(() =>
     boot.applyPersisted
@@ -274,25 +277,31 @@ export default function App() {
 
   if (state.changesets.length === 0) {
     return (
-      <Welcome
-        recents={recents}
-        onLoad={handleLoadChangeset}
-        onRecentsChange={setRecents}
-      />
+      <>
+        <Welcome
+          recents={recents}
+          onLoad={handleLoadChangeset}
+          onRecentsChange={setRecents}
+        />
+        <FindBar open={findOpen} onClose={closeFind} />
+      </>
     );
   }
 
   return (
-    <ReviewWorkspace
-      state={state}
-      dispatch={dispatch}
-      drafts={drafts}
-      setDrafts={setDrafts}
-      themeId={themeId}
-      setThemeId={setThemeId}
-      onLoadChangeset={handleLoadChangeset}
-      currentSource={currentSource}
-      liveReloadBar={liveReloadBar}
-    />
+    <>
+      <ReviewWorkspace
+        state={state}
+        dispatch={dispatch}
+        drafts={drafts}
+        setDrafts={setDrafts}
+        themeId={themeId}
+        setThemeId={setThemeId}
+        onLoadChangeset={handleLoadChangeset}
+        currentSource={currentSource}
+        liveReloadBar={liveReloadBar}
+      />
+      <FindBar open={findOpen} onClose={closeFind} />
+    </>
   );
 }
