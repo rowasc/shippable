@@ -65,7 +65,12 @@ fn start_sidecar(app: tauri::AppHandle) {
         }
     }
     .env("PORT", port.to_string())
-    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
+    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS)
+    // Defense-in-depth: tauri-plugin-shell inherits the parent process's
+    // environment by default. Override ANTHROPIC_API_KEY to an empty string
+    // so a key set in the shell that launched the .app can't shadow the
+    // Keychain-backed credential the web app rehydrates via /api/auth/set.
+    .env("ANTHROPIC_API_KEY", "");
 
     // The Bun-compiled sidecar binary can't resolve the `library/` dir
     // from `import.meta.url` the way `tsx` can, so we point it at one

@@ -66,7 +66,11 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
     };
   }, [attempt]);
 
-  if (state === "ready") {
+  // Wait for credentials to resolve (initial rehydrate finishes by calling
+  // refresh, which flips status to "ready" or "error") before deciding which
+  // branch to render. Without this gate the boot panel can flash for a frame
+  // on Tauri cold start while Keychain reads are still in flight.
+  if (state === "ready" && credentials.status !== "loading") {
     const hasAnthropic = credentials.list.some((c) => c.kind === "anthropic");
     if (!hasAnthropic && !credentials.anthropicSkipped) {
       return (

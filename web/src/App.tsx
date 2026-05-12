@@ -33,7 +33,6 @@ import { useWorktreeLiveReload } from "./useWorktreeLiveReload";
 import { parseDiff } from "./parseDiff";
 import { postJson } from "./apiClient";
 import { fetchDiffCodeGraph } from "./codeGraphClient";
-import { CredentialsProvider, useCredentials } from "./auth/useCredentials";
 
 interface BootSeed {
   changesets: ChangeSet[];
@@ -91,22 +90,6 @@ function resolveBoot(): BootSeed {
 }
 
 export default function App() {
-  return (
-    <CredentialsProvider>
-      <AppBody />
-    </CredentialsProvider>
-  );
-}
-
-function AppBody() {
-  const credentials = useCredentials();
-  useEffect(() => {
-    void credentials.rehydrate();
-    // Run once on mount. `rehydrate` is referentially stable (memoised by
-    // useCredentials), so we deliberately don't include it in deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const [themeId, setThemeId] = useTheme();
   const { findOpen, closeFind } = useTauriMenu();
   const [boot] = useState<BootSeed>(() => resolveBoot());

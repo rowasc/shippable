@@ -17,6 +17,7 @@ vi.mock("./keychain", () => ({
 
 import * as client from "./auth/client";
 import App from "./App";
+import { CredentialsProvider } from "./auth/useCredentials";
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -24,9 +25,17 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
+// The production tree (main.tsx) is <CredentialsProvider><ServerHealthGate>
+// <App/></ServerHealthGate></CredentialsProvider>. Tests mirror that wrapping
+// — App must NOT mount its own provider, and the gate must be able to call
+// useCredentials() above it without throwing.
 describe("App credentials wiring", () => {
-  it("mounts a CredentialsProvider that fetches the list on first render", async () => {
-    render(<App />);
+  it("renders under a hoisted CredentialsProvider and triggers an initial list fetch", async () => {
+    render(
+      <CredentialsProvider>
+        <App />
+      </CredentialsProvider>,
+    );
     await waitFor(() => expect(client.authList).toHaveBeenCalled());
   });
 });

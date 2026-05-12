@@ -68,7 +68,15 @@ export async function streamReview(
   const started = Date.now();
 
   try {
-    const client = new Anthropic({ apiKey: getCredential({ kind: "anthropic" }) });
+    const apiKey = getCredential({ kind: "anthropic" });
+    if (!apiKey) {
+      // /api/review gates on hasCredential and returns 503 before reaching
+      // streamReview, so this branch is the TOCTOU defense — the credential
+      // was cleared between the gate and SDK construction. Throw rather
+      // than let the SDK fall back to process.env.ANTHROPIC_API_KEY.
+      throw new Error("anthropic_key_missing");
+    }
+    const client = new Anthropic({ apiKey });
     const stream = client.messages.stream(
       {
         model: parsed.model ?? DEFAULT_MODEL,

@@ -82,7 +82,15 @@ export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
   const map = buildStructureMap(cs);
   const userContent = buildUserMessage(cs, map);
 
-  const client = new Anthropic({ apiKey: getCredential({ kind: "anthropic" }) });
+  const apiKey = getCredential({ kind: "anthropic" });
+  if (!apiKey) {
+    // The /api/plan handler short-circuits with 503 when the store is empty,
+    // so reaching here implies the credential was cleared between the gate
+    // and SDK construction. Throw rather than let the SDK fall back to
+    // process.env.ANTHROPIC_API_KEY — env reads are no longer authoritative.
+    throw new Error("anthropic_key_missing");
+  }
+  const client = new Anthropic({ apiKey });
 
   const response = await client.messages.parse({
     model: MODEL,

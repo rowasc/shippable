@@ -79,33 +79,33 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  useEffect(() => {
-    // Fire-and-forget; refresh is stable so this runs once on mount.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh();
-  }, [refresh]);
-
   const rehydrate = useCallback(async () => {
-    if (!isTauri()) return;
-    const candidates: Credential[] = [
-      { kind: "anthropic" },
-      { kind: "github", host: "github.com" },
-      ...readTrustedGithubHosts().map(
-        (host): Credential => ({ kind: "github", host }),
-      ),
-    ];
-    for (const credential of candidates) {
-      try {
-        const value = await keychainGet(keychainAccountFor(credential));
-        if (value) {
-          await authSet(credential, value);
+    if (isTauri()) {
+      const candidates: Credential[] = [
+        { kind: "anthropic" },
+        { kind: "github", host: "github.com" },
+        ...readTrustedGithubHosts().map(
+          (host): Credential => ({ kind: "github", host }),
+        ),
+      ];
+      for (const credential of candidates) {
+        try {
+          const value = await keychainGet(keychainAccountFor(credential));
+          if (value) {
+            await authSet(credential, value);
+          }
+        } catch {
+          // Silent — Keychain miss / read error doesn't prompt at boot.
         }
-      } catch {
-        // Silent — Keychain miss / read error doesn't prompt at boot.
       }
     }
     await refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void rehydrate();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+  }, [rehydrate]);
 
   const set = useCallback(
     async (credential: Credential, value: string) => {
