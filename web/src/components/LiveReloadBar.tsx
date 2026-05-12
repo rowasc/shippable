@@ -40,7 +40,7 @@ export function LiveReloadBar({
           Worktree at <code>{provenance.path}</code> is no longer reachable.
           Live reload stopped.
         </span>
-        <button className="livebar__btn" onClick={onDismissGone}>
+        <button type="button" className="livebar__btn" onClick={onDismissGone}>
           dismiss
         </button>
       </div>
@@ -55,6 +55,7 @@ export function LiveReloadBar({
           {describeDrift(provenance.state, staleNext)}
         </span>
         <button
+          type="button"
           className="livebar__btn livebar__btn--primary"
           onClick={onReload}
           disabled={busyReloading}
@@ -62,6 +63,7 @@ export function LiveReloadBar({
           {busyReloading ? "reloading…" : "reload"}
         </button>
         <button
+          type="button"
           className="livebar__btn"
           onClick={onDismissStale}
           disabled={busyReloading}
@@ -82,6 +84,7 @@ export function LiveReloadBar({
         <span className="livebar__path">{provenance.path}</span>
       </span>
       <button
+        type="button"
         className="livebar__btn"
         onClick={onToggleEnabled}
         title="toggle live reload for this worktree"
