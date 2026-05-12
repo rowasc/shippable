@@ -10,6 +10,7 @@ import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { highlightCode } from "../highlight";
 import { ensureMermaidReady } from "./mermaidClient";
+import { MediaLightbox } from "./MediaLightbox";
 import {
   resolveImageSrc,
   resolvePath,
@@ -97,7 +98,8 @@ function MermaidBlock({ source }: { source: string }) {
   const renderId = useId().replace(/[:]/g, "_");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [svg, setSvg] = useState<string | null>(null);
+  const [zoomed, setZoomed] = useState(false);
 
   useEffect(() => {
     ensureMermaidReady();
@@ -105,7 +107,6 @@ function MermaidBlock({ source }: { source: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    let createdUrl: string | null = null;
     const target = containerRef.current;
     if (!target) return;
     setError(null);
@@ -115,18 +116,13 @@ function MermaidBlock({ source }: { source: string }) {
         if (cancelled || !target) return;
         target.innerHTML = result.svg;
         if (result.bindFunctions) result.bindFunctions(target);
-        const blob = new Blob([result.svg], { type: "image/svg+xml" });
-        createdUrl = URL.createObjectURL(blob);
-        setBlobUrl(createdUrl);
+        setSvg(result.svg);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
       });
-    return () => {
-      cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
-    };
+    return () => { cancelled = true; };
   }, [source, renderId]);
 
   if (error) {
@@ -142,23 +138,21 @@ function MermaidBlock({ source }: { source: string }) {
     );
   }
 
-  // Wrap in an anchor pointing to a blob URL of the rendered SVG. Left-click
-  // opens it full-size in a new tab (where the browser/webview's own zoom
-  // works); right-click gives "Open in new tab", "Save link as", etc.
   return (
-    <a
-      href={blobUrl ?? undefined}
-      target="_blank"
-      rel="noreferrer"
-      className="md-preview__mermaid-link"
-      title="Open diagram in new tab to zoom"
-    >
-      <div
-        ref={containerRef}
-        className="md-preview__mermaid"
-        aria-label="Mermaid diagram"
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        className="md-preview__mermaid md-preview__zoomable"
+        title="Click to zoom"
+        onClick={() => svg && setZoomed(true)}
+        disabled={!svg}
+      >
+        <span ref={containerRef} className="md-preview__mermaid-svg" aria-label="Mermaid diagram" />
+      </button>
+      {zoomed && svg ? (
+        <MediaLightbox content={{ kind: "svg", svg }} onClose={() => setZoomed(false)} />
+      ) : null}
+    </>
   );
 }
 
@@ -202,7 +196,7 @@ export function ResolvedImg({
   if (!resolved) return null;
 
   if (resolved.kind === "local") {
-    return <img src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
+    return <ZoomableImage src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
   }
 
   // Key the gate on the resolved identity so React unmounts/remounts (and
@@ -219,6 +213,34 @@ export function ResolvedImg({
   );
 }
 
+function ZoomableImage({
+  src,
+  alt,
+  className,
+  title,
+  ...rest
+}: React.ImgHTMLAttributes<HTMLImageElement> & { src: string }) {
+  const [zoomed, setZoomed] = useState(false);
+  return (
+    <>
+      <img
+        src={src}
+        alt={alt ?? ""}
+        className={cx("md-preview__zoomable-img", className)}
+        {...rest}
+        title={title ?? "Click to zoom"}
+        onClick={() => setZoomed(true)}
+      />
+      {zoomed ? (
+        <MediaLightbox
+          content={{ kind: "image", src, alt: alt ?? undefined }}
+          onClose={() => setZoomed(false)}
+        />
+      ) : null}
+    </>
+  );
+}
+
 function ResolvedImgGate({
   resolved,
   alt,
@@ -230,7 +252,7 @@ function ResolvedImgGate({
   const [isEnabled, setIsEnabled] = useState(false);
 
   if (resolved.kind === "blocked" && isEnabled) {
-    return <img src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
+    return <ZoomableImage src={resolved.src} alt={alt ?? ""} className={className} {...rest} />;
   }
 
   return (
