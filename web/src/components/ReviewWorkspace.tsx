@@ -237,9 +237,11 @@ export function ReviewWorkspace({
     dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
   }, [polledAgentReplies, dispatch]);
 
-  // Same shape on the top-level side: idempotent merge into state.agentComments.
+  // Replace-not-merge into state.agentComments. We dispatch even on the
+  // empty batch so a worktree switch (the hook resets its polled list to
+  // [] on transition) correctly clears stale agent comments from the
+  // previous worktree. The reducer is idempotent under structural equality.
   useEffect(() => {
-    if (polledAgentComments.length === 0) return;
     dispatch({ type: "MERGE_AGENT_COMMENTS", polled: polledAgentComments });
   }, [polledAgentComments, dispatch]);
 
@@ -1296,7 +1298,7 @@ export function ReviewWorkspace({
               if (!activeWorktreeSource) return;
               const target = state.replies[key]?.find((r) => r.id === replyId);
               if (!target) return;
-              const derived = deriveCommentPayload(key, cs);
+              const derived = deriveCommentPayload(key, cs, state.agentComments);
               if (!derived) return;
               // Optimistically clear the error so the pip flips back to ◌
               // queued the moment the user clicks; if the retry fails we set

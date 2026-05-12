@@ -656,14 +656,14 @@ function buildFrames(): Frame[] {
       },
       {
         kind: "tool",
-        tool: "shippable_post_review_reply",
+        tool: "shippable_post_review_comment",
         args: "cmt_a1 · addressed",
         result:
           "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
       },
       {
         kind: "tool",
-        tool: "shippable_post_review_reply",
+        tool: "shippable_post_review_comment",
         args: "cmt_a2 · declined",
         result:
           "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",

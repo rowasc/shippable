@@ -270,9 +270,9 @@ function AgentCommentsBlock({
         {agentComments.map((ac) => {
           const replyKey = agentCommentReplyKey(ac.id);
           const threadReplies = replies[replyKey] ?? [];
-          const anchorLabel = ac.anchor
-            ? `${ac.anchor.file}:${ac.anchor.lines}`
-            : "(no anchor)";
+          // mergeAgentComments filters to anchor-shaped entries, so `anchor`
+          // is always set here. The `!` records that invariant for readers.
+          const anchorLabel = `${ac.anchor!.file}:${ac.anchor!.lines}`;
           return (
             <li key={ac.id} className="ac__agent-comment">
               <div className="ac__agent-comment-head">
@@ -628,10 +628,10 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 /**
  * Two magic phrases — one per direction of the loop. `check shippable` pulls
  * pending reviewer comments via the `shippable_check_review_comments` tool;
- * `report back to shippable` posts per-comment replies via the new
- * `shippable_post_review_reply` tool. The descriptions on both tools tune
- * for implicit triggering, but a literal phrase is the prompt-drift escape
- * hatch — see docs/sdd/agent-reply-support/spec.md.
+ * `report back to shippable` posts per-comment replies (or fresh top-level
+ * agent comments) via the `shippable_post_review_comment` tool. The
+ * descriptions on both tools tune for implicit triggering, but a literal
+ * phrase is the prompt-drift escape hatch.
  */
 const MAGIC_PHRASE_PULL = "check shippable";
 const MAGIC_PHRASE_REPORT = "report back to shippable";

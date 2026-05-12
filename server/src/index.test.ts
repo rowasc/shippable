@@ -206,6 +206,55 @@ describe("POST /api/agent/enqueue", () => {
     expect(r.status).toBe(400);
     expect(String(r.body.error)).toMatch(/is not an agent comment/);
   });
+
+  it("rejects 'reply-to-agent-comment' whose parentAgentCommentId points at a reply-shaped agent entry", async () => {
+    // The agent first posts a reply (parent shape) under some delivered
+    // reviewer comment, then a reviewer somehow tries to enqueue a
+    // reply-to-agent-comment pointing at that reply's id. Only top-level
+    // (anchor-shaped) entries can legitimately parent a reviewer reply.
+    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "deadbeef",
+      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+    });
+    const realCommentId = enq.body.id as string;
+    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
+    const replyShaped = await postJson(`${baseUrl}/api/agent/comments`, {
+      worktreePath,
+      parent: { commentId: realCommentId, outcome: "addressed" },
+      body: "fixed",
+    });
+    const replyShapedId = replyShaped.body.id as string;
+
+    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "abc",
+      comment: {
+        kind: "reply-to-agent-comment",
+        file: "a.ts",
+        lines: "1",
+        body: "x",
+        parentAgentCommentId: replyShapedId,
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(String(r.body.error)).toMatch(/is not an agent comment/);
+  });
+
+  it("rejects malformed comment.lines on enqueue", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
+      worktreePath,
+      commitSha: "abc",
+      comment: {
+        kind: "block",
+        file: "a.ts",
+        lines: "abc",
+        body: "x",
+      },
+    });
+    expect(r.status).toBe(400);
+    expect(String(r.body.error)).toMatch(/lines/);
+  });
 });
 
 describe("POST /api/agent/pull", () => {
@@ -553,6 +602,30 @@ describe("POST /api/agent/comments — top-level (anchor) shape", () => {
     });
     expect(r.status).toBe(400);
     expect(String(r.body.error)).toMatch(/anchor\.lines/);
+  });
+
+  it("rejects malformed anchor.lines (not a single number or simple range)", async () => {
+    const cases = ["abc", "1,2", "10..20", "10-", "-10", "10 to 20", "10\n11"];
+    for (const lines of cases) {
+      const r = await postJson(`${baseUrl}/api/agent/comments`, {
+        worktreePath,
+        anchor: { file: "src/foo.ts", lines },
+        body: "x",
+      });
+      expect(r.status).toBe(400);
+      expect(String(r.body.error)).toMatch(/lines/);
+    }
+  });
+
+  it("rejects agentLabel longer than 64 chars", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+      worktreePath,
+      anchor: { file: "src/foo.ts", lines: "1" },
+      body: "x",
+      agentLabel: "x".repeat(65),
+    });
+    expect(r.status).toBe(400);
+    expect(String(r.body.error)).toMatch(/agentLabel/);
   });
 });
 

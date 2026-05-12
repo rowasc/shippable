@@ -833,6 +833,19 @@ const COMMENT_KINDS: readonly CommentKind[] = [
   "reply-to-agent-comment",
 ];
 
+/**
+ * Line-anchor shape accepted on the wire: a single line ("42") or an
+ * inclusive range ("40-58"). Anything else is rejected at the boundary
+ * so the reviewer panel and the agent envelope never have to defend
+ * against multiline / wildcard / shell-injected `lines` strings.
+ */
+const LINES_PATTERN = /^\d+(-\d+)?$/;
+
+/** Conservative upper bound on `agentLabel` to keep the in-memory store
+ *  bounded against a noisy or hostile caller. Far longer than any real
+ *  per-harness identity (`claude-code`, `codex`, etc.). */
+const MAX_AGENT_LABEL_LENGTH = 64;
+
 async function handleGithubAuthSet(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1187,6 +1200,21 @@ async function handleAgentEnqueue(
     }
     parentAgentCommentId = commentInput.parentAgentCommentId;
   }
+  if (
+    typeof commentInput.lines === "string" &&
+    commentInput.lines.length > 0 &&
+    !LINES_PATTERN.test(commentInput.lines)
+  ) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "comment.lines must be a single line number (\"42\") or a range (\"40-58\")",
+      }),
+    );
+    return;
+  }
   const comment: Omit<Comment, "id" | "enqueuedAt"> = {
     kind: commentInput.kind,
     file: commentInput.file,
@@ -1316,10 +1344,12 @@ async function handleAgentPostComment(
     res.end(JSON.stringify({ error: "invalid JSON body" }));
     return;
   }
+  // Validate in the same order as `handleAgentEnqueue`: shape-level
+  // (worktreePath + discriminator) first, then field-level (body), then
+  // worktree filesystem check.
   const wtPath =
     typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
-  const commentBody = typeof parsed.body === "string" ? parsed.body : "";
-  if (!wtPath || commentBody.length === 0) {
+  if (!wtPath) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(
@@ -1344,6 +1374,13 @@ async function handleAgentPostComment(
     );
     return;
   }
+  const commentBody = typeof parsed.body === "string" ? parsed.body : "";
+  if (commentBody.length === 0) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "body must be a non-empty string" }));
+    return;
+  }
   try {
     await assertGitDir(wtPath);
   } catch (err) {
@@ -1351,6 +1388,19 @@ async function handleAgentPostComment(
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: message }));
+    return;
+  }
+  if (
+    typeof parsed.agentLabel === "string" &&
+    parsed.agentLabel.length > MAX_AGENT_LABEL_LENGTH
+  ) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `agentLabel must be at most ${MAX_AGENT_LABEL_LENGTH} characters`,
+      }),
+    );
     return;
   }
   const agentLabel =
@@ -1420,6 +1470,17 @@ async function handleAgentPostComment(
       JSON.stringify({
         error:
           "anchor.lines must be a non-empty string (file-level agent comments are not supported)",
+      }),
+    );
+    return;
+  }
+  if (!LINES_PATTERN.test(lines)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error:
+          "anchor.lines must be a single line number (\"42\") or a range (\"40-58\")",
       }),
     );
     return;

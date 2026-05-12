@@ -988,44 +988,43 @@ function shallowEqualAgentReply(a: AgentReply, b: AgentReply): boolean {
 }
 
 /**
- * Idempotent merge of polled top-level agent comments into the
- * `state.agentComments` slot. Mirrors `mergeAgentReplies`: existing ids
- * update in place when their content changed; new ids append; entries
- * sorted by `postedAt` ascending. Re-merging the same batch returns the
- * same state reference so React subscribers don't re-render on idle polls.
+ * Replace the `state.agentComments` slot with the polled batch — the
+ * server returns the worktree's full authoritative list (capped at 200)
+ * on every poll, so additive merging would let evicted entries persist
+ * stale and would leak across worktree switches (the hook resets its
+ * polled state to `[]` on worktree change; the reducer must honour that).
  *
  * Reply-shaped (parent-set) entries are filtered out defensively; the
  * polling-split in `useDeliveredPolling.ts` should never dispatch them
  * here, but the guard means a future caller can't silently corrupt the
  * slot.
+ *
+ * Idempotent under structural equality: re-dispatching the same batch
+ * returns the same state reference so React subscribers don't re-render
+ * on idle polls.
  */
 function mergeAgentComments(
   state: ReviewState,
   polled: AgentComment[],
 ): ReviewState {
-  const incoming = polled.filter((c) => c.anchor !== undefined);
-  if (incoming.length === 0) return state;
+  const incoming = polled
+    .filter((c) => c.anchor !== undefined)
+    .slice()
+    .sort((a, b) => a.postedAt.localeCompare(b.postedAt));
+  if (sameAgentCommentsList(state.agentComments, incoming)) return state;
+  return { ...state, agentComments: incoming };
+}
 
-  const byId = new Map<string, AgentComment>();
-  for (const e of state.agentComments) byId.set(e.id, e);
-  let changed = false;
-  for (const inc of incoming) {
-    const prev = byId.get(inc.id);
-    if (!prev) {
-      byId.set(inc.id, inc);
-      changed = true;
-      continue;
-    }
-    if (!shallowEqualAgentComment(prev, inc)) {
-      byId.set(inc.id, inc);
-      changed = true;
-    }
+/** Order-sensitive structural equality — both lists are sorted by `postedAt`. */
+function sameAgentCommentsList(
+  a: AgentComment[],
+  b: AgentComment[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!shallowEqualAgentComment(a[i], b[i])) return false;
   }
-  if (!changed) return state;
-  const merged = Array.from(byId.values()).sort((a, b) =>
-    a.postedAt.localeCompare(b.postedAt),
-  );
-  return { ...state, agentComments: merged };
+  return true;
 }
 
 function shallowEqualAgentComment(a: AgentComment, b: AgentComment): boolean {

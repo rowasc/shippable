@@ -231,12 +231,16 @@ export function isDeliveredCommentId(
 }
 
 /**
- * Returns true when `id` is in the agent-comment store for this worktree.
- * Used by the enqueue endpoint to defensively reject reviewer replies
- * (`kind === "reply-to-agent-comment"`) that point at a `parentAgentCommentId`
- * the agent never actually posted.
+ * Returns true when `id` belongs to a **top-level** (anchor-shaped)
+ * `AgentComment` in this worktree's store. Used by the enqueue endpoint
+ * to defensively reject reviewer replies (`kind === "reply-to-agent-comment"`)
+ * that point at:
+ *   (a) an id the agent never actually posted (forged or stale), or
+ *   (b) a reply-shaped agent entry (a reply, not a top-level root) —
+ *       which can't legitimately be the parent of a reviewer reply.
  *
- * Mirrors `isDeliveredCommentId` for the agent-comment store.
+ * Mirrors `isDeliveredCommentId` for the agent-comment store, narrowed
+ * to the anchor-shaped variant.
  */
 export function isAgentCommentId(
   worktreePath: string,
@@ -244,7 +248,7 @@ export function isAgentCommentId(
 ): boolean {
   const list = agentCommentStore.get(worktreePath);
   if (!list) return false;
-  return list.some((c) => c.id === id);
+  return list.some((c) => c.id === id && c.anchor !== undefined);
 }
 
 /** Test-only: clear all queues. */
@@ -291,9 +295,11 @@ function escapeXmlAttr(value: string): string {
 }
 
 function sanitizeBody(body: string): string {
-  // Strip `]]>` so a future CDATA wrapper around the body can't be terminated
-  // early by user content. We don't wrap in CDATA today, but the cost is
-  // trivial and it future-proofs the format.
+  // Strip `]]>` so the CDATA wrapper around the body (added by `renderComment`
+  // and the `<parent>` child) can't be terminated early by user content.
+  // Without CDATA, a body containing `</comment>` or `</parent>` would break
+  // out of the envelope and the agent's parser would see fabricated sibling
+  // entries — a real prompt-injection vector.
   return body.replace(/\]\]>/g, "]]");
 }
 
@@ -350,15 +356,16 @@ function renderComment(
       const parentAttrs = [
         `id="${escapeXmlAttr(parent.id)}"`,
         `file="${escapeXmlAttr(parent.anchor.file)}"`,
+        `lines="${escapeXmlAttr(parent.anchor.lines)}"`,
       ];
-      if (parent.anchor.lines) {
-        parentAttrs.push(`lines="${escapeXmlAttr(parent.anchor.lines)}"`);
-      }
-      parentChild = `<parent ${parentAttrs.join(" ")}>${sanitizeBody(parent.body)}</parent>`;
+      parentChild = `<parent ${parentAttrs.join(" ")}><![CDATA[${sanitizeBody(parent.body)}]]></parent>`;
     } else {
       attrs.push(`parent-missing="true"`);
     }
   }
 
-  return `  <comment ${attrs.join(" ")}>${sanitizeBody(c.body)}${parentChild}</comment>`;
+  // Body is CDATA-wrapped so user-supplied prose can't escape the
+  // surrounding <comment> / <parent> elements. `sanitizeBody` strips any
+  // `]]>` sequence so the wrapper itself can't be terminated early.
+  return `  <comment ${attrs.join(" ")}><![CDATA[${sanitizeBody(c.body)}]]>${parentChild}</comment>`;
 }

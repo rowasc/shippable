@@ -88,6 +88,16 @@ function splitAgentComments(
       replies.push(polled);
     } else if (c.anchor !== undefined) {
       topLevel.push(c);
+    } else {
+      // The server type guarantees exactly one of `parent` / `anchor` is
+      // set, so TS narrows `c` to `never` here. A wire entry with neither
+      // means a server bug or a version skew (older web app talking to a
+      // newer server with a third shape); surface it loudly rather than
+      // silently dropping. The cast pulls `id` back into scope for the log.
+      console.warn(
+        "[shippable] polled AgentComment has neither `parent` nor `anchor`; dropping",
+        (c as { id?: unknown }).id,
+      );
     }
   }
   return { replies, topLevel };

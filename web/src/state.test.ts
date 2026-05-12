@@ -1236,6 +1236,51 @@ describe("MERGE_AGENT_COMMENTS", () => {
     expect(merged).toBe(s0);
     expect(merged.agentComments).toEqual([]);
   });
+
+  it("replaces — entries missing from the polled batch are evicted", () => {
+    // The server returns the worktree's full authoritative list every
+    // poll (capped at 200). When an entry ages out of the cap, the next
+    // poll must remove it from state.agentComments — additive merging
+    // would leave stale entries indefinitely.
+    const s1 = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [
+        tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z"),
+        tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z"),
+      ],
+    });
+    expect(s1.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
+    const s2 = reducer(s1, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z")],
+    });
+    expect(s2.agentComments.map((c) => c.id)).toEqual(["ac_2"]);
+  });
+
+  it("clears the slot on an empty polled batch (worktree-switch reset)", () => {
+    // When the polling hook resets to [] on worktree change, the empty
+    // dispatch flows through and clears the previous worktree's entries
+    // so they don't leak into the new worktree's view.
+    const s1 = reducer(s0, {
+      type: "MERGE_AGENT_COMMENTS",
+      polled: [tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z")],
+    });
+    expect(s1.agentComments).toHaveLength(1);
+    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: [] });
+    expect(s2.agentComments).toEqual([]);
+  });
+
+  it("idempotent on a structurally-equal but freshly-allocated batch", () => {
+    // Re-polling produces a new array; the reducer must compare element
+    // contents, not array refs, to preserve the no-rerender invariant.
+    const batch = () => [
+      tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z"),
+      tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z"),
+    ];
+    const s1 = reducer(s0, { type: "MERGE_AGENT_COMMENTS", polled: batch() });
+    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: batch() });
+    expect(s2).toBe(s1);
+  });
 });
 
 // ── SET_EXPAND_LEVEL ───────────────────────────────────────────────────────
