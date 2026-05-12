@@ -23,7 +23,7 @@ What this enables:
 - A thread can evolve: a `comment` that becomes a `request` after agent dialogue carries both states. Original intent ≠ current intent is a supported, visible state.
 - AI agents receive `intent` as structured signal in the wire payload, so a `request` reads differently from a `comment` without prose-parsing.
 - Cross-thread aggregation is a first-class read ("show me all open requests", "9 open / 2 acked"). The data shape supports it from slice 1 because it will be required for the inbox view.
-- GitHub round-trip is lossless **for comments Shippable authored**, and *only* for those. Every Shippable push carries a mandatory HTML-comment sentinel as a soft footer (`<!-- sp:v1 intent=… id=… -->`) — the parser's source of truth, invisible in the GitHub UI. Non-default intents also get a small visible glyph at the start of the body (`🚧` blocker, `🔧` request, `❓` question, `✓` accept, `✗` reject) — nice for human readers, carries no Shippable branding. On re-ingest we read intent from the sentinel first; from the legacy `SP: 🛟` header second (read-only compatibility for older Shippable builds and hand-typed cases — we don't push that format ourselves); else the comment is foreign and stored as plain `intent: "comment"`. We never inspect prose for stray glyphs, brackets, or conventional-comments syntax. PR-imported comments live in the local thread store and can be enqueued to the agent like any other interaction.
+- GitHub round-trip is lossless **for comments Shippable authored**, and *only* for those. Every Shippable push carries a mandatory HTML-comment sentinel as a soft footer (`<!-- sp:v1 intent=… id=… -->`) — the parser's source of truth, invisible in the GitHub UI. Non-default intents also get a small visible glyph at the start of the body (`🚧` blocker, `🔧` request, `❓` question, `✓` accept, `✗` reject) — nice for human readers, carries no Shippable branding. On re-ingest we read intent from the sentinel; if there's no sentinel, the comment is foreign and stored as plain `intent: "comment"`. We never inspect prose for stray glyphs, brackets, conventional-comments syntax, or any other in-body convention. PR-imported comments live in the local thread store and can be enqueued to the agent like any other interaction.
 
 What this does **not** try to do (yet):
 
@@ -321,7 +321,7 @@ Today the pieces already exist:
 2. Don't enqueue them automatically. Default: PR comments sit in the local store unsent. Auto-enqueueing every PR comment would flood the agent with stale conversation.
 3. Add an explicit per-PR gesture: a `Share PR comments with agent` button in the changeset header (only visible when `prSource` is set and there are PR-imported interactions in the store). Clicking it stamps `enqueueOptIn: true` on each PR-imported reply that hasn't already been enqueued, which makes the enqueue path pick them up on the next run. Subsequent edits/acks behave like local interactions.
 4. The wire payload preserves the original author (`Reply.author`) and surfaces `external.htmlUrl` so the agent can deep-link back to GitHub. The agent's tool description gets a note: "Comments may include PR-imported items from other reviewers — `author` and `external.htmlUrl` indicate provenance."
-5. PR ingest applies the *same* marker-strip pass as the rest of the GitHub pull path (per § Wire format): a comment whose body begins with the exact `SP: 🛟 <intent>\n\n<body>` Shippable sentinel is parsed into `Reply { intent: <intent>, body: <body> }`. **Everything else stays as `intent: "comment"` with the body verbatim** — bare-emoji prose, conventional-comments syntax, `[REQUEST]` brackets, anything that resembles but doesn't match the sentinel. No heuristic guessing. Same asymmetric rule as § Local ↔ GitHub; PR-ingest is just one caller of that parser.
+5. PR ingest applies the *same* marker-strip pass as the rest of the GitHub pull path (per § Wire format): a comment carrying a Shippable HTML sentinel (`<!-- sp:v1 intent=<intent> id=<id> -->`) is parsed into `Reply { intent: <intent>, body: <body-without-sentinel-and-glyph> }`. **Everything else stays as `intent: "comment"` with the body verbatim** — bare-emoji prose, conventional-comments syntax, `[REQUEST]` brackets, anything without the sentinel. No heuristic guessing. Same asymmetric rule as § Local ↔ GitHub; PR-ingest is just one caller of that parser.
 
 This means the agent reviews PR comments — first-party reviewers' notes get the same treatment as local reviewers' notes. That's the whole point of the unification.
 
@@ -471,19 +471,17 @@ For `comment` intent:
 <!-- sp:v1 intent=comment id=cmt_b22c04 -->
 ```
 
-No `SP:`-style visible branding. No life-buoy emoji. The HTML sentinel is the entire provenance signal.
+No visible branding. The HTML sentinel is the entire provenance signal.
 
-**Pull (GitHub → Shippable).** For each line comment fetched in `server/src/github/pr-load.ts`, the parser tries three increasingly forgiving sources for `intent`, in order:
+**Pull (GitHub → Shippable).** For each line comment fetched in `server/src/github/pr-load.ts`:
 
-1. **HTML sentinel** (canonical). If the body contains a line matching exactly `<!-- sp:v1 intent=<intent> id=<id> -->` where `<intent>` is in the closed set, take that intent. Strip the sentinel line (and the blank line preceding it) from the body before storing. This is the path every Shippable-pushed comment lands on.
+1. **HTML sentinel present?** If the body contains a line matching exactly `<!-- sp:v1 intent=<intent> id=<id> -->` where `<intent>` is in the closed set, take that intent. Strip the sentinel line (and the blank line preceding it) from the body. If a visible intent glyph from the closed set (`🚧 `, `🔧 `, `❓ `, `✓ `, `✗ `) leads the remaining body and matches the sentinel's intent, strip it too. This is the path every Shippable-pushed comment lands on.
 
-2. **Legacy `SP: 🛟 <intent>` header** (read-only compatibility). If no sentinel is present *and* the body's first line matches `SP: 🛟 <intent>` (closed set: `question`, `request`, `blocker`, `ack`, `unack`, `accept`, `reject`) followed by a newline, take that intent and strip the header. This path exists for: (a) hand-typed cases — someone manually typed the older marker; (b) any Shippable build prior to this rev. **We read this format on pull but never push it ourselves** (per user direction: visible Shippable branding isn't useful to the PR audience).
-
-3. **Plain comment** otherwise. Everything else — bare-emoji prose, conventional-comments syntax, `[REQUEST]` brackets, lowercased `sp:`, mangled markers — is `intent: "comment"`, body stored verbatim. **No heuristic guessing, ever.**
+2. **No sentinel? Plain comment.** Everything else — bare-emoji prose, conventional-comments syntax, `[REQUEST]` brackets — is `intent: "comment"`, body stored verbatim. **No heuristic guessing, ever.**
 
 Round-trip stability: a Shippable-pushed `request` re-ingests as `intent: "request"`, body without the visible glyph and without the sentinel. If the user re-pushes that comment (e.g. after editing), both the visible glyph and the sentinel are re-applied fresh — the strip-on-pull + reapply-on-push pattern means re-ingested comments don't accumulate `🔧 🔧 <body>` prefixes or stacked sentinels.
 
-**Visible-glyph collision with foreign prose.** A foreign reviewer who happens to start a comment with `🔧 ` (e.g. "🔧 fix-it instructions follow…") doesn't get misclassified — we only parse intent from the sentinel and the legacy header, never from the visible glyph. The glyph is purely visual; the sentinel is what the parser reads.
+**Visible-glyph collision with foreign prose.** A foreign reviewer who happens to start a comment with `🔧 ` (e.g. "🔧 fix-it instructions follow…") doesn't get misclassified — we only parse intent from the sentinel, never from the visible glyph. The glyph is purely visual; the sentinel is what the parser reads.
 
 **Sentinel collision.** A foreign reviewer who literally types `<!-- sp:v1 intent=blocker id=cmt_xxx -->` inside their comment body could fake provenance. Acceptable casualty for v0 — the structure (correct version tag, valid intent token, id-shaped string) makes accidental collision near zero, and deliberate spoofing of an internal tooling marker is a social problem, not a parser problem.
 
@@ -550,7 +548,7 @@ Each slice is independently shippable. Slice 0 is a hard precondition; the rest 
 
 5. **Wire rename + intent passthrough.** Rename `CommentKind` → `InteractionTarget`, `<comment>` → `<interaction>`, `kind` attribute → `target`; add `intent`, `author`, `authorRole`, and `htmlUrl` (when PR-sourced) to the per-element payload. No `originalIntent` on the wire — the agent derives it from the ordered thread if it cares. Server validation, MCP server, tool descriptions all updated in one commit.
 
-6. **GitHub round-trip.** Push visible glyph + mandatory HTML sentinel footer; pull tries sentinel first, then legacy `SP:🛟` header (read-only), else stays as `comment`. PR-level verdict derived from open-blocker count (see § PR-level verdict).
+6. **GitHub round-trip.** Push visible glyph + mandatory HTML sentinel footer; pull reads sentinel, else stays as `comment`. PR-level verdict derived from open-blocker count (see § PR-level verdict).
 
 7. **PR-comments-to-agent gesture.** Header button; one-shot enqueue of PR-imported interactions. Drop the `external?.source !== "pr"` enqueue filter.
 
@@ -569,7 +567,7 @@ Pinning these before any code:
 ## Risks
 
 - **Picker fatigue.** Seven intents is a lot to put in front of a reviewer who just wants to leave a note. Mitigation: the picker only ever shows the asks (4) when starting a fresh thread; responses appear only in the reply composer where they're contextually relevant. Default is `comment`, picker is one Tab away, never blocking; `a` for ack is a one-key path that bypasses the composer entirely.
-- **Marker collision in re-ingested PRs.** Mitigated by design: foreign comments are never parsed for intent at all. Visible glyphs (`🔧`, `🚧`, `❓`, `✓`, `✗`) in foreign prose don't affect intent — only the HTML sentinel (and the legacy `SP: 🛟` header on pull) feed the parser. The only spoofing risk is a foreign reviewer literally typing the sentinel inside their body; accepted as a v0 casualty (social problem, not parser problem).
+- **Marker collision in re-ingested PRs.** Mitigated by design: foreign comments are never parsed for intent at all. Visible glyphs (`🔧`, `🚧`, `❓`, `✓`, `✗`) in foreign prose don't affect intent — only the HTML sentinel feeds the parser. The only spoofing risk is a foreign reviewer literally typing the sentinel inside their body; accepted as a v0 casualty (social problem, not parser problem).
 - **Selector cost.** The cross-thread aggregation walks every interaction on every render. Mitigation: memoize on `(changesetId, repliesRevision, ackedNotesRevision)`, with the two revision counters maintained by the reducer (added in slice 1; see § Cross-thread aggregation). Slice 1 ships with a benchmark on a 200-thread fixture; if it regresses re-render perf, we move the selector to `useMemo` per consumer.
 - **Wire rename is a breaking change for any in-flight agent session.** The MCP server is in-tree and updates atomically with the rest of the surface; existing in-memory queues are dropped on server restart anyway. The risk is small and we accept it.
 
