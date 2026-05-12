@@ -1,10 +1,10 @@
 # Typed file graph diagram
 
-## Status: design — not yet implemented
+## Status: shipped
 
-The current diagram (`web/src/planDiagram.ts` + `web/src/components/PlanDiagramView.tsx`) renders every file as an unlabelled rectangle and edges as comma-separated symbol-name strings. Reviewers can't tell whether a diff is "two components and a hook" or "a route + a migration + the config that drives it" — every change looks the same shape. The underlying `CodeGraph` already comes from `/api/code-graph`'s LSP path (`server/src/codeGraph.ts`) but most of what LSP returns — symbol kinds, counts, which side of an edge a symbol came from — is collapsed away in `bucketEdgesFromLspResults` before it reaches the renderer.
+The typed file-graph diagram is wired end-to-end. `EdgeKind = "imports" | "tests" | "uses-hook" | "uses-type" | "references"` and the `FileRole` union live in `web/src/types.ts:79`. The two-tier classifier is `web/src/fileRole.ts` (covered by `web/src/fileRole.test.ts`). Renderer and server enrichment landed in the same PR.
 
-This plan is the smallest change that uses what we already pay for: keep the file-granularity graph, but **type the nodes and edges**, so the diagram conveys the *shape* of the diff at a glance.
+The remainder of this doc is the original plan — kept as the record of the design rationale (the resolved decisions section is the load-bearing part for future contributors).
 
 ## Goal
 
