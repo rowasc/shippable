@@ -317,3 +317,10 @@
   border: 1px solid var(--red);
   border-radius: 2px;
 }
+.welcome__hint {
+  color: var(--fg-mute);
+  font-size: 11px;
+}
+.welcome__hint--warn {
+  color: var(--yellow, var(--fg-dim));
+}

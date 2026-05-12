@@ -326,6 +326,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadFromUrl()}
+              aria-invalid={url.trim() !== "" && !isValidHttpUrl(url)}
             />
             <button
               className="welcome__btn"
@@ -335,6 +336,11 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               {urlBusy || pr.busy ? "loading…" : "load"}
             </button>
           </div>
+          {url.trim() !== "" && !isValidHttpUrl(url) && (
+            <div className="welcome__hint welcome__hint--warn">
+              URL must start with <code>http://</code> or <code>https://</code>.
+            </div>
+          )}
           {pr.error && <div className="welcome__err">{pr.error}</div>}
         </section>
 
