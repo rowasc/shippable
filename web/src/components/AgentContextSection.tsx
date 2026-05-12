@@ -8,12 +8,6 @@ import type {
 } from "../types";
 import type { SymbolIndex } from "../symbols";
 
-// Free-form composer was removed alongside the `freeform` CommentKind.
-// The agent → reviewer back-channel is now `shippable_post_review_reply`
-// per docs/sdd/agent-reply-support/spec.md; reviewer → agent stays the
-// existing per-thread queue. Pushback / clarification flows back into
-// the user-agent chat, not Shippable.
-
 interface Props {
   slice: AgentContextSlice | null;
   /** All sessions matched to this worktree (for the picker). */
