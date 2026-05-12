@@ -9,8 +9,6 @@ use tauri_plugin_shell::ShellExt;
 mod keychain;
 mod menu;
 
-const ANTHROPIC_KEY_ACCOUNT: &str = "ANTHROPIC_API_KEY";
-
 // Origins the bundled sidecar should accept. Covers the WebView origin Tauri
 // uses on macOS/Linux (`tauri://localhost`) and the equivalent Windows form
 // (`http://tauri.localhost`). In debug builds (`cargo tauri dev`) the page is
@@ -45,31 +43,6 @@ fn find_free_port() -> std::io::Result<u16> {
 fn start_sidecar(app: tauri::AppHandle) {
     let startup = Instant::now();
 
-    let key = match keychain::get(ANTHROPIC_KEY_ACCOUNT) {
-        Ok(Some(key)) => {
-            log::info!(
-                "keychain lookup completed in {}ms",
-                startup.elapsed().as_millis()
-            );
-            Some(key)
-        }
-        Ok(None) => {
-            log::warn!(
-                "no key in Keychain after {}ms (service=shippable account={ANTHROPIC_KEY_ACCOUNT}); \
-                 AI plan will be unavailable until one is added",
-                startup.elapsed().as_millis()
-            );
-            None
-        }
-        Err(e) => {
-            log::warn!(
-                "Keychain lookup error after {}ms: {e}",
-                startup.elapsed().as_millis()
-            );
-            None
-        }
-    };
-
     let port = match find_free_port() {
         Ok(port) => port,
         Err(e) => {
@@ -92,13 +65,7 @@ fn start_sidecar(app: tauri::AppHandle) {
         }
     }
     .env("PORT", port.to_string())
-    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS)
-    // Always set ANTHROPIC_API_KEY — empty when Keychain has none — so the
-    // sidecar doesn't silently inherit one from the .app's launch
-    // environment. Keychain is the single source of truth on desktop;
-    // letting parent env leak through made the prompt unreachable when the
-    // shell had the var set.
-    .env("ANTHROPIC_API_KEY", key.unwrap_or_default());
+    .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS);
 
     // The Bun-compiled sidecar binary can't resolve the `library/` dir
     // from `import.meta.url` the way `tsx` can, so we point it at one
