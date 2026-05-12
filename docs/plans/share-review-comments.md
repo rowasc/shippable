@@ -15,7 +15,7 @@ What v0 enables:
 - A reviewer authors structured comments on a worktree's diff. Authoring stages them on the local server's queue — there is no separate "Send" gesture.
 - The reviewer asks their agent something like `check shippable`. The agent calls the MCP tool, fetches the queue, and reads the `<reviewer-feedback>` envelope as its tool result. The model acts on the comments.
 - A small "Delivered (N)" block surfaces what the agent has fetched, with timestamps. Per-thread pips flip from queued (◌) to delivered (✓) when the comment id appears in the delivered list.
-- The agent posts structured per-comment replies back via `shippable_post_review_reply`; replies render threaded under the original comment in the panel. See `docs/sdd/agent-reply-support/spec.md`.
+- The agent posts back via `shippable_post_review_comment`. Two modes through one tool: *reply* (`parentId` + `outcome`) threads under a reviewer comment, *top-level* (`file` + `lines`) anchors a fresh agent-authored comment to the diff that the reviewer can reply to. See `docs/sdd/agent-reply-support/spec.md` (reply-only design) and `docs/sdd/agent-comments/spec.md` (top-level extension).
 
 > **Free-form composer is gone.** The `freeform` `CommentKind` and the panel's free-form composer were removed by the agent-reply work — reply support is comment-anchored only. Reviewer → agent freeform messaging now flows out-of-band into the user-agent chat, which is consistent with how clarifications already worked.
 
@@ -24,7 +24,7 @@ What v0 explicitly does not try to do:
 - **Push to an idle session.** No transport short of Channels or PTY injection delivers when the user isn't at the terminal. Both rejected — see § Approaches considered.
 - **Active mid-turn delivery.** Pull means the agent fetches when prompted. Hooks would deliver mid-turn; we considered them and chose not to (§ Why pull, not push).
 - **Per-comment fetch control.** The MCP tool returns the full pending queue. If the reviewer wants only a subset, they delete the rest. Drafts stay local — § State.
-- ~~**Detection of agent replies.**~~ Superseded — the agent posts structured replies via `shippable_post_review_reply` and they render threaded under the original comment. See `docs/sdd/agent-reply-support/spec.md`.
+- ~~**Detection of agent replies.**~~ Superseded — the agent posts structured replies and top-level comments via `shippable_post_review_comment` and they render threaded under the original entry (replies) or as a new root in the panel (top-level). See `docs/sdd/agent-reply-support/spec.md` and `docs/sdd/agent-comments/spec.md`.
 
 ## Why pull, not push
 
@@ -61,7 +61,7 @@ What we lose:
 
 Each one stands on its own and unblocks the next.
 
-**(1) Queue substrate.** Per-worktree comment queue keyed by `worktreePath`, with atomic pull-and-ack. Endpoints: `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. `<reviewer-feedback>` payload formatter. Server-side vitest with the sort/sanitize fixture. *Done when:* enqueue → pull round-trips, second pull is empty, sort order matches the spec. (The agent-reply back-channel adds `POST` and `GET /api/agent/replies` to the same substrate — see `docs/sdd/agent-reply-support/spec.md`.)
+**(1) Queue substrate.** Per-worktree comment queue keyed by `worktreePath`, with atomic pull-and-ack. Endpoints: `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. `<reviewer-feedback>` payload formatter. Server-side vitest with the sort/sanitize fixture. *Done when:* enqueue → pull round-trips, second pull is empty, sort order matches the spec. (The agent back-channel adds `POST` and `GET /api/agent/comments` to the same substrate — both reply-shaped and top-level agent comments share one store. See `docs/sdd/agent-reply-support/spec.md` and `docs/sdd/agent-comments/spec.md`.)
 
 **(2) Author = enqueue.** Authoring a thread comment in the UI POSTs to `/api/agent/enqueue` immediately; the response includes the server-assigned comment id, which is stored on `Reply.enqueuedCommentId`. Editing a previously-saved Reply re-enqueues with `supersedes` set to the prior id (§ Behavior § Edit & delete). Drafts (textarea state before submit) stay local — the data model has no "Reply pending submission" state. *Done when:* writing 5 comments produces 5 entries in the queue with ids on the local Replies; editing one produces a sixth entry with the right `supersedes` link. (The earlier free-form composer that enqueued a `freeform` comment kind was removed by the agent-reply work — see `docs/sdd/agent-reply-support/spec.md`.)
 
@@ -128,7 +128,7 @@ A `<reviewer-feedback>` envelope wrapping one `<comment>` block per item. Markdo
 </reviewer-feedback>
 ```
 
-Per-comment fields: `id` (server-assigned; pass it back as `commentId` to `shippable_post_review_reply`), `file` (repo-relative path), `lines` (single line or range), `kind` (`line` | `block` | `reply-to-ai-note` | `reply-to-teammate` | `reply-to-hunk-summary`). For reply kinds, the body is the original AI/teammate text and the reviewer's reply text — the agent might have no context about the original comment. (The `freeform` kind was removed by the agent-reply work — see `docs/sdd/agent-reply-support/spec.md`.)
+Per-comment fields: `id` (server-assigned; pass it back as `parentId` to `shippable_post_review_comment` in reply mode), `file` (repo-relative path), `lines` (single line or range), `kind` (`line` | `block` | `reply-to-ai-note` | `reply-to-teammate` | `reply-to-hunk-summary` | `reply-to-agent-comment`). For reply kinds, the body is the original AI/teammate text and the reviewer's reply text — the agent might have no context about the original comment. The `reply-to-agent-comment` kind additionally carries a `parent-id` attribute and a `<parent id="…" file="…" lines="…">…</parent>` child inlining the parent agent comment's body, so the agent can thread a coherent response. (The `freeform` kind was removed by the agent-reply work — see `docs/sdd/agent-reply-support/spec.md`.)
 
 When a comment is the result of an edit on a previously-delivered version, the block carries a `supersedes="<old_id>"` attribute pointing to the prior comment id. § Behavior describes the server-side resolution.
 
@@ -219,7 +219,7 @@ User-facing interactions pinned for v0. Alternatives we considered and the reaso
 ## Follow-ups (out of scope for v0)
 
 - **Belt-and-suspenders hooks.** A user who really wants mid-turn delivery on Claude Code can add a hook that hits `/api/agent/pull` directly. The `worktree-agent-context-panel` branch is the reference implementation. Not v0.
-- ~~**Agent-reply detection.**~~ Landed via the post-by-tool flow in `docs/sdd/agent-reply-support/spec.md` — the agent calls `shippable_post_review_reply` with structured `{ commentId, body, outcome }`, no heuristic parsing needed. Replies thread under the original comment in the panel.
+- ~~**Agent-reply detection.**~~ Landed via the post-by-tool flow in `docs/sdd/agent-reply-support/spec.md` and extended in `docs/sdd/agent-comments/spec.md` — the agent calls `shippable_post_review_comment` (reply or top-level mode), no heuristic parsing needed. Reply-shape entries thread under the original comment in the panel; top-level entries surface as new roots under "Agent comments" with their own reply composer.
 - **Push to idle session.** Channels (when GA) or a sidecar that types into the running CLI's stdin.
 - **Multi-channel pip generalization.** When additional delivery channels arrive (GitHub PR comment, Linear issue, etc.), the pip generalizes from "agent-fetched" to "seen by N channels" with a tooltip listing each. v0 ships agent-only; the data model on `Reply` keeps the door open by storing per-channel ids, not a single `enqueuedCommentId`, when this lands.
 - **Server-side install verification for non-CC harnesses.** The server tracks `lastPullAt` per worktree; the panel auto-hides the install affordance when a pull was seen within the last few minutes. Useful when a user pulls quickly after install; the v0 manual "I installed it" dismiss covers the longer-tail case.
@@ -230,8 +230,8 @@ User-facing interactions pinned for v0. Alternatives we considered and the reaso
 
 - `server/src/agent-queue.ts` — per-worktree queue + payload formatter (slice 1); also hosts the agent-reply store added by the agent-reply spec.
 - `server/src/worktree-validation.ts` — `assertGitDir` shared helper.
-- `server/src/index.ts` — endpoints `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. The agent-reply back-channel adds `POST` and `GET /api/agent/replies` to the same router.
-- `mcp-server/` (new) — TypeScript MCP server exposing `shippable_check_review_comments` (slice 3) and `shippable_post_review_reply` (added by the agent-reply spec). Standalone npm-publish target so users can install it via the harness's `mcp add`-style command; not a workspace dependency consumed by the existing `web/` or `server/` packages.
+- `server/src/index.ts` — endpoints `POST /api/agent/enqueue`, `POST /api/agent/pull`, `GET /api/agent/delivered`, `POST /api/agent/unenqueue`. The agent back-channel adds `POST` and `GET /api/agent/comments` to the same router — both reply-shaped and top-level agent comments share one store.
+- `mcp-server/` (new) — TypeScript MCP server exposing `shippable_check_review_comments` (slice 3) and `shippable_post_review_comment` (reply or top-level mode through one tool; see `docs/sdd/agent-comments/spec.md`). Standalone npm-publish target so users can install it via the harness's `mcp add`-style command; not a workspace dependency consumed by the existing `web/` or `server/` packages.
 - `web/src/types.ts` — extends `Reply` with `enqueuedCommentId: string | null`.
 - `web/src/components/AgentContextSection.tsx` — install affordance, magic-phrase copy box, Delivered (N) block.
 - `web/src/components/ReplyThread.tsx` — pip rendering driven by `enqueuedCommentId` + `deliveredIds`.

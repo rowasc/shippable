@@ -45,11 +45,18 @@ The dropdown is the recovery path. Users who want to view the panel against a di
 
 ## Agent → reviewer back-channel
 
-After the agent fetches comments via `shippable_check_review_comments`, it posts structured per-comment replies via the new `shippable_post_review_reply` tool. Each reply carries `{ commentId, body, outcome }` where `outcome ∈ { addressed, declined, noted }`. The reviewer UI polls `GET /api/agent/replies` while the panel is mounted AND the tab is visible; new replies surface threaded under the original comment, with an outcome icon and a generic "agent" label. Multiple replies to the same comment append.
+After the agent fetches comments via `shippable_check_review_comments`, it posts back via the unified `shippable_post_review_comment` tool. Two modes through one schema:
+
+- **Reply mode** — `{ parentId, replyText, outcome }` where `outcome ∈ { addressed, declined, noted }`. Threads under the matching reviewer comment with an outcome icon and a generic "agent" label.
+- **Top-level mode** — `{ file, lines, replyText }`. Posts a fresh, agent-authored comment anchored to the diff. Renders as a new root in the panel under an **Agent comments (N)** block — anchor (`file:lines`), agent label, body, and a standard reply composer. The reviewer can respond inline; the response enqueues with kind `reply-to-agent-comment` and the pull envelope inlines the parent's body as a `<parent>` child so the agent has context.
+
+The reviewer UI polls `GET /api/agent/comments` while the panel is mounted AND the tab is visible; new entries (both shapes) surface within a poll cycle. Multiple replies to the same parent append; multiple top-level comments on the same anchor also append.
+
+File-level top-level comments (`lines` omitted) are not supported in v0 — the reviewer UI has no file-level comment slot yet. The MCP tool input rejects them with a clear error. Follow-up: bundle file-level commenting for users and agents in one future change. See `docs/sdd/agent-comments/spec.md` for the full design.
 
 Pushback / clarification on a `declined` reply does **not** flow back through Shippable — that conversation belongs in the user-agent chat. Shippable's role is to surface what the agent did, not to host a multi-turn debate.
 
-See `docs/sdd/agent-reply-support/spec.md` for the full design.
+See `docs/sdd/agent-reply-support/spec.md` for the original reply-only design and `docs/sdd/agent-comments/spec.md` for the top-level extension.
 
 ## MCP install affordance
 
@@ -57,7 +64,7 @@ The panel renders a prominent install section at the top when no `shippable` MCP
 
 - **Install:** `claude mcp add shippable -- npx -y @shippable/mcp-server` (Claude Code; per-harness adaptation lands as more harnesses surface real demand). See `mcp-server/README.md` for the full per-harness install matrix (Codex CLI, Cursor / Cline / Claude Desktop / OpenCode).
 - **Pull comments:** `check shippable` — the magic phrase that triggers the agent to call `shippable_check_review_comments`.
-- **Report back:** `report back to shippable` — the fallback phrase that nudges the agent to post per-comment replies via `shippable_post_review_reply` after addressing them.
+- **Report back:** `report back to shippable` — the fallback phrase that nudges the agent to post per-comment replies or fresh top-level comments via `shippable_post_review_comment`.
 
 Both tool descriptions are tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback", "let shippable know what you did"), but the literal phrases are the reliable fallback.
 
@@ -79,8 +86,8 @@ Detection is server-side — `GET /api/worktrees/mcp-status` reads `~/.claude/se
 - `web/src/state.ts` — adds `agentContext?: AgentContextSlice` to `ReviewState` + actions `SET_AGENT_CONTEXT`, `SET_AGENT_SESSION`.
 - `web/src/view.ts` — extends `InspectorViewModel` with the rendered slice.
 - `server/src/agent-context.ts` (new) — JSONL parser, `cwd` matcher, commit-boundary slicer.
-- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|unenqueue`, `GET /api/agent/delivered` (the queue substrate, see `docs/plans/share-review-comments.md`), `POST /api/agent/replies` and `GET /api/agent/replies` (the agent → reviewer back-channel, see `docs/sdd/agent-reply-support/spec.md`).
-- `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` (pull pending comments) and `shippable_post_review_reply` (post structured per-comment replies back). Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
+- `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|unenqueue`, `GET /api/agent/delivered` (the queue substrate, see `docs/plans/share-review-comments.md`), `POST /api/agent/comments` and `GET /api/agent/comments` (the agent → reviewer back-channel — both reply-shaped and top-level agent comments share one store; see `docs/sdd/agent-reply-support/spec.md` and `docs/sdd/agent-comments/spec.md`).
+- `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` (pull pending comments) and `shippable_post_review_comment` (post per-comment replies or fresh top-level comments). Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
 
 ## Out of scope for this feature
 
