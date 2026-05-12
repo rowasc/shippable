@@ -157,10 +157,9 @@ export type Action =
       polled: PolledAgentReply[];
     }
   | {
-      // Merge a polled batch of top-level (anchor-shaped) agent comments
-      // into `state.agentComments`. Idempotent by id, sorted by postedAt
-      // ascending. Mirrors MERGE_AGENT_REPLIES's invariants — re-merging
-      // the same batch returns the same state reference for React's sake.
+      // Replace `state.agentComments` with the polled batch. See
+      // `mergeAgentComments` for semantics — note this is replace-not-merge,
+      // unlike the additive MERGE_AGENT_REPLIES above.
       type: "MERGE_AGENT_COMMENTS";
       polled: AgentComment[];
     }

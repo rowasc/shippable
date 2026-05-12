@@ -237,11 +237,15 @@ export function ReviewWorkspace({
     dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
   }, [polledAgentReplies, dispatch]);
 
-  // Replace-not-merge into state.agentComments. We dispatch even on the
-  // empty batch so a worktree switch (the hook resets its polled list to
-  // [] on transition) correctly clears stale agent comments from the
-  // previous worktree. The reducer is idempotent under structural equality.
+  // Replace-not-merge into state.agentComments. Skip the dispatch while
+  // `polledAgentComments === null` — that state means "haven't polled yet"
+  // (initial mount, or just after a worktree switch); dispatching the
+  // hook's initial `[]` here would clobber any persisted agent comments
+  // rehydrated from storage before the first poll lands. Once a real poll
+  // returns we dispatch even on an empty batch so the worktree's
+  // authoritative list (which may have evicted entries) wins.
   useEffect(() => {
+    if (polledAgentComments === null) return;
     dispatch({ type: "MERGE_AGENT_COMMENTS", polled: polledAgentComments });
   }, [polledAgentComments, dispatch]);
 

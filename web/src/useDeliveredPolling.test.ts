@@ -278,8 +278,74 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     expect(r.result.current.agentReplies[0].outcome).toBe("addressed");
     // Top-level entries land in the separate agentComments slot.
     expect(r.result.current.agentComments).toHaveLength(1);
-    expect(r.result.current.agentComments[0].id).toBe("tl1");
-    expect(r.result.current.agentComments[0].anchor?.file).toBe("src/foo.ts");
+    expect(r.result.current.agentComments?.[0].id).toBe("tl1");
+    expect(r.result.current.agentComments?.[0].anchor?.file).toBe("src/foo.ts");
+  });
+
+  it("agentComments is null until the first successful poll lands (initial-mount no-clobber)", async () => {
+    // Regression: before this change the hook's initial state was `[]`, so
+    // the effect in ReviewWorkspace would fire on mount with an empty
+    // batch and clobber a persisted `state.agentComments` rehydrated from
+    // storage. Modelling the slot as `AgentComment[] | null` lets the
+    // caller distinguish "haven't polled yet" from "polled empty".
+    let resolveComments: ((value: AgentComment[]) => void) | null = null;
+    const fetcher = vi.fn<(p: string) => Promise<DeliveredComment[]>>(
+      async () => [],
+    );
+    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
+      () =>
+        new Promise<AgentComment[]>((resolve) => {
+          resolveComments = resolve;
+        }),
+    );
+
+    const r = renderHook(() =>
+      useDeliveredPolling({
+        worktreePath: "/wt",
+        fetcher,
+        commentsFetcher,
+      }),
+    );
+    // Before the in-flight fetch resolves, the slot must still be null.
+    expect(r.result.current.agentComments).toBeNull();
+
+    // Resolve the promise → first successful poll lands → slot becomes [].
+    await act(async () => {
+      resolveComments!([]);
+      await Promise.resolve();
+    });
+    expect(r.result.current.agentComments).toEqual([]);
+  });
+
+  it("worktreePath change resets agentComments to null so stale entries don't survive the transition", async () => {
+    // The reset is what lets the next poll's authoritative list win cleanly;
+    // it also keeps the caller's null-guard symmetric across mount and
+    // worktree switches.
+    const fetcher = vi.fn<(p: string) => Promise<DeliveredComment[]>>(
+      async () => [],
+    );
+    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
+      async (p) =>
+        p === "/wt1"
+          ? [topLevelEntry("tl1", "f.ts", "1-2", "2026-05-06T12:00:00.000Z")]
+          : [],
+    );
+
+    const r = renderHook(
+      ({ worktreePath }: { worktreePath: string }) =>
+        useDeliveredPolling({ worktreePath, fetcher, commentsFetcher }),
+      { initialProps: { worktreePath: "/wt1" } },
+    );
+    await act(() => Promise.resolve());
+    expect(r.result.current.agentComments?.map((c) => c.id)).toEqual(["tl1"]);
+
+    // Synchronous reset on worktree change.
+    r.rerender({ worktreePath: "/wt2" });
+    expect(r.result.current.agentComments).toBeNull();
+
+    // Next poll's result lands and replaces.
+    await act(() => Promise.resolve());
+    expect(r.result.current.agentComments).toEqual([]);
   });
 
   it("resets state when worktreePath changes", async () => {

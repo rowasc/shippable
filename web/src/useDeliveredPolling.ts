@@ -38,8 +38,13 @@ export interface DeliveredPollingResult {
    * Top-level agent comments (anchor-shaped). The caller dispatches
    * `MERGE_AGENT_COMMENTS` to fold them into `state.agentComments`.
    * Derived from the `anchor`-shaped entries in the polled `AgentComment[]`.
+   *
+   * `null` means "haven't polled yet" — distinct from "polled and got an
+   * empty list". The caller MUST skip the dispatch on `null` so an initial
+   * mount doesn't clobber a persisted `state.agentComments` rehydrated from
+   * storage before the first successful poll lands.
    */
-  agentComments: AgentComment[];
+  agentComments: AgentComment[] | null;
   /** ISO of the last successful fetch; null until the first one lands. */
   lastSuccessfulPollAt: string | null;
   /** True iff the most recent fetch errored. */
@@ -110,7 +115,12 @@ export function useDeliveredPolling({
 }: UseDeliveredPollingArgs): DeliveredPollingResult {
   const [delivered, setDelivered] = useState<DeliveredComment[]>([]);
   const [agentReplies, setAgentReplies] = useState<PolledAgentReply[]>([]);
-  const [agentComments, setAgentComments] = useState<AgentComment[]>([]);
+  // `null` until the first successful poll lands. Lets the caller skip the
+  // initial-mount dispatch and avoid clobbering persisted state.agentComments
+  // before any network response arrives.
+  const [agentComments, setAgentComments] = useState<AgentComment[] | null>(
+    null,
+  );
   const [lastSuccessfulPollAt, setLastSuccessfulPollAt] = useState<
     string | null
   >(null);
@@ -127,7 +137,10 @@ export function useDeliveredPolling({
     setLastResetWorktree(worktreePath);
     setDelivered([]);
     setAgentReplies([]);
-    setAgentComments([]);
+    // Back to `null` so the caller skips dispatching until the new
+    // worktree's first poll lands; the dispatched batch (often empty)
+    // then clears any stale comments from the previous worktree.
+    setAgentComments(null);
     setLastSuccessfulPollAt(null);
     setError(false);
   }
