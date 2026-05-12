@@ -32,6 +32,12 @@
   padding: 0;
   list-style: none;
 }
+.panel__empty {
+  padding: 8px 12px;
+  color: var(--fg-mute);
+  font-size: 12px;
+  font-style: italic;
+}
 .row-wrap {
   display: flex;
   align-items: stretch;

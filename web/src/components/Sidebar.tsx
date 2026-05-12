@@ -43,6 +43,9 @@ export function Sidebar({
       />
       <section className="panel">
         <header className="panel__h">Files</header>
+        {viewModel.files.length === 0 && (
+          <div className="panel__empty">No files in this changeset.</div>
+        )}
         <ul className="panel__list">
           {viewModel.files.map((f) => (
             <li
