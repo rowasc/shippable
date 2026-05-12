@@ -7,6 +7,7 @@ import { ReviewWorkspace } from "./ReviewWorkspace";
 import type { Action } from "../state";
 import type { ChangeSet, PrSource } from "../types";
 import { initialState } from "../state";
+import { CredentialsProvider } from "../auth/useCredentials";
 
 const {
   fetchDefinitionCapabilitiesMock,
@@ -20,13 +21,8 @@ const { loadGithubPrMock } = vi.hoisted(() => ({
   loadGithubPrMock: vi.fn(),
 }));
 
-const { setGithubTokenMock } = vi.hoisted(() => ({
-  setGithubTokenMock: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock("../githubPrClient", () => ({
   loadGithubPr: loadGithubPrMock,
-  setGithubToken: setGithubTokenMock,
   GithubFetchError: class GithubFetchError extends Error {
     discriminator: string;
     host?: string;
@@ -154,6 +150,14 @@ vi.mock("../keychain", () => ({
   isTauri: isTauriMock,
   keychainGet: keychainGetMock,
   keychainSet: vi.fn().mockResolvedValue(undefined),
+  keychainRemove: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../auth/client", () => ({
+  authList: vi.fn().mockResolvedValue([]),
+  authSet: vi.fn().mockResolvedValue(undefined),
+  authClear: vi.fn().mockResolvedValue(undefined),
+  AuthClientError: class AuthClientError extends Error {},
 }));
 
 afterEach(cleanup);
@@ -162,7 +166,7 @@ afterEach(() => {
   fetchDefinitionMock.mockReset();
   isTauriMock.mockReturnValue(false);
   keychainGetMock.mockResolvedValue(null);
-  setGithubTokenMock.mockResolvedValue(undefined);
+  window.localStorage.clear();
 });
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -204,16 +208,18 @@ describe("ReviewWorkspace symbol navigation", () => {
     const dispatch = vi.fn();
 
     render(
-      <ReviewWorkspace
-        state={state}
-        dispatch={dispatch}
-        drafts={{}}
-        setDrafts={() => ({})}
-        themeId="light"
-        setThemeId={() => undefined}
-        onLoadChangeset={() => undefined}
-        currentSource={{ kind: "worktree", path: "/repo", branch: "feat/nav" }}
-      />,
+      <CredentialsProvider>
+        <ReviewWorkspace
+          state={state}
+          dispatch={dispatch}
+          drafts={{}}
+          setDrafts={() => ({})}
+          themeId="light"
+          setThemeId={() => undefined}
+          onLoadChangeset={() => undefined}
+          currentSource={{ kind: "worktree", path: "/repo", branch: "feat/nav" }}
+        />
+      </CredentialsProvider>,
     );
 
     await waitFor(() =>
@@ -298,16 +304,18 @@ function renderPrWorkspace(over: Partial<{ dispatch: Dispatch<Action> }> = {}) {
   const dispatch: Dispatch<Action> = over.dispatch ?? vi.fn();
 
   render(
-    <ReviewWorkspace
-      state={state}
-      dispatch={dispatch}
-      drafts={{}}
-      setDrafts={() => ({})}
-      themeId="light"
-      setThemeId={() => undefined}
-      onLoadChangeset={() => undefined}
-      currentSource={{ kind: "pr", prUrl: "https://github.com/owner/repo/pull/1" }}
-    />,
+    <CredentialsProvider>
+      <ReviewWorkspace
+        state={state}
+        dispatch={dispatch}
+        drafts={{}}
+        setDrafts={() => ({})}
+        themeId="light"
+        setThemeId={() => undefined}
+        onLoadChangeset={() => undefined}
+        currentSource={{ kind: "pr", prUrl: "https://github.com/owner/repo/pull/1" }}
+      />
+    </CredentialsProvider>,
   );
 
   return { state, dispatch };
@@ -463,7 +471,11 @@ describe("ReviewWorkspace — PR auth-rejected banner", () => {
     );
     // Token modal must NOT appear
     expect(screen.queryByText(/GitHub token required/i)).toBeNull();
-    expect(setGithubTokenMock).toHaveBeenCalledWith("github.com", "ghp_cached_token");
+    const authClient = await import("../auth/client");
+    expect(authClient.authSet).toHaveBeenCalledWith(
+      { kind: "github", host: "github.com" },
+      "ghp_cached_token",
+    );
   });
 
   it("renders the truncation banner when prSource.truncation is set", () => {
@@ -477,19 +489,70 @@ describe("ReviewWorkspace — PR auth-rejected banner", () => {
     const state = initialState([cs]);
 
     render(
-      <ReviewWorkspace
-        state={state}
-        dispatch={vi.fn() as Dispatch<Action>}
-        drafts={{}}
-        setDrafts={() => ({})}
-        themeId="light"
-        setThemeId={() => undefined}
-        onLoadChangeset={() => undefined}
-        currentSource={null}
-      />,
+      <CredentialsProvider>
+        <ReviewWorkspace
+          state={state}
+          dispatch={vi.fn() as Dispatch<Action>}
+          drafts={{}}
+          setDrafts={() => ({})}
+          themeId="light"
+          setThemeId={() => undefined}
+          onLoadChangeset={() => undefined}
+          currentSource={null}
+        />
+      </CredentialsProvider>,
     );
 
     expect(screen.getByText(/truncated by GitHub: too many files/i)).toBeTruthy();
+  });
+});
+
+describe("ReviewWorkspace — settings affordance", () => {
+  beforeEach(() => {
+    fetchDefinitionCapabilitiesMock.mockResolvedValue({ languages: [] });
+  });
+
+  it("exposes a settings TopbarAction that opens the SettingsModal", async () => {
+    renderPrWorkspace();
+    const btn = await screen.findByRole("button", { name: /settings/i });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /add github host/i })).toBeTruthy(),
+    );
+  });
+});
+
+describe("ReviewWorkspace — AI off chip", () => {
+  beforeEach(() => {
+    fetchDefinitionCapabilitiesMock.mockResolvedValue({ languages: [] });
+  });
+
+  it("renders the AI off chip when anthropic is missing AND the skip flag is set", async () => {
+    window.localStorage.setItem("shippable:anthropic:skip", "true");
+    renderPrWorkspace();
+    const chip = await screen.findByRole("button", { name: /ai off/i });
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /add github host/i })).toBeTruthy(),
+    );
+  });
+
+  it("omits the AI off chip when anthropic is configured", async () => {
+    window.localStorage.setItem("shippable:anthropic:skip", "true");
+    const authClient = await import("../auth/client");
+    vi.mocked(authClient.authList).mockResolvedValue([{ kind: "anthropic" }]);
+    renderPrWorkspace();
+    // Wait for an unrelated topbar button to confirm the topbar has mounted,
+    // then assert the AI off chip is absent.
+    await screen.findByRole("button", { name: /settings/i });
+    expect(screen.queryByRole("button", { name: /ai off/i })).toBeNull();
+  });
+
+  it("omits the AI off chip when anthropic is missing but the user hasn't dismissed the boot prompt", async () => {
+    // No localStorage skip — the boot gate would prompt; the topbar must not.
+    renderPrWorkspace();
+    await screen.findByRole("button", { name: /settings/i });
+    expect(screen.queryByRole("button", { name: /ai off/i })).toBeNull();
   });
 });
 

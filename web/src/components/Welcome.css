@@ -324,3 +324,25 @@
 .welcome__hint--warn {
   color: var(--yellow, var(--fg-dim));
 }
+
+.welcome__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+}
+
+.welcome__footer-link {
+  background: transparent;
+  color: var(--fg-dim);
+  border: none;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.welcome__footer-link:hover {
+  color: var(--fg);
+}

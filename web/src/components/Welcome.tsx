@@ -8,6 +8,7 @@ import { removeRecent } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
 import { useGithubPrLoad, isGithubPrUrl } from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
+import { SettingsModal } from "./SettingsModal";
 
 interface Props {
   recents: RecentEntry[];
@@ -24,6 +25,7 @@ interface Props {
 
 export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   const [err, setErr] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Single URL field (handles both raw diff URLs and GitHub PR HTML URLs).
   const [url, setUrl] = useState("");
@@ -416,7 +418,20 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
             ))}
           </section>
         )}
+
+        <footer className="welcome__footer">
+          <button
+            type="button"
+            className="welcome__footer-link"
+            onClick={() => setShowSettings(true)}
+          >
+            settings
+          </button>
+        </footer>
       </div>
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }

@@ -52,22 +52,6 @@ export class GithubFetchError extends Error {
   }
 }
 
-export async function setGithubToken(
-  host: string,
-  token: string,
-): Promise<void> {
-  const res = await fetch(await apiUrl("/api/github/auth/set"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ host, token }),
-  });
-  if (!res.ok) {
-    const json = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(json.error ?? `HTTP ${res.status}`);
-  }
-}
-
-
 export async function loadGithubPr(prUrl: string): Promise<PrLoadResult> {
   // Basic local validation before hitting the server.
   if (!prUrl.trim()) {

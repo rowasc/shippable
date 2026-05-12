@@ -10,12 +10,12 @@
 import { useState } from "react";
 import {
   loadGithubPr,
-  setGithubToken,
   GithubFetchError,
   GH_ERROR_MESSAGES,
   type PrLoadResult,
 } from "./githubPrClient";
-import { isTauri, keychainGet, keychainSet } from "./keychain";
+import { isTauri, keychainGet } from "./keychain";
+import { useCredentials } from "./auth/useCredentials";
 
 export interface UseGithubPrLoadOptions {
   /**
@@ -32,6 +32,7 @@ export interface TokenModalState {
 }
 
 export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
+  const credentials = useCredentials();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokenModal, setTokenModal] = useState<TokenModalState | null>(null);
@@ -55,7 +56,7 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
           if (isTauri()) {
             const cached = await keychainGet(`GITHUB_TOKEN:${err.host}`);
             if (cached) {
-              await setGithubToken(err.host, cached);
+              await credentials.set({ kind: "github", host: err.host }, cached);
               setBusy(false);
               return loadPr(prUrl); // retry once with the cached token
             }
@@ -83,12 +84,10 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
   }
 
   /** Caller hands this to GitHubTokenModal's onSubmit. Pushes the token to
-   *  Keychain (Tauri) and the server, closes the modal, and retries. */
+   *  Keychain (Tauri) and the server through `useCredentials().set`, closes
+   *  the modal, and retries. */
   async function submitToken(host: string, token: string): Promise<void> {
-    if (isTauri()) {
-      await keychainSet(`GITHUB_TOKEN:${host}`, token);
-    }
-    await setGithubToken(host, token);
+    await credentials.set({ kind: "github", host }, token);
     const pendingUrl = tokenModal?.pendingPrUrl ?? "";
     setTokenModal(null);
     if (pendingUrl) await loadPr(pendingUrl);

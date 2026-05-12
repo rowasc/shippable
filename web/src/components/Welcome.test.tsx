@@ -2,17 +2,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { Welcome } from "./Welcome";
+import { CredentialsProvider } from "../auth/useCredentials";
 
 beforeEach(() => {
   cleanup();
   isTauriMock.mockReturnValue(false);
   keychainGetMock.mockResolvedValue(null);
-  setGithubTokenMock.mockResolvedValue(undefined);
+  window.localStorage.clear();
 });
 
-const { loadGithubPrMock, setGithubTokenMock } = vi.hoisted(() => ({
+vi.mock("../auth/client", () => ({
+  authList: vi.fn().mockResolvedValue([]),
+  authSet: vi.fn().mockResolvedValue(undefined),
+  authClear: vi.fn().mockResolvedValue(undefined),
+  AuthClientError: class AuthClientError extends Error {},
+}));
+
+const { loadGithubPrMock } = vi.hoisted(() => ({
   loadGithubPrMock: vi.fn(),
-  setGithubTokenMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../githubPrClient", async () => {
@@ -20,7 +27,6 @@ vi.mock("../githubPrClient", async () => {
   return {
     ...actual,
     loadGithubPr: loadGithubPrMock,
-    setGithubToken: setGithubTokenMock,
   };
 });
 
@@ -33,6 +39,7 @@ vi.mock("../keychain", () => ({
   isTauri: isTauriMock,
   keychainGet: keychainGetMock,
   keychainSet: vi.fn().mockResolvedValue(undefined),
+  keychainRemove: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../useWorktreeLoader", () => ({
@@ -56,7 +63,9 @@ vi.mock("../useWorktreeLoader", () => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function renderWelcome(onLoad: any = vi.fn()) {
   return render(
-    <Welcome recents={[]} onLoad={onLoad} onRecentsChange={() => {}} />,
+    <CredentialsProvider>
+      <Welcome recents={[]} onLoad={onLoad} onRecentsChange={() => {}} />
+    </CredentialsProvider>,
   );
 }
 
@@ -192,7 +201,11 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();
-    expect(setGithubTokenMock).toHaveBeenCalledWith("github.com", "ghp_cached_token");
+    const authClient = await import("../auth/client");
+    expect(authClient.authSet).toHaveBeenCalledWith(
+      { kind: "github", host: "github.com" },
+      "ghp_cached_token",
+    );
   });
 
   it("renders an inline error for github_pr_not_found", async () => {
@@ -211,6 +224,19 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
 
     await waitFor(() =>
       expect(screen.getByText("PR not found.")).toBeTruthy(),
+    );
+  });
+});
+
+describe("Welcome — settings affordance", () => {
+  it("renders a settings link that opens the SettingsModal", async () => {
+    renderWelcome();
+    const link = screen.getByRole("button", { name: /^settings$/i });
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /add github host/i }),
+      ).toBeTruthy(),
     );
   });
 });

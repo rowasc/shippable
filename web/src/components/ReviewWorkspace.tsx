@@ -25,7 +25,9 @@ import { RangePicker } from "./RangePicker";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { CodeRunner } from "./CodeRunner";
 import { ThemePicker } from "./ThemePicker";
-import { TopbarActions } from "./TopbarActions";
+import { TopbarActions, type TopbarAction } from "./TopbarActions";
+import { SettingsModal } from "./SettingsModal";
+import { useCredentials } from "../auth/useCredentials";
 import { PromptPicker } from "./PromptPicker";
 import { CommandPalette } from "./CommandPalette";
 import { ConfirmModal } from "./ConfirmModal";
@@ -65,9 +67,9 @@ import { KEYMAP, type ActionId } from "../keymap";
 import { clearSession } from "../persist";
 import type { ThemeId } from "../tokens";
 import type { RecentSource } from "../recents";
-import { loadGithubPr, setGithubToken, GithubFetchError } from "../githubPrClient";
+import { loadGithubPr, GithubFetchError } from "../githubPrClient";
 import { GitHubTokenModal } from "./GitHubTokenModal";
-import { isTauri, keychainGet, keychainSet } from "../keychain";
+import { isTauri, keychainGet } from "../keychain";
 import {
   buildDiffViewModel,
   buildSidebarViewModel,
@@ -112,10 +114,17 @@ export function ReviewWorkspace({
   currentSource,
   liveReloadBar,
 }: Props) {
+  const credentials = useCredentials();
+  const hasAnthropicCredential = credentials.list.some(
+    (c) => c.kind === "anthropic",
+  );
+  const showAiOffChip =
+    !hasAnthropicCredential && credentials.anthropicSkipped;
   const [showHelp, setShowHelp] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showInspector, setShowInspector] = useState(true);
   const [showLoad, setShowLoad] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showRangePicker, setShowRangePicker] = useState(false);
   const [rangePickerBusy, setRangePickerBusy] = useState(false);
   const [rangePickerErr, setRangePickerErr] = useState<string | null>(null);
@@ -328,7 +337,7 @@ export function ReviewWorkspace({
           if (isTauri()) {
             const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
             if (cached) {
-              await setGithubToken(e.host, cached);
+              await credentials.set({ kind: "github", host: e.host }, cached);
               // Retry: release busy state after the recursive call resolves.
               setPrRefreshBusy(false);
               return handlePrRefresh(htmlUrl);
@@ -352,10 +361,7 @@ export function ReviewWorkspace({
     host: string,
     token: string,
   ): Promise<void> {
-    if (isTauri()) {
-      await keychainSet(`GITHUB_TOKEN:${host}`, token);
-    }
-    await setGithubToken(host, token);
+    await credentials.set({ kind: "github", host }, token);
     const pendingUrl = prRefreshTokenModal?.pendingHtmlUrl ?? "";
     const pendingAction = prRefreshTokenModal?.pendingAction;
     setPrRefreshTokenModal(null);
@@ -870,7 +876,20 @@ export function ReviewWorkspace({
             node: <ThemePicker value={themeId} onChange={setThemeId} />,
             menuLabel: "theme",
           }}
-          items={[
+          items={([
+            ...(showAiOffChip
+              ? [
+                  {
+                    id: "ai-off",
+                    label: "AI off",
+                    glyph: "✦",
+                    title: "AI is disabled — click to enable",
+                    pinned: true,
+                    priority: 15,
+                    onClick: () => setShowSettings(true),
+                  },
+                ]
+              : []),
             {
               id: "inspector",
               label: "inspector",
@@ -920,6 +939,14 @@ export function ReviewWorkspace({
               },
             },
             {
+              id: "settings",
+              label: "settings",
+              glyph: "⚙",
+              title: "manage Anthropic + GitHub credentials",
+              priority: 5,
+              onClick: () => setShowSettings(true),
+            },
+            {
               id: "reset",
               label: "reset review",
               title: "clear persisted progress and reload",
@@ -928,7 +955,7 @@ export function ReviewWorkspace({
               priority: 100,
               onClick: () => setShowResetConfirm(true),
             },
-          ]}
+          ] as TopbarAction[])}
         />
       </header>
 
@@ -1601,6 +1628,9 @@ export function ReviewWorkspace({
             setShowLoad(false);
           }}
         />
+      )}
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} />
       )}
       <StatusBar
         transientHint={mouseTip}

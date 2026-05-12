@@ -2,23 +2,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { LoadModal } from "./LoadModal";
+import { CredentialsProvider } from "../auth/useCredentials";
 
 afterEach(() => {
   cleanup();
   isTauriMock.mockReturnValue(false);
   keychainGetMock.mockResolvedValue(null);
-  setGithubTokenMock.mockResolvedValue(undefined);
+  window.localStorage.clear();
 });
 
+vi.mock("../auth/client", () => ({
+  authList: vi.fn().mockResolvedValue([]),
+  authSet: vi.fn().mockResolvedValue(undefined),
+  authClear: vi.fn().mockResolvedValue(undefined),
+  AuthClientError: class AuthClientError extends Error {},
+}));
+
 // Mock the github client and the GitHubTokenModal
-const { loadGithubPrMock, setGithubTokenMock } = vi.hoisted(() => ({
+const { loadGithubPrMock } = vi.hoisted(() => ({
   loadGithubPrMock: vi.fn(),
-  setGithubTokenMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../githubPrClient", () => ({
   loadGithubPr: loadGithubPrMock,
-  setGithubToken: setGithubTokenMock,
   GithubFetchError: class GithubFetchError extends Error {
     discriminator: string;
     host?: string;
@@ -50,6 +56,7 @@ vi.mock("../keychain", () => ({
   isTauri: isTauriMock,
   keychainGet: keychainGetMock,
   keychainSet: vi.fn().mockResolvedValue(undefined),
+  keychainRemove: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Worktree loader — disable server-backed section for cleaner tests.
@@ -72,7 +79,11 @@ vi.mock("../useWorktreeLoader", () => ({
 }));
 
 function renderModal(onLoad = vi.fn(), onClose = vi.fn()) {
-  return render(<LoadModal onLoad={onLoad} onClose={onClose} />);
+  return render(
+    <CredentialsProvider>
+      <LoadModal onLoad={onLoad} onClose={onClose} />
+    </CredentialsProvider>,
+  );
 }
 
 describe("LoadModal — unified URL field (PR + diff URL)", () => {
@@ -177,7 +188,11 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();
-    expect(setGithubTokenMock).toHaveBeenCalledWith("github.com", "ghp_cached_token");
+    const authClient = await import("../auth/client");
+    expect(authClient.authSet).toHaveBeenCalledWith(
+      { kind: "github", host: "github.com" },
+      "ghp_cached_token",
+    );
   });
 
   it("opens the token modal when Tauri Keychain returns null (no cached token)", async () => {
