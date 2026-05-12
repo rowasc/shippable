@@ -3,6 +3,7 @@ import {
   DEFAULT_PORT,
   handleCheckReviewComments,
   handlePostReviewReply,
+  NEXT_STEP_HINT,
 } from "./handler.js";
 
 interface CapturedRequest {
@@ -41,7 +42,7 @@ afterEach(() => {
 });
 
 describe("handleCheckReviewComments", () => {
-  it("returns the payload when the server has pending comments", async () => {
+  it("returns the payload with a trailing next-step hint when the server has pending comments", async () => {
     const payload =
       "<reviewer-feedback from=\"shippable\" commit=\"abc\"><comment id=\"c1\" file=\"x.ts\" lines=\"1\" kind=\"block\">hi</comment></reviewer-feedback>";
     const { fetchFn } = makeFetch(jsonResponse({ payload, ids: ["a", "b"] }));
@@ -52,10 +53,12 @@ describe("handleCheckReviewComments", () => {
     );
 
     expect(result.isError).toBeUndefined();
-    expect(result.content).toEqual([{ type: "text", text: payload }]);
+    expect(result.content).toEqual([
+      { type: "text", text: `${payload}\n\n${NEXT_STEP_HINT}` },
+    ]);
   });
 
-  it("returns 'No pending comments.' when payload is empty", async () => {
+  it("returns 'No pending comments.' without the hint when payload is empty", async () => {
     const { fetchFn } = makeFetch(jsonResponse({ payload: "", ids: [] }));
 
     const result = await handleCheckReviewComments(
@@ -67,6 +70,7 @@ describe("handleCheckReviewComments", () => {
     expect(result.content).toEqual([
       { type: "text", text: "No pending comments." },
     ]);
+    expect(result.content[0]!.text).not.toContain(NEXT_STEP_HINT);
   });
 
   it("falls back to deps.cwd() when worktreePath is absent", async () => {

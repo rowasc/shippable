@@ -22,7 +22,7 @@ The descriptions were tuned for prompt drift on adjacent phrasings ("pull review
 
 Input: `{ worktreePath?: string }` — defaults to the agent's `cwd()`.
 
-Returns the formatted reviewer-feedback envelope, or `"No pending comments."` when the queue is empty.
+Returns the formatted reviewer-feedback envelope, or `"No pending comments."` when the queue is empty. When the envelope is non-empty, the response also carries a short trailing next-step hint reminding the agent to call `shippable_post_review_reply` once per comment — the exact wording lives in `src/handler.ts` (`NEXT_STEP_HINT`) so it stays a single source of truth.
 
 ### `shippable_post_review_reply`
 

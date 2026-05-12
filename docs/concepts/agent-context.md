@@ -52,12 +52,12 @@ The panel is collapsed-by-default for everything except Task and Files-touched, 
 
 The same panel hosts the reverse direction. There are now **two MCP tools** wiring the loop end-to-end:
 
-1. **Reviewer → agent (pull).** The reviewer authors structured comments (line, block, replies) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling `shippable_check_review_comments` — typically when prompted with `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment.
-2. **Agent → reviewer (post-back).** After addressing each fetched comment, the agent calls `shippable_post_review_reply` with `{ commentId, body, outcome }` where `outcome ∈ { addressed, declined, noted }`. The reply lands in the local server's per-worktree reply store and surfaces threaded under the original reviewer comment in the panel on the next poll. The fallback magic phrase is `report back to shippable`.
+1. **Reviewer → agent (pull).** The reviewer authors structured comments (line, block, replies) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling `shippable_check_review_comments` — typically when prompted with `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment. The response also carries a trailing next-step hint in-band so the post-back expectation doesn't rely solely on the tool description, which fades from a model's working focus after the call.
+2. **Agent → reviewer (post-back).** After addressing each fetched comment, the agent calls `shippable_post_review_reply` with `{ commentId, replyText, outcome }` where `outcome ∈ { addressed, declined, noted }`. The reply lands in the local server's per-worktree reply store and surfaces threaded under the original reviewer comment in the panel on the next poll. The fallback magic phrase is `report back to shippable`.
 
 The free-form composer and the `freeform` `CommentKind` are gone — reply support is comment-anchored only. Pushback or clarification on a `declined` reply flows out-of-band into the user-agent chat, not back through Shippable.
 
-See `docs/plans/share-review-comments.md` for the original pull design and `docs/sdd/agent-reply-support/spec.md` for the post-back half.
+See `docs/plans/share-review-comments.md` for the original pull design, `docs/sdd/agent-reply-support/spec.md` for the post-back half, and `docs/sdd/auto-reply-hint/spec.md` for the in-band hint that reinforces the loop.
 
 Concretely:
 

@@ -2,6 +2,19 @@ import { discoverSidecarPort } from "./port-discovery.js";
 
 export const DEFAULT_PORT = 3001;
 
+// Appended to the `shippable_check_review_comments` response when the server
+// returns at least one pending comment. Lives in the tool result (not the
+// tool description) because descriptions fade from a model's working focus
+// after a tool call; the response text does not. Suppressed on the empty
+// branch so we don't train the agent to ignore it. See
+// docs/sdd/auto-reply-hint/spec.md.
+export const NEXT_STEP_HINT =
+  "Next step: call `shippable_post_review_reply` once per comment above. " +
+  "Pass the comment's `id` attribute as `commentId`, your prose as `replyText`, " +
+  "and set `outcome` to `addressed` (you fixed it), `declined` (you intentionally " +
+  "won't), or `noted` (you saw it, no action). The user can also trigger this " +
+  "explicitly with the phrase \"report back to shippable\".";
+
 export interface HandlerDeps {
   fetchFn?: typeof fetch;
   port?: number;
@@ -106,7 +119,7 @@ export async function handleCheckReviewComments(
   }
 
   const text = typeof body.payload === "string" && body.payload.length > 0
-    ? body.payload
+    ? `${body.payload}\n\n${NEXT_STEP_HINT}`
     : "No pending comments.";
   return {
     content: [{ type: "text", text }],
