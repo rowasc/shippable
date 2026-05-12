@@ -378,11 +378,14 @@
   opacity: 0.85;
 }
 /* When the whole file is signed off, every line picks up a soft green
-   tint regardless of read-state. This makes flipping Shift+M feel decisive. */
-.diff--file-reviewed .hunk__body .line {
+   tint regardless of read-state. This makes flipping Shift+M feel decisive.
+   The :not(.line--selected) exclusion keeps line-range selections visible
+   on reviewed files — without it the high-specificity reviewed-tint
+   overrides the .line--selected background on context/del rows. */
+.diff--file-reviewed .hunk__body .line:not(.line--selected) {
   background-color: rgba(166, 227, 161, 0.04);
 }
-.diff--file-reviewed .line--add {
+.diff--file-reviewed .line--add:not(.line--selected) {
   background-color: rgba(166, 227, 161, 0.10);
 }
 .line--selected {
