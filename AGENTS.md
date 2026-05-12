@@ -76,6 +76,11 @@ Features that depend on a particular workspace mode (worktree ingest needs disk;
 - Shipping the Tauri DMG via the built-in step (Finder AppleScript). We use `hdiutil` instead — see `scripts/build-dmg.mjs`.
 - If you change `ReviewState` or any other internal shape that will be stored, version it.
 
+## Tauri/Wry constraints
+
+- `window.confirm()`, `window.alert()`, and blob-URL `<a target="_blank">` downloads do NOT work in Wry/WKWebView. Use in-app modals/lightboxes instead.
+- The sidecar inherits parent shell env vars (e.g., `ANTHROPIC_API_KEY`) during `tauri dev` — verify behavior in a packaged DMG, not just dev, before claiming an env-handling change works.
+
 ## Git etiquette
 
 - Conventional-ish commit messages. Look at `git log` for the local style; match it.
