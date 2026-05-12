@@ -60,10 +60,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .close_window()
         .build()?;
 
-    Menu::with_items(
-        app,
-        &[&app_menu, &edit_menu, &view_menu, &window_menu],
-    )
+    Menu::with_items(app, &[&app_menu, &edit_menu, &view_menu, &window_menu])
 }
 
 /// Maps a menu item id to the action string we emit to the frontend.
