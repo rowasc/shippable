@@ -81,11 +81,12 @@ Detection is server-side — `GET /api/worktrees/mcp-status` reads `~/.claude/se
 ## Files of interest
 
 - `web/src/components/Inspector.tsx` — adds `<AgentContextSection>` between the sticky header and the AI concerns section.
-- `web/src/components/AgentContextSection.tsx` (new) — the section UI itself.
-- `web/src/types.ts` — adds `AgentContextSlice`, `AgentSessionRef`, `AgentMessage`, `ToolCallSummary`.
-- `web/src/state.ts` — adds `agentContext?: AgentContextSlice` to `ReviewState` + actions `SET_AGENT_CONTEXT`, `SET_AGENT_SESSION`.
-- `web/src/view.ts` — extends `InspectorViewModel` with the rendered slice.
-- `server/src/agent-context.ts` (new) — JSONL parser, `cwd` matcher, commit-boundary slicer.
+- `web/src/components/AgentContextSection.tsx` — the section UI itself.
+- `web/src/components/ReviewWorkspace.tsx` — holds the agent-context state as plain `useState` at the App level rather than in `ReviewState`. See [`docs/concepts/agent-context.md`](../concepts/agent-context.md) § "State lives outside `ReviewState`" for the rationale (transient, async-fetched, per-changeset — we deliberately don't persist it).
+- `web/src/types.ts` — `AgentContextSlice`, `AgentSessionRef`, `AgentMessage`, `ToolCallSummary`.
+- `web/src/state.ts` — `agentComments` slot, `agentComment:<id>` reply-key prefix, and v2→v3 persist migration.
+- `web/src/agentContextClient.ts` — the fetch helpers; `useDeliveredPolling.ts` drives pip refresh.
+- `server/src/agent-context.ts` — JSONL parser, `cwd` matcher, commit-boundary slicer.
 - `server/src/index.ts` — endpoints `POST /api/worktrees/agent-context` (read), `POST /api/worktrees/sessions` (list candidates for manual pick), `GET /api/worktrees/mcp-status` (install detection), `POST /api/agent/enqueue|pull|unenqueue`, `GET /api/agent/delivered` (the queue substrate, see `docs/plans/share-review-comments.md`), `POST /api/agent/comments` and `GET /api/agent/comments` (the agent → reviewer back-channel — both reply-shaped and top-level agent comments share one store; see `docs/sdd/agent-reply-support/spec.md` and `docs/sdd/agent-comments/spec.md`).
 - `mcp-server/` — the standalone TypeScript MCP server exposing `shippable_check_review_comments` (pull pending comments) and `shippable_post_review_comment` (post per-comment replies or fresh top-level comments). Installs into Claude Code via `claude mcp add shippable -- npx -y @shippable/mcp-server`.
 
