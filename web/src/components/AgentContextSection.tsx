@@ -162,7 +162,10 @@ export function AgentContextSection({
 
       {error && (
         <div className="ac__err">
-          {error} <button className="ac__err-retry" onClick={onRefresh}>retry</button>
+          {error}{" "}
+          <button type="button" className="ac__err-retry" onClick={onRefresh}>
+            retry
+          </button>
         </div>
       )}
 
