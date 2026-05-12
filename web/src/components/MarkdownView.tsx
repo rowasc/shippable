@@ -1,13 +1,15 @@
 import "./MarkdownView.css";
 import githubMarkdownLightCss from "github-markdown-css/github-markdown-light.css?raw";
 import githubMarkdownDarkCss from "github-markdown-css/github-markdown-dark.css?raw";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import mermaid from "mermaid";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { remarkAlert } from "remark-github-blockquote-alert";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { highlightCode } from "../highlight";
+import { ensureMermaidReady } from "./mermaidClient";
 import {
   resolveImageSrc,
   resolvePath,
@@ -84,7 +86,61 @@ function CodeBlock({
     return <code className={className} {...rest}>{children}</code>;
   }
 
+  if (match[1] === "mermaid") {
+    return <MermaidBlock source={text} />;
+  }
+
   return <ShikiBlock code={text} language={match[1]} />;
+}
+
+function MermaidBlock({ source }: { source: string }) {
+  const renderId = useId().replace(/[:]/g, "_");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    ensureMermaidReady();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const target = containerRef.current;
+    if (!target) return;
+    setError(null);
+    mermaid
+      .render(`md-mermaid-${renderId}`, source)
+      .then((result) => {
+        if (cancelled || !target) return;
+        target.innerHTML = result.svg;
+        if (result.bindFunctions) result.bindFunctions(target);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => { cancelled = true; };
+  }, [source, renderId]);
+
+  if (error) {
+    return (
+      <div className="md-preview__mermaid-error">
+        <p>Couldn't render Mermaid diagram:</p>
+        <pre>{error}</pre>
+        <details>
+          <summary>Source</summary>
+          <pre><code>{source}</code></pre>
+        </details>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="md-preview__mermaid"
+      aria-label="Mermaid diagram"
+    />
+  );
 }
 
 function ShikiBlock({ code, language }: { code: string; language: string }) {

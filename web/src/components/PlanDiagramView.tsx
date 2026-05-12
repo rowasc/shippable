@@ -4,6 +4,7 @@ import "./PlanDiagramView.css";
 import type { PlanDiagram, PlanDiagramNode } from "../planDiagram";
 import type { EvidenceRef, FileRole, SymbolShape } from "../types";
 import { CopyButton } from "./CopyButton";
+import { ensureMermaidReady } from "./mermaidClient";
 
 // What each role means in plain language, surfaced as the hover tooltip
 // on every node. Reviewers don't need to know about path-floor vs LSP-shape
@@ -35,21 +36,6 @@ interface Props {
    *  Receives an `EvidenceRef` of `kind: "file"` so clicking a node
    *  scrolls the diff to that file. */
   onNavigate?: (ev: EvidenceRef) => void;
-}
-
-// Initialise mermaid once per session. `securityLevel: "loose"` is what
-// enables `click <id> callback "tooltip"` to invoke a registered window
-// handler — strict mode strips the click directive entirely.
-let mermaidInited = false;
-function ensureMermaidReady(): void {
-  if (mermaidInited) return;
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: "neutral",
-    securityLevel: "loose",
-    flowchart: { htmlLabels: true, curve: "basis" },
-  });
-  mermaidInited = true;
 }
 
 const MERMAID_CALLBACK_PROP = "__shippableDiagramClick";
