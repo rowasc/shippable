@@ -170,8 +170,10 @@ export function CommandPalette({ predicates, onClose, onPick }: Props) {
                     onClick={() => {
                       if (item.enabled) onPick(item.action);
                     }}
-                    onMouseEnter={() => {
-                      if (enabledIdx >= 0) setActiveIdx(enabledIdx);
+                    onMouseMove={() => {
+                      if (enabledIdx >= 0 && enabledIdx !== clampedActiveIdx) {
+                        setActiveIdx(enabledIdx);
+                      }
                     }}
                   >
                     <span className="cmdpal__chord">{item.chord}</span>
