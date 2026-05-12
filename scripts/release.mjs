@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline/promises";
+import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -122,11 +124,42 @@ function tagAndPush() {
   exec("git", ["push", "origin", tag]);
 }
 
+function rawCommitList(prev) {
+  const range = prev ? `${prev}..HEAD` : "HEAD";
+  return (
+    capture("git", ["log", range, "--pretty=format:- %s (%h)", "--no-merges"]).stdout ||
+    "_no commits since last release_"
+  );
+}
+
+function aiChangelog(prev) {
+  const range = prev ? `${prev}..HEAD` : "HEAD";
+  const log = capture("git", ["log", range, "--pretty=format:%h %s%n%b%n---", "--no-merges"]).stdout;
+  if (!log) return null;
+
+  const prompt = `You are drafting release notes for Shippable, an AI-assisted code review prototype. Below are the commits going into ${tag}${prev ? ` since ${prev}` : " (first release)"}.
+
+Group them into 2-4 themes (e.g. Features, Fixes, Docs) as level-3 headings (###). Use markdown bullets — one short line per change, written for an end-user reader, not a commit log. Drop noise (chore, refactor, lint) unless it's user-visible. Output only the markdown body, no preamble.
+
+Commits:
+${log}`;
+
+  const r = spawnSync("claude", ["-p", prompt], { encoding: "utf8" });
+  if (r.error?.code === "ENOENT") {
+    console.warn("release: claude CLI not found — falling back to raw commit list");
+    return null;
+  }
+  if (r.status !== 0) {
+    console.warn(`release: claude -p exited ${r.status} — falling back to raw commit list`);
+    if (r.stderr) console.warn(r.stderr.trim());
+    return null;
+  }
+  return r.stdout.trim() || null;
+}
+
 function buildNotes() {
   const prev = previousTag();
-  const range = prev ? `${prev}..HEAD` : "HEAD";
-  const log = capture("git", ["log", range, "--pretty=format:- %s (%h)", "--no-merges"]).stdout;
-  const changes = log || "_no commits since last release_";
+  const changes = aiChangelog(prev) ?? rawCommitList(prev);
   const compare = prev
     ? `\n\n**Full diff:** [\`${prev}...${tag}\`](https://github.com/rowasc/shippable/compare/${prev}...${tag})`
     : "";
@@ -149,11 +182,40 @@ ${changes}${compare}
 `;
 }
 
-function createRelease(dmgs) {
+function openEditor(file) {
+  const editor = process.env.EDITOR || process.env.VISUAL || "vi";
+  const [cmd, ...args] = editor.split(/\s+/);
+  const result = spawnSync(cmd, [...args, file], { stdio: "inherit" });
+  if (result.status !== 0) fail(`editor (${editor}) exited ${result.status}`);
+}
+
+async function confirm(question) {
+  const rl = readline.createInterface({ input: stdin, output: stdout });
+  try {
+    const ans = (await rl.question(`${question} `)).trim().toLowerCase();
+    return ans === "y" || ans === "yes";
+  } finally {
+    rl.close();
+  }
+}
+
+async function publishRelease(dmgs) {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), "shippable-release-"));
   const notesFile = path.join(tmpDir, "notes.md");
+  let keepNotes = false;
   try {
     writeFileSync(notesFile, buildNotes(), "utf8");
+    console.log(`\nrelease: opening editor on draft release notes`);
+    openEditor(notesFile);
+    if (!readFileSync(notesFile, "utf8").trim()) fail("release notes are empty — aborting");
+
+    if (!(await confirm(`Publish ${tag} as pre-release? [y/N]`))) {
+      keepNotes = true;
+      console.log(`release: aborted by user. Edited notes preserved at ${notesFile}`);
+      return;
+    }
+
+    tagAndPush();
     exec("gh", [
       "release",
       "create",
@@ -166,7 +228,7 @@ function createRelease(dmgs) {
       notesFile,
     ]);
   } finally {
-    rmSync(tmpDir, { recursive: true, force: true });
+    if (!keepNotes) rmSync(tmpDir, { recursive: true, force: true });
   }
   const url = capture("gh", ["release", "view", tag, "--json", "url", "-q", ".url"]).stdout;
   console.log(`\nrelease: published ${tag}`);
@@ -175,5 +237,4 @@ function createRelease(dmgs) {
 
 preflight();
 const dmgs = buildDmgs();
-tagAndPush();
-createRelease(dmgs);
+await publishRelease(dmgs);

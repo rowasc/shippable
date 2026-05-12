@@ -26,8 +26,10 @@ The script:
 - refuses if `v<version>` already exists locally or on `origin`
 - warns if you're not on `main`
 - builds DMGs for both architectures via `scripts/build-dmg.mjs --target=...`
+- drafts release notes (themed changelog via `claude -p` if the Claude Code CLI is installed and authed, raw commit list otherwise) and opens them in `$EDITOR` for you to edit
+- after you save+quit, prompts `Publish v<version>?` — answer `y` to continue, anything else aborts (no tag created)
 - tags `v<version>`, pushes the tag to `origin`
-- creates the GitHub release with `gh release create`, attaching both DMGs, with auto-generated notes from commits since the previous `v*` tag
+- creates the GitHub release with `gh release create`, attaching both DMGs, using your edited notes
 
 Pass `--skip-build` to reuse DMGs from a previous run (e.g. if the publish step failed after a successful build).
 
