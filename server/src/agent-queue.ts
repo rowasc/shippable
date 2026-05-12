@@ -8,7 +8,8 @@ export type CommentKind =
   | "block"
   | "reply-to-ai-note"
   | "reply-to-teammate"
-  | "reply-to-hunk-summary";
+  | "reply-to-hunk-summary"
+  | "reply-to-agent-comment";
 
 export interface Comment {
   id: string;
@@ -21,6 +22,12 @@ export interface Comment {
   commitSha: string;
   /** Prior comment id this entry replaces. Null when not an edit. */
   supersedes: string | null;
+  /**
+   * Id of the parent `AgentComment` this entry replies to. Required when
+   * `kind === "reply-to-agent-comment"`, absent otherwise. Distinct from
+   * `supersedes` (which means "replaces a prior version of this comment").
+   */
+  parentAgentCommentId?: string;
   /** ISO timestamp stamped at enqueue. */
   enqueuedAt: string;
 }
@@ -32,17 +39,36 @@ export interface DeliveredComment extends Comment {
 
 export type Outcome = "addressed" | "declined" | "noted";
 
-export interface AgentReply {
+/**
+ * An agent-authored entry. Two shapes, distinguished by which optional
+ * field is set:
+ *
+ *  - `parent` set → a reply threaded under a delivered reviewer comment.
+ *    Carries the parent's id and an outcome (addressed/declined/noted).
+ *  - `anchor` set → a top-level comment anchored to the diff (file+lines).
+ *    No outcome — outcomes only make sense for replies.
+ *
+ * Exactly one of the two is set; the discriminated union prevents the
+ * "both / neither" cases at the type level.
+ */
+interface AgentCommentBase {
   id: string;
-  /** The delivered comment id this reply answers. */
-  commentId: string;
   body: string;
-  outcome: Outcome;
   /** ISO timestamp stamped at post time. */
   postedAt: string;
   /** Optional generic identity surface; reserved for future per-harness label. */
   agentLabel?: string;
 }
+
+export type AgentComment =
+  | (AgentCommentBase & {
+      parent: { commentId: string; outcome: Outcome };
+      anchor?: never;
+    })
+  | (AgentCommentBase & {
+      anchor: { file: string; lines: string };
+      parent?: never;
+    });
 
 interface QueueEntry {
   pending: Comment[];
@@ -50,10 +76,10 @@ interface QueueEntry {
 }
 
 const DELIVERED_HISTORY_CAP = 200;
-const REPLY_HISTORY_CAP = 200;
+const AGENT_COMMENT_HISTORY_CAP = 200;
 
 const queues = new Map<string, QueueEntry>();
-const replyStore = new Map<string, AgentReply[]>();
+const agentCommentStore = new Map<string, AgentComment[]>();
 
 function getOrCreate(worktreePath: string): QueueEntry {
   let entry = queues.get(worktreePath);
@@ -124,36 +150,68 @@ export function unenqueue(worktreePath: string, id: string): boolean {
   return true;
 }
 
-export function postReply(
+/**
+ * Payload accepted by `postAgentComment`. One of the two shapes — discriminated
+ * by which field is present — must be supplied:
+ *
+ *   - `parent` → reply threaded under a delivered reviewer comment.
+ *   - `anchor` → top-level comment anchored to file (+ lines) in the diff.
+ */
+export type PostAgentCommentPayload =
+  | {
+      parent: { commentId: string; outcome: Outcome };
+      body: string;
+      agentLabel?: string;
+    }
+  | {
+      anchor: { file: string; lines: string };
+      body: string;
+      agentLabel?: string;
+    };
+
+export function postAgentComment(
   worktreePath: string,
-  payload: { commentId: string; body: string; outcome: Outcome; agentLabel?: string },
+  payload: PostAgentCommentPayload,
 ): string {
   const id = randomUUID();
-  const reply: AgentReply = {
-    id,
-    commentId: payload.commentId,
-    body: payload.body,
-    outcome: payload.outcome,
-    postedAt: new Date().toISOString(),
-  };
-  if (payload.agentLabel !== undefined) reply.agentLabel = payload.agentLabel;
-  let list = replyStore.get(worktreePath);
+  const postedAt = new Date().toISOString();
+  const entry: AgentComment =
+    "parent" in payload
+      ? {
+          id,
+          body: payload.body,
+          postedAt,
+          parent: payload.parent,
+          ...(payload.agentLabel !== undefined
+            ? { agentLabel: payload.agentLabel }
+            : {}),
+        }
+      : {
+          id,
+          body: payload.body,
+          postedAt,
+          anchor: payload.anchor,
+          ...(payload.agentLabel !== undefined
+            ? { agentLabel: payload.agentLabel }
+            : {}),
+        };
+  let list = agentCommentStore.get(worktreePath);
   if (!list) {
     list = [];
-    replyStore.set(worktreePath, list);
+    agentCommentStore.set(worktreePath, list);
   }
-  list.push(reply);
-  // Bound the per-worktree reply list — a noisy agent in a long-lived
-  // process otherwise grows this without limit. Mirrors
+  list.push(entry);
+  // Bound the per-worktree agent-comment list — a noisy agent in a long-
+  // lived process otherwise grows this without limit. Mirrors
   // DELIVERED_HISTORY_CAP on the comment side.
-  if (list.length > REPLY_HISTORY_CAP) {
-    list.splice(0, list.length - REPLY_HISTORY_CAP);
+  if (list.length > AGENT_COMMENT_HISTORY_CAP) {
+    list.splice(0, list.length - AGENT_COMMENT_HISTORY_CAP);
   }
   return id;
 }
 
-export function listReplies(worktreePath: string): AgentReply[] {
-  const list = replyStore.get(worktreePath);
+export function listAgentComments(worktreePath: string): AgentComment[] {
+  const list = agentCommentStore.get(worktreePath);
   if (!list) return [];
   return list.slice();
 }
@@ -172,10 +230,27 @@ export function isDeliveredCommentId(
   return entry.delivered.some((d) => d.id === commentId);
 }
 
+/**
+ * Returns true when `id` is in the agent-comment store for this worktree.
+ * Used by the enqueue endpoint to defensively reject reviewer replies
+ * (`kind === "reply-to-agent-comment"`) that point at a `parentAgentCommentId`
+ * the agent never actually posted.
+ *
+ * Mirrors `isDeliveredCommentId` for the agent-comment store.
+ */
+export function isAgentCommentId(
+  worktreePath: string,
+  id: string,
+): boolean {
+  const list = agentCommentStore.get(worktreePath);
+  if (!list) return false;
+  return list.some((c) => c.id === id);
+}
+
 /** Test-only: clear all queues. */
 export function resetForTests(): void {
   queues.clear();
-  replyStore.clear();
+  agentCommentStore.clear();
 }
 
 function resolveSupersessions(pending: Comment[]): Comment[] {
@@ -222,19 +297,34 @@ function sanitizeBody(body: string): string {
   return body.replace(/\]\]>/g, "]]");
 }
 
+/**
+ * Resolver passed to `formatPayload`. Returns the agent comment with the
+ * given id, or null when it isn't present (e.g., aged out of the cap-200
+ * window). When omitted entirely, every `reply-to-agent-comment` entry is
+ * treated as having a missing parent — useful for unit tests that don't
+ * care about the parent envelope.
+ */
+export type AgentCommentLookup = (id: string) => AgentComment | null;
+
 export function formatPayload(
   commentsList: Comment[],
   commitSha: string,
+  lookupAgentComment?: AgentCommentLookup,
 ): string {
   if (commentsList.length === 0) return "";
   const sorted = sortForPayload(commentsList);
-  const body = sorted.map(renderComment).join("\n");
+  const body = sorted
+    .map((c) => renderComment(c, lookupAgentComment))
+    .join("\n");
   return `<reviewer-feedback from="shippable" commit="${escapeXmlAttr(commitSha)}">\n${body}\n</reviewer-feedback>`;
 }
 
-function renderComment(c: Comment): string {
+function renderComment(
+  c: Comment,
+  lookupAgentComment?: AgentCommentLookup,
+): string {
   // `id` is first so the agent sees it before the body — needed to call
-  // `shippable_post_review_reply`. Pull-and-ack drains the queue, so this
+  // `shippable_post_review_comment`. Pull-and-ack drains the queue, so this
   // is the only chance the agent has to read the id.
   const attrs: string[] = [
     `id="${escapeXmlAttr(c.id)}"`,
@@ -247,5 +337,28 @@ function renderComment(c: Comment): string {
   if (c.supersedes) {
     attrs.push(`supersedes="${escapeXmlAttr(c.supersedes)}"`);
   }
-  return `  <comment ${attrs.join(" ")}>${sanitizeBody(c.body)}</comment>`;
+
+  // For reply-to-agent-comment entries, surface the parent id and inline the
+  // parent comment's body as a child element so the agent has context for
+  // its reply. If the parent is no longer in the store (capped out), emit
+  // `parent-missing="true"` so the agent can degrade gracefully.
+  let parentChild = "";
+  if (c.kind === "reply-to-agent-comment" && c.parentAgentCommentId) {
+    attrs.push(`parent-id="${escapeXmlAttr(c.parentAgentCommentId)}"`);
+    const parent = lookupAgentComment?.(c.parentAgentCommentId) ?? null;
+    if (parent && parent.anchor) {
+      const parentAttrs = [
+        `id="${escapeXmlAttr(parent.id)}"`,
+        `file="${escapeXmlAttr(parent.anchor.file)}"`,
+      ];
+      if (parent.anchor.lines) {
+        parentAttrs.push(`lines="${escapeXmlAttr(parent.anchor.lines)}"`);
+      }
+      parentChild = `<parent ${parentAttrs.join(" ")}>${sanitizeBody(parent.body)}</parent>`;
+    } else {
+      attrs.push(`parent-missing="true"`);
+    }
+  }
+
+  return `  <comment ${attrs.join(" ")}>${sanitizeBody(c.body)}${parentChild}</comment>`;
 }

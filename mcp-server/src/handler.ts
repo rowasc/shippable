@@ -9,8 +9,8 @@ export const DEFAULT_PORT = 3001;
 // branch so we don't train the agent to ignore it. See
 // docs/sdd/auto-reply-hint/spec.md.
 export const NEXT_STEP_HINT =
-  "Next step: call `shippable_post_review_reply` once per comment above. " +
-  "Pass the comment's `id` attribute as `commentId`, your prose as `replyText`, " +
+  "Next step: call `shippable_post_review_comment` once per comment above. " +
+  "Pass the comment's `id` attribute as `parentId`, your prose as `replyText`, " +
   "and set `outcome` to `addressed` (you fixed it), `declined` (you intentionally " +
   "won't), or `noted` (you saw it, no action). The user can also trigger this " +
   "explicitly with the phrase \"report back to shippable\".";
@@ -128,46 +128,67 @@ export async function handleCheckReviewComments(
 
 export type Outcome = "addressed" | "declined" | "noted";
 
-interface PostReplyInput {
-  worktreePath?: string;
-  commentId: string;
-  /**
-   * Free-form prose for the reply. Named `replyText` rather than `body`
-   * because some model serializers conflate `body` with the HTML element
-   * and emit `</body>` close tags into the value — see the reply-flow
-   * notes in `docs/sdd/agent-reply-support/spec.md`.
-   */
-  replyText: string;
-  outcome: Outcome;
-}
+/**
+ * Input to the unified `shippable_post_review_comment` tool. Discriminated by
+ * which fields are present:
+ *
+ *   - reply form: `parentId` + `outcome` (threads under an existing reviewer comment)
+ *   - top-level form: `file` + `lines` (a fresh comment anchored to the diff)
+ *
+ * The `replyText` field carries the prose for both forms. It's named
+ * `replyText` rather than `body` because some model serializers conflate
+ * `body` with the HTML element and emit `</body>` close tags into the value
+ * — see the reply-flow notes in `docs/sdd/agent-reply-support/spec.md`.
+ */
+export type PostReviewCommentInput =
+  | {
+      worktreePath?: string;
+      parentId: string;
+      replyText: string;
+      outcome: Outcome;
+    }
+  | {
+      worktreePath?: string;
+      file: string;
+      lines: string;
+      replyText: string;
+    };
 
-interface PostReplyResponse {
+interface PostCommentResponse {
   id: string;
 }
 
-export async function handlePostReviewReply(
-  input: PostReplyInput,
+export async function handlePostReviewComment(
+  input: PostReviewCommentInput,
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
   const port = await resolvePort(deps);
   const worktreePath = resolveWorktreePath(input, deps);
   const baseUrl = `http://127.0.0.1:${port}`;
-  const url = `${baseUrl}/api/agent/replies`;
+  const url = `${baseUrl}/api/agent/comments`;
   const fetchFn = deps?.fetchFn ?? fetch;
+
+  // Wire-level field on the local server endpoint stays `body` — the
+  // `replyText` rename is contained to the MCP tool's input schema.
+  const wireBody =
+    "parentId" in input
+      ? {
+          worktreePath,
+          parent: { commentId: input.parentId, outcome: input.outcome },
+          body: input.replyText,
+        }
+      : {
+          worktreePath,
+          anchor: { file: input.file, lines: input.lines },
+          body: input.replyText,
+        };
 
   let response: Response;
   try {
     response = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        worktreePath,
-        commentId: input.commentId,
-        // Wire-level field on the local server endpoint stays `body` —
-        // the rename is contained to the MCP tool's input schema.
-        body: input.replyText,
-        outcome: input.outcome,
-      }),
+      body: JSON.stringify(wireBody),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -182,9 +203,9 @@ export async function handlePostReviewReply(
     );
   }
 
-  let parsed: PostReplyResponse;
+  let parsed: PostCommentResponse;
   try {
-    parsed = (await response.json()) as PostReplyResponse;
+    parsed = (await response.json()) as PostCommentResponse;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(
@@ -192,9 +213,11 @@ export async function handlePostReviewReply(
     );
   }
 
+  const text =
+    "parentId" in input
+      ? `Posted reply ${parsed.id} for comment ${input.parentId}.`
+      : `Posted agent comment ${parsed.id} for ${input.file}:${input.lines}.`;
   return {
-    content: [
-      { type: "text", text: `Posted reply ${parsed.id} for comment ${input.commentId}.` },
-    ],
+    content: [{ type: "text", text }],
   };
 }

@@ -8,11 +8,13 @@ import {
   enqueue,
   pullAndAck,
   listDelivered,
-  postReply,
-  listReplies,
+  postAgentComment,
+  listAgentComments,
+  isAgentCommentId,
   unenqueue,
   formatPayload,
   resetForTests,
+  type AgentComment,
   type Comment,
 } from "./agent-queue.ts";
 import { assertGitDir } from "./worktree-validation.ts";
@@ -156,66 +158,171 @@ describe("unenqueue", () => {
   });
 });
 
-describe("postReply / listReplies", () => {
-  it("postReply assigns id + postedAt and appends to the worktree's reply list", () => {
-    const id = postReply(WT, {
-      commentId: "c1",
+describe("AgentComment shape", () => {
+  it("accepts the reply form (parent set, anchor absent)", () => {
+    const reply: AgentComment = {
+      id: "r1",
+      body: "fixed",
+      postedAt: "2025-01-01T00:00:00Z",
+      parent: { commentId: "c1", outcome: "addressed" },
+    };
+    expect(reply.parent.commentId).toBe("c1");
+    expect(reply.parent.outcome).toBe("addressed");
+  });
+
+  it("accepts the top-level form (anchor set, parent absent)", () => {
+    const root: AgentComment = {
+      id: "r2",
+      body: "I notice this file lacks tests",
+      postedAt: "2025-01-01T00:00:00Z",
+      anchor: { file: "src/foo.ts", lines: "42-58" },
+    };
+    expect(root.anchor.file).toBe("src/foo.ts");
+    expect(root.anchor.lines).toBe("42-58");
+  });
+});
+
+describe("postAgentComment / listAgentComments", () => {
+  it("reply payload assigns id + postedAt and appends to the worktree's list", () => {
+    const id = postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "addressed" },
       body: "fixed it",
-      outcome: "addressed",
     });
     expect(id).toBeTruthy();
-    const replies = listReplies(WT);
+    const replies = listAgentComments(WT);
     expect(replies).toHaveLength(1);
     expect(replies[0].id).toBe(id);
-    expect(replies[0].commentId).toBe("c1");
+    expect(replies[0].parent?.commentId).toBe("c1");
     expect(replies[0].body).toBe("fixed it");
-    expect(replies[0].outcome).toBe("addressed");
+    expect(replies[0].parent?.outcome).toBe("addressed");
     expect(replies[0].postedAt).toBeTruthy();
   });
 
+  it("top-level payload assigns id + postedAt and lands in the same list", () => {
+    const id = postAgentComment(WT, {
+      anchor: { file: "src/foo.ts", lines: "42-58" },
+      body: "I notice this block lacks tests",
+    });
+    expect(id).toBeTruthy();
+    const entries = listAgentComments(WT);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].id).toBe(id);
+    expect(entries[0].anchor?.file).toBe("src/foo.ts");
+    expect(entries[0].anchor?.lines).toBe("42-58");
+    expect(entries[0].parent).toBeUndefined();
+    expect(entries[0].postedAt).toBeTruthy();
+  });
+
   it("appends rather than overwrites repeated replies to the same commentId", () => {
-    postReply(WT, { commentId: "c1", body: "first", outcome: "noted" });
-    postReply(WT, { commentId: "c1", body: "second", outcome: "addressed" });
-    const replies = listReplies(WT);
+    postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "noted" },
+      body: "first",
+    });
+    postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "addressed" },
+      body: "second",
+    });
+    const replies = listAgentComments(WT);
     expect(replies).toHaveLength(2);
     expect(replies.map((r) => r.body)).toEqual(["first", "second"]);
   });
 
+  it("interleaves reply-shaped and top-level-shaped entries in the same list", () => {
+    postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "noted" },
+      body: "reply",
+    });
+    postAgentComment(WT, {
+      anchor: { file: "x.ts", lines: "1" },
+      body: "top-level",
+    });
+    const entries = listAgentComments(WT);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].parent).toBeDefined();
+    expect(entries[1].anchor).toBeDefined();
+  });
+
   it("returns entries sorted by postedAt ascending", async () => {
-    postReply(WT, { commentId: "c1", body: "a", outcome: "noted" });
+    postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "noted" },
+      body: "a",
+    });
     // Force a measurable timestamp gap so the ascending order is observable
     // even on machines where two consecutive Date.now() calls collapse.
     await new Promise((r) => setTimeout(r, 5));
-    postReply(WT, { commentId: "c2", body: "b", outcome: "noted" });
-    const replies = listReplies(WT);
+    postAgentComment(WT, {
+      parent: { commentId: "c2", outcome: "noted" },
+      body: "b",
+    });
+    const replies = listAgentComments(WT);
     expect(replies.map((r) => r.body)).toEqual(["a", "b"]);
     expect(
       replies[0].postedAt.localeCompare(replies[1].postedAt),
     ).toBeLessThanOrEqual(0);
   });
 
-  it("listReplies returns [] for an unknown worktree", () => {
-    expect(listReplies("/tmp/no-such-worktree")).toEqual([]);
+  it("listAgentComments returns [] for an unknown worktree", () => {
+    expect(listAgentComments("/tmp/no-such-worktree")).toEqual([]);
   });
 
-  it("resetForTests clears replies", () => {
-    postReply(WT, { commentId: "c1", body: "x", outcome: "addressed" });
+  it("resetForTests clears the agent-comment store", () => {
+    postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "addressed" },
+      body: "x",
+    });
     resetForTests();
-    expect(listReplies(WT)).toEqual([]);
+    expect(listAgentComments(WT)).toEqual([]);
   });
 
-  it("caps the per-worktree reply list at the history limit", () => {
-    // Mirror the delivered-history-cap behaviour: oldest replies aged out
+  it("caps the per-worktree list at the history limit", () => {
+    // Mirror the delivered-history-cap behaviour: oldest entries aged out
     // once we cross the cap. Defends against a noisy agent in a
     // long-lived process.
     for (let i = 0; i < 250; i++) {
-      postReply(WT, { commentId: "c1", body: `r-${i}`, outcome: "noted" });
+      postAgentComment(WT, {
+        parent: { commentId: "c1", outcome: "noted" },
+        body: `r-${i}`,
+      });
     }
-    const replies = listReplies(WT);
+    const replies = listAgentComments(WT);
     expect(replies).toHaveLength(200);
     // Append-order, oldest first → oldest retained is r-50.
     expect(replies[0].body).toBe("r-50");
     expect(replies[199].body).toBe("r-249");
+  });
+});
+
+describe("isAgentCommentId", () => {
+  it("returns true for an id present in the worktree's store", () => {
+    const id = postAgentComment(WT, {
+      anchor: { file: "src/foo.ts", lines: "1" },
+      body: "x",
+    });
+    expect(isAgentCommentId(WT, id)).toBe(true);
+  });
+
+  it("returns false for an unknown id", () => {
+    postAgentComment(WT, {
+      anchor: { file: "src/foo.ts", lines: "1" },
+      body: "x",
+    });
+    expect(isAgentCommentId(WT, "no-such-id")).toBe(false);
+  });
+
+  it("returns false for an unknown worktreePath", () => {
+    postAgentComment(WT, {
+      anchor: { file: "src/foo.ts", lines: "1" },
+      body: "x",
+    });
+    expect(isAgentCommentId("/tmp/other-worktree", "anything")).toBe(false);
+  });
+
+  it("recognizes reply-shaped entries too (single store, both shapes)", () => {
+    const id = postAgentComment(WT, {
+      parent: { commentId: "c1", outcome: "addressed" },
+      body: "fixed",
+    });
+    expect(isAgentCommentId(WT, id)).toBe(true);
   });
 });
 
@@ -377,6 +484,92 @@ describe("formatPayload", () => {
       /^<reviewer-feedback from="shippable" commit="deadbeef">/,
     );
     expect(out).toMatch(/<\/reviewer-feedback>$/);
+  });
+
+  it("inlines the parent agent comment for kind reply-to-agent-comment", () => {
+    const parent: AgentComment = {
+      id: "ac-1",
+      body: "I notice this block lacks tests",
+      postedAt: "2025-01-01T00:00:00Z",
+      anchor: { file: "src/foo.ts", lines: "42-58" },
+    };
+    const c: Comment = {
+      id: "c1",
+      kind: "reply-to-agent-comment",
+      file: "src/foo.ts",
+      lines: "42-58",
+      body: "good catch, will add",
+      commitSha: "sha",
+      supersedes: null,
+      parentAgentCommentId: "ac-1",
+      enqueuedAt: "2025-01-01T00:01:00Z",
+    };
+    const out = formatPayload([c], "sha", (id) => (id === "ac-1" ? parent : null));
+    expect(out).toContain('kind="reply-to-agent-comment"');
+    expect(out).toContain('parent-id="ac-1"');
+    expect(out).not.toContain('parent-missing="true"');
+    expect(out).toContain('<parent id="ac-1" file="src/foo.ts" lines="42-58">');
+    expect(out).toContain("I notice this block lacks tests</parent>");
+  });
+
+  it("emits parent-missing when the parent agent comment isn't in the store", () => {
+    const c: Comment = {
+      id: "c1",
+      kind: "reply-to-agent-comment",
+      file: "src/foo.ts",
+      lines: "42-58",
+      body: "good catch, will add",
+      commitSha: "sha",
+      supersedes: null,
+      parentAgentCommentId: "ac-gone",
+      enqueuedAt: "2025-01-01T00:01:00Z",
+    };
+    const out = formatPayload([c], "sha", () => null);
+    expect(out).toContain('parent-id="ac-gone"');
+    expect(out).toContain('parent-missing="true"');
+    expect(out).not.toContain("<parent ");
+  });
+
+  it("escapes parent-id, parent attrs, and parent body", () => {
+    const parent: AgentComment = {
+      id: 'id"a&<b>',
+      body: "before ]]> after & <tag>",
+      postedAt: "2025-01-01T00:00:00Z",
+      anchor: { file: 'q"&.ts', lines: "1" },
+    };
+    const c: Comment = {
+      id: "c1",
+      kind: "reply-to-agent-comment",
+      file: "src/foo.ts",
+      lines: "1",
+      body: "x",
+      commitSha: "sha",
+      supersedes: null,
+      parentAgentCommentId: 'id"a&<b>',
+      enqueuedAt: "2025-01-01T00:01:00Z",
+    };
+    const out = formatPayload([c], "sha", () => parent);
+    expect(out).toContain(`parent-id="id&quot;a&amp;&lt;b&gt;"`);
+    expect(out).toContain(`<parent id="id&quot;a&amp;&lt;b&gt;" file="q&quot;&amp;.ts" lines="1">`);
+    expect(out).not.toContain("]]>");
+    expect(out).toContain("before ]] after & <tag></parent>");
+  });
+
+  it("leaves non-reply-to-agent-comment kinds unchanged", () => {
+    const c: Comment = {
+      id: "c1",
+      kind: "block",
+      file: "a.ts",
+      lines: "1",
+      body: "x",
+      commitSha: "sha",
+      supersedes: null,
+      enqueuedAt: "2025-01-01T00:01:00Z",
+    };
+    const out = formatPayload([c], "sha", () => null);
+    expect(out).not.toContain("parent-id");
+    expect(out).not.toContain("<parent ");
+    expect(out).not.toContain("parent-missing");
   });
 
   it("emits an id attribute on each <comment> so the agent can post replies", () => {
