@@ -326,20 +326,21 @@ export function LoadModal({ onLoad, onClose }: Props) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadFromUrl()}
+              aria-invalid={url.trim() !== "" && !urlIsValid}
             />
             <button
               className="modal__btn modal__btn--primary"
               onClick={loadFromUrl}
               disabled={urlBusy || pr.busy || !urlIsValid}
-              title={
-                !urlIsValid && url.trim()
-                  ? "URL must start with http:// or https://"
-                  : undefined
-              }
             >
               {urlBusy || pr.busy ? "loading…" : "load"}
             </button>
           </div>
+          {url.trim() !== "" && !urlIsValid && (
+            <p className="modal__hint modal__hint--error">
+              URL must start with <code>http://</code> or <code>https://</code>.
+            </p>
+          )}
           {pr.error && (
             <p className="modal__hint modal__hint--error">{pr.error}</p>
           )}
