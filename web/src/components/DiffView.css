@@ -231,12 +231,16 @@
 .hunk__body {
   background: var(--bg);
 }
-/* The grid-template-columns below is the contract that lets the mouse
+/* Scoped under `.hunk__body` so Shiki's own `<span class="line">` (used in
+   the markdown preview's fenced code blocks) doesn't accidentally pick up
+   the diff-row grid and wrap each token char-by-char.
+
+   The grid-template-columns below is the contract that lets the mouse
    layer disambiguate gutter (line numbers / sign / AI glyph) from text:
    only the trailing 1fr column carries `.line__text`, which keeps native
    text selection. The first four fixed-width columns get cursor: default
    so the user sees them as a clickable lane for line-range drag. */
-.line {
+.hunk__body .line {
   display: grid;
   grid-template-columns: 40px 40px 14px 16px 1fr;
   gap: 0;
@@ -375,7 +379,7 @@
 }
 /* When the whole file is signed off, every line picks up a soft green
    tint regardless of read-state. This makes flipping Shift+M feel decisive. */
-.diff--file-reviewed .line {
+.diff--file-reviewed .hunk__body .line {
   background-color: rgba(166, 227, 161, 0.04);
 }
 .diff--file-reviewed .line--add {
