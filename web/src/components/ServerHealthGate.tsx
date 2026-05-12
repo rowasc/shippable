@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import "./ServerHealthGate.css";
-import { apiUrl } from "../apiUrl";
+import { apiUrl, waitForSidecarReady } from "../apiUrl";
 import { useApiKey } from "../useApiKey";
 import { CopyButton } from "./CopyButton";
 import { KeySetup } from "./KeySetup";
@@ -53,6 +53,16 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        // In Tauri, block on a `shippable:sidecar-ready` event from Rust
+        // before probing — the WebView mounts before the Node listener
+        // binds, and the old single-shot probe lost that race.
+        const ready = await waitForSidecarReady();
+        if (cancelled) return;
+        if (!ready.ok) {
+          setState("unreachable");
+          setError(ready.reason);
+          return;
+        }
         const res = await fetch(await apiUrl("/api/health"));
         if (cancelled) return;
         if (res.ok) {

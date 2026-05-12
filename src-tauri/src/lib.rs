@@ -134,15 +134,41 @@ fn start_sidecar(app: tauri::AppHandle) {
     match sidecar.spawn() {
         Ok((mut rx, child)) => {
             log::info!(
-                "sidecar started on 127.0.0.1:{port} in {}ms",
+                "sidecar spawned (port={port}) in {}ms; awaiting listener",
                 startup.elapsed().as_millis()
             );
 
+            // Stash the child immediately for kill-on-exit, but leave `port`
+            // unset — clients use port presence as the readiness signal, and
+            // Node hasn't bound the listener yet at this point.
+            {
+                let state = app.state::<SidecarState>();
+                state.inner.lock().unwrap().child = Some(child);
+            }
+
+            let app_for_task = app.clone();
             tauri::async_runtime::spawn(async move {
+                let mut announced = false;
                 while let Some(event) = rx.recv().await {
                     match event {
                         CommandEvent::Stdout(bytes) => {
-                            log::info!("[sidecar] {}", String::from_utf8_lossy(&bytes).trim_end());
+                            let line = String::from_utf8_lossy(&bytes);
+                            let trimmed = line.trim_end();
+                            log::info!("[sidecar] {trimmed}");
+                            // Server logs this once `listen()` callback fires
+                            // (server/src/index.ts). That's the moment the
+                            // loopback port is actually accepting connections,
+                            // so it's the moment we can let the WebView probe.
+                            if !announced && trimmed.contains("[server] listening") {
+                                announced = true;
+                                let state = app_for_task.state::<SidecarState>();
+                                state.inner.lock().unwrap().port = Some(port);
+                                log::info!(
+                                    "sidecar listener ready on 127.0.0.1:{port} in {}ms",
+                                    startup.elapsed().as_millis()
+                                );
+                                let _ = app_for_task.emit("shippable:sidecar-ready", port);
+                            }
                         }
                         CommandEvent::Stderr(bytes) => {
                             log::warn!("[sidecar] {}", String::from_utf8_lossy(&bytes).trim_end());
@@ -153,23 +179,28 @@ fn start_sidecar(app: tauri::AppHandle) {
                                 payload.code,
                                 payload.signal
                             );
+                            if !announced {
+                                let _ = app_for_task.emit(
+                                    "shippable:sidecar-failed",
+                                    format!(
+                                        "sidecar exited before listening (code={:?}, signal={:?})",
+                                        payload.code, payload.signal
+                                    ),
+                                );
+                            }
                             break;
                         }
                         _ => {}
                     }
                 }
             });
-
-            let state = app.state::<SidecarState>();
-            let mut runtime = state.inner.lock().unwrap();
-            runtime.port = Some(port);
-            runtime.child = Some(child);
         }
         Err(e) => {
             log::warn!(
                 "sidecar spawn failed after {}ms: {e}",
                 startup.elapsed().as_millis()
             );
+            let _ = app.emit("shippable:sidecar-failed", format!("spawn failed: {e}"));
         }
     }
 }
