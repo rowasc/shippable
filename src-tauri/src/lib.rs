@@ -100,9 +100,10 @@ fn start_sidecar(app: tauri::AppHandle) {
     .env("ANTHROPIC_API_KEY", key.unwrap_or_default());
 
     // The Bun-compiled sidecar binary can't resolve the `library/` dir
-    // from `import.meta.url` the way `tsx` can, so point it at the
-    // source repo in dev. Production builds need the library bundled
-    // as a resource — not wired yet.
+    // from `import.meta.url` the way `tsx` can, so we point it at one
+    // explicitly. Dev: the source repo (edits hot-pick up without a
+    // rebuild). Release: the library bundled into the .app's Resources
+    // dir via `tauri.conf.json#bundle.resources`.
     #[cfg(debug_assertions)]
     let sidecar = {
         let library_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -113,6 +114,20 @@ fn start_sidecar(app: tauri::AppHandle) {
             "SHIPPABLE_LIBRARY_PATH",
             library_path.to_string_lossy().to_string(),
         )
+    };
+    #[cfg(not(debug_assertions))]
+    let sidecar = match app
+        .path()
+        .resolve("library", tauri::path::BaseDirectory::Resource)
+    {
+        Ok(library_path) => sidecar.env(
+            "SHIPPABLE_LIBRARY_PATH",
+            library_path.to_string_lossy().to_string(),
+        ),
+        Err(e) => {
+            log::warn!("bundled library resource not resolvable: {e}");
+            sidecar
+        }
     };
 
     match sidecar.spawn() {

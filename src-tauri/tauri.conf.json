@@ -37,6 +37,9 @@
     ],
     "externalBin": [
       "binaries/shippable-server"
-    ]
+    ],
+    "resources": {
+      "../library": "library"
+    }
   }
 }
