@@ -28,6 +28,7 @@ import { ThemePicker } from "./ThemePicker";
 import { TopbarActions, type TopbarAction } from "./TopbarActions";
 import { SettingsModal } from "./SettingsModal";
 import { useCredentials } from "../auth/useCredentials";
+import { keychainAccountFor } from "../auth/credential";
 import { PromptPicker } from "./PromptPicker";
 import { CommandPalette } from "./CommandPalette";
 import { ConfirmModal } from "./ConfirmModal";
@@ -335,7 +336,9 @@ export function ReviewWorkspace({
           // on hit, push to server and retry silently. On miss, open the
           // token modal with a pendingAction so the user can supply it once.
           if (isTauri()) {
-            const cached = await keychainGet(`GITHUB_TOKEN:${e.host}`);
+            const cached = await keychainGet(
+              keychainAccountFor({ kind: "github", host: e.host }),
+            );
             if (cached) {
               await credentials.set({ kind: "github", host: e.host }, cached);
               // Retry: release busy state after the recursive call resolves.

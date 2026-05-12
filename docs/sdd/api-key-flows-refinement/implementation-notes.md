@@ -28,7 +28,7 @@ Deviations and notes captured during execution of the 25-task plan in
 - **Impact:** Consumers import `from "./auth/useCredentials"` (no
   extension), so the rename is invisible.
 
-### 3a. Task 20 had no code change (modal was already presentational)
+### 3. Task 20 had no code change (modal was already presentational)
 - **Spec/plan said:** Task 20 was to update `GitHubTokenModal.tsx` so its
   submit "calls `useCredentials().set` rather than the legacy
   `setGithubToken` path" — but also noted "If the modal already takes
@@ -40,7 +40,7 @@ Deviations and notes captured during execution of the 25-task plan in
   wanted) lives in Task 21. No separate Task 20 commit was made.
 - **Impact:** None.
 
-### 3. Server callsite migration happened in Task 4, not Task 5
+### 4. Server callsite migration happened in Task 4, not Task 5
 - **Spec/plan said:** Task 5 was to migrate `server/src/github/api-client.ts`
   to read from the new auth-store via `getCredential({kind:"github", host})`.
 - **What was done:** `api-client.ts` does not (and never did) call the
@@ -61,7 +61,7 @@ Deviations and notes captured during execution of the 25-task plan in
   `server/src/github/` returns no references") still holds — there were
   none to begin with.
 
-### 4. `http.ts` extracted from `index.ts` to share `readBody`/CORS helpers
+### 5. `http.ts` extracted from `index.ts` to share `readBody`/CORS helpers
 - **Spec/plan said:** Task 3 said to "use the existing `readBody`,
   `writeCorsHeaders` … from `server/src/index.ts`".
 - **What was done:** Extracted `MAX_REQUEST_BODY_BYTES`,
@@ -75,7 +75,7 @@ Deviations and notes captured during execution of the 25-task plan in
 - **Impact:** One new file (`server/src/http.ts`), 30 LOC moved. No
   behaviour change.
 
-### 5. `Demo.tsx` / `feature-docs.tsx` migration happened inside Task 15
+### 6. `Demo.tsx` / `feature-docs.tsx` migration happened inside Task 15
 - **Spec/plan said:** Task 15 was a straight deletion of
   `web/src/useApiKey.ts`, `web/src/components/KeySetup.tsx`, and
   `KeySetup.css`. The Verify step said "`grep useApiKey|KeySetup` …
@@ -89,7 +89,7 @@ Deviations and notes captured during execution of the 25-task plan in
 - **Impact:** Demo and feature-docs surfaces now exercise the same
   panel the boot gate does, which is the desired end state.
 
-### 6. ReviewWorkspace's PR refresh code path was also migrated
+### 7. ReviewWorkspace's PR refresh code path was also migrated
 - **Spec/plan said:** Task 21 covered `useGithubPrLoad.ts`.
 - **What was done:** `ReviewWorkspace.tsx` carries a *duplicate* of the
   same cache-hit / token-required logic in `handlePrRefresh` /
@@ -100,6 +100,113 @@ Deviations and notes captured during execution of the 25-task plan in
   `setGithubToken` would have broken Task 22's build.
 - **Impact:** The PR refresh flow now writes via the unified credentials
   hook. End-user behaviour unchanged.
+
+## Post-implementation review fixes
+
+A multi-agent review (architecture, design, UI/UX, bugs, security, code
+reuse, general) ran after the initial 25 tasks landed. The findings
+below are the ones acted on before the branch shipped. Each is captured
+because the spec did not anticipate them.
+
+### R1. `CredentialsProvider` hoisted to `main.tsx`
+- **What changed:** The provider was mounted inside `App`, below the
+  `ServerHealthGate` that wraps `App`. The gate calls `useCredentials()`
+  on every render, so production threw on first paint. Tests masked
+  this because each test wrapped its own provider. Hoisting the
+  provider above the gate in `main.tsx` fixes it.
+- **Why the spec missed it:** Task 12 said "Wrap the existing app body
+  in `<CredentialsProvider>`" — literally accurate, but the gate's
+  consumption of `useCredentials()` (added in Task 14) made the gate
+  itself a consumer that the wrapper didn't cover.
+- **Impact:** Production no longer crashes at boot. `App.test.tsx`
+  updated to wrap with `<CredentialsProvider>` to mirror `main.tsx`.
+
+### R2. Mount-time fetch race collapsed into a single rehydrate
+- **What changed:** `CredentialsProvider` previously ran a standalone
+  `useEffect` calling `refresh()`; `AppBody` ran a *second* effect
+  calling `rehydrate()` (which itself ended with `refresh()`). On Tauri
+  cold start the two could resolve out of order, briefly showing the
+  boot Anthropic panel to users who actually had a Keychain entry.
+  Now the provider's mount effect is the only fetcher: `rehydrate()`
+  runs once, the `isTauri()` branch guards only the Keychain reads,
+  and `refresh()` runs in both modes so `status` flips to "ready"
+  exactly once. `ServerHealthGate` also waits on
+  `credentials.status !== "loading"` before deciding which branch to
+  render, so the boot panel cannot flash while the initial fetch is
+  in flight.
+
+### R3. Anthropic env-fallback closed in JS and Rust
+- **What changed (server):** `plan.ts` and `review.ts` previously
+  passed `apiKey: getCredential(...)` directly to `new Anthropic(...)`,
+  which silently falls back to `process.env.ANTHROPIC_API_KEY` when
+  the value is `undefined`. The route-level gate prevents this in
+  normal flow, but a TOCTOU (concurrent `/api/auth/clear` between gate
+  and SDK construction) could slip through. Both call sites now throw
+  `anthropic_key_missing` when `getCredential` returns falsy.
+- **What changed (Tauri):** The sidecar spawn used to set
+  `.env("ANTHROPIC_API_KEY", "")` defensively (so the parent shell's
+  exported key couldn't shadow the Keychain-backed flow). That clear
+  was removed alongside the Keychain read in Task 23; the env path
+  was reopened. Restored as a one-line `.env("ANTHROPIC_API_KEY", "")`
+  on the sidecar `Command`.
+
+### R4. Two cache-hit retry paths now use `keychainAccountFor`
+- **What changed:** `web/src/useGithubPrLoad.ts` and
+  `web/src/components/ReviewWorkspace.tsx` built the Keychain account
+  name inline as `` `GITHUB_TOKEN:${host}` ``. The helper introduced in
+  Task 9 (`keychainAccountFor`) was added precisely to prevent this
+  drift. Both call sites now funnel through it; the inline strings
+  also skipped the helper's host normalization, so a server response
+  with a mixed-case host could write under one account and read back
+  under another.
+
+### R5. `SettingsModal` exposes dialog ARIA attributes
+- **What changed:** The modal's `modal__box` got `role="dialog"`,
+  `aria-modal="true"`, `aria-label="settings"`. The boot gate and the
+  existing `GitHubTokenModal` already had this triplet; the new modal
+  silently dropped it.
+
+### R6. Github host normalized once, at the HTTP boundary
+- **What changed:** `parseCredential` in `server/src/auth/endpoints.ts`
+  preserved the raw host string while `encodeStoreKey` and
+  `assertGithubHostAllowed` independently re-normalized. The store
+  handled this correctly, but `/api/auth/list` reflected the canonical
+  form via `decodeStoreKey` — so callers could write under
+  `GitHub.Com` and read back `github.com`, an asymmetric API surface.
+  Now `parseCredential` normalizes once and the Credential carries the
+  canonical form for the entire request.
+
+### R7. `/api/auth/has` dropped
+- **What changed:** The endpoint had no caller — every consumer (Settings
+  UI, boot gate, tests) reads from `/api/auth/list` and derives presence
+  via `list.some(...)`. Keeping `has` half-wired meant maintaining a
+  POST endpoint whose only effect was the same information `list`
+  already exposes, with a worse REST shape. Dropped from
+  `server/src/auth/endpoints.ts`, the route in `server/src/index.ts`,
+  the `authHas` wrapper in `web/src/auth/client.ts`, and all related
+  tests. `docs/concepts/server-api-boundary.md` updated; the SDD spec
+  was left as a record of original intent.
+
+### R8. Host blocklist coverage
+- **What changed:** Added `0.0.0.0` (IPv4 unspecified, resolves to
+  loopback on connect) and `::ffff:` (IPv4-mapped IPv6 — the kernel
+  translates these so a caller using the prefix could otherwise bypass
+  the IPv4 blocklist). Tests now also exercise `::1`, `172.16.0.1` /
+  `172.31.255.254` boundaries, `100.64.0.1` / `100.127.255.254` CGNAT
+  boundaries, and `fc00::`.
+
+### R9. Nits — error message + retained duplication
+- `assertGithubHostAllowed` previously echoed the offending host in its
+  `Error.message`. `handleAuthSet` catches the throw and returns the
+  bare `host_blocked` discriminator, but a future logger could surface
+  `.message` verbatim. The error message no longer includes the host.
+- The `AddGithubHost` sub-component in `CredentialsPanel.tsx` overlaps
+  with `GitHubTokenModal`'s host-trust + token-paste staging. Extracting
+  a shared `<HostTrustConfirmation>` was considered but skipped:
+  `AddGithubHost` has a third stage (host input) the modal does not,
+  and they use different CSS namespaces (`.creds__*` vs `.modal__*`).
+  The duplication is deliberate at the prototype stage; revisit once
+  a third surface (e.g. PR-load preflight) needs the same staging.
 
 ## Manual smoke steps the headless harness cannot run
 

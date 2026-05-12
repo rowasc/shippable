@@ -12,6 +12,8 @@ const store = new Map<string, string>();
 const BLOCKED = [
   /^localhost$/i,
   /^127\.\d+\.\d+\.\d+$/,
+  // IPv4 unspecified — kernels will resolve this to localhost on connect.
+  /^0\.0\.0\.0$/,
   /^::1$/,
   /^10\.\d+\.\d+\.\d+$/,
   /^192\.168\.\d+\.\d+$/,
@@ -26,12 +28,20 @@ const BLOCKED = [
   // IPv6 ULA (fc00::/7 — fc and fd prefixes)
   /^fc[0-9a-f]{2}:/i,
   /^fd[0-9a-f]{2}:/i,
+  // IPv4-mapped IPv6 — `::ffff:127.0.0.1` reaches the same loopback as the
+  // bare IPv4 form would, so the kernel-level translation lets a caller
+  // bypass the IPv4 blocklist by typing the address with the prefix.
+  /^::ffff:/i,
 ];
 
 function assertGithubHostAllowed(host: string): void {
   const h = host.trim().toLowerCase();
   if (BLOCKED.some((re) => re.test(h))) {
-    throw new Error(`auth-store: github host "${host}" is not allowed`);
+    // Don't echo the host: handleAuthSet catches this and returns the bare
+    // "host_blocked" discriminator, but a future logger could surface the
+    // Error.message verbatim. Defense in depth — the caller already knows
+    // which host they sent in.
+    throw new Error("auth-store: github host is not allowed");
   }
 }
 

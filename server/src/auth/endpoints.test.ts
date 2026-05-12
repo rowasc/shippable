@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import {
   handleAuthSet,
-  handleAuthHas,
   handleAuthClear,
   handleAuthList,
 } from "./endpoints.ts";
@@ -16,9 +15,6 @@ beforeAll(async () => {
     try {
       if (req.method === "POST" && req.url === "/api/auth/set") {
         return await handleAuthSet(req, res, null);
-      }
-      if (req.method === "POST" && req.url === "/api/auth/has") {
-        return await handleAuthHas(req, res, null);
       }
       if (req.method === "POST" && req.url === "/api/auth/clear") {
         return await handleAuthClear(req, res, null);
@@ -148,33 +144,6 @@ describe("POST /api/auth/set", () => {
   });
 });
 
-describe("POST /api/auth/has", () => {
-  it("returns present:false before any set", async () => {
-    const r = await post("/api/auth/has", {
-      credential: { kind: "anthropic" },
-    });
-    expect(r.status).toBe(200);
-    expect(r.body).toEqual({ present: false });
-  });
-
-  it("returns present:true after a set", async () => {
-    await post("/api/auth/set", {
-      credential: { kind: "anthropic" },
-      value: "sk-test",
-    });
-    const r = await post("/api/auth/has", {
-      credential: { kind: "anthropic" },
-    });
-    expect(r.body).toEqual({ present: true });
-  });
-
-  it("rejects a missing credential", async () => {
-    const r = await post("/api/auth/has", {});
-    expect(r.status).toBe(400);
-    expect(r.body.error).toBe("invalid_credential");
-  });
-});
-
 describe("POST /api/auth/clear", () => {
   it("clears an existing credential", async () => {
     await post("/api/auth/set", {
@@ -227,5 +196,20 @@ describe("GET /api/auth/list", () => {
       { kind: "github", host: "github.com" },
     ]);
     expect(JSON.stringify(r.body)).not.toContain("secret");
+  });
+
+  it("normalises hosts at the wire boundary so /set and /list agree", async () => {
+    // Send a mixed-case host on the way in; /list should reflect the
+    // canonical form. Without normalization in parseCredential the caller
+    // would write under GitHub.Com and read back github.com — confusing for
+    // anyone watching either side of the wire.
+    await post("/api/auth/set", {
+      credential: { kind: "github", host: "GitHub.Com" },
+      value: "ghp_x",
+    });
+    const r = await get("/api/auth/list");
+    expect(r.body.credentials).toEqual([
+      { kind: "github", host: "github.com" },
+    ]);
   });
 });

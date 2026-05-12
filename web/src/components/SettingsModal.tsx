@@ -25,7 +25,13 @@ export function SettingsModal({ onClose }: Props) {
       data-testid="settings-backdrop"
       onClick={onClose}
     >
-      <div className="modal__box" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal__box"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="settings"
+      >
         <header className="modal__h">
           <span className="modal__h-label">settings</span>
           <button className="modal__close" onClick={onClose}>

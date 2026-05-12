@@ -16,6 +16,7 @@ import {
 } from "./githubPrClient";
 import { isTauri, keychainGet } from "./keychain";
 import { useCredentials } from "./auth/useCredentials";
+import { keychainAccountFor } from "./auth/credential";
 
 export interface UseGithubPrLoadOptions {
   /**
@@ -54,7 +55,9 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
       if (err instanceof GithubFetchError) {
         if (err.discriminator === "github_token_required" && err.host) {
           if (isTauri()) {
-            const cached = await keychainGet(`GITHUB_TOKEN:${err.host}`);
+            const cached = await keychainGet(
+              keychainAccountFor({ kind: "github", host: err.host }),
+            );
             if (cached) {
               await credentials.set({ kind: "github", host: err.host }, cached);
               setBusy(false);

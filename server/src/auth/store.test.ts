@@ -64,11 +64,24 @@ describe("github host blocklist", () => {
   it.each([
     "localhost",
     "127.0.0.1",
+    "0.0.0.0",
+    "::1",
     "10.0.0.1",
     "192.168.1.1",
+    // RFC1918 172.16.0.0/12 boundaries
+    "172.16.0.1",
+    "172.31.255.254",
     "169.254.169.254",
+    // CGNAT (100.64.0.0/10) boundaries
+    "100.64.0.1",
+    "100.127.255.254",
     "fe80::1",
+    "fc00::1",
     "fd00::1",
+    // IPv4-mapped IPv6 — must not become an escape hatch for the IPv4
+    // blocklist via the kernel's automatic translation.
+    "::ffff:127.0.0.1",
+    "::ffff:169.254.169.254",
   ])("rejects blocked host %s", (host) => {
     expect(() => setCredential({ kind: "github", host }, "tok")).toThrow();
   });

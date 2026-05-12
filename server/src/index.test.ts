@@ -946,43 +946,6 @@ describe("POST /api/auth/set", () => {
   });
 });
 
-describe("POST /api/auth/has", () => {
-  it("returns { present: false } when not set", async () => {
-    const r = await postJson(`${baseUrl}/api/auth/has`, {
-      credential: { kind: "anthropic" },
-    });
-    expect(r.status).toBe(200);
-    expect(r.body.present).toBe(false);
-  });
-
-  it("returns { present: true } after set", async () => {
-    await postJson(`${baseUrl}/api/auth/set`, {
-      credential: { kind: "github", host: "github.com" },
-      value: "ghp_test",
-    });
-    const r = await postJson(`${baseUrl}/api/auth/has`, {
-      credential: { kind: "github", host: "github.com" },
-    });
-    expect(r.status).toBe(200);
-    expect(r.body.present).toBe(true);
-  });
-
-  it("rejects when credential is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/auth/has`, {});
-    expect(r.status).toBe(400);
-    expect(r.body.error).toBe("invalid_credential");
-  });
-
-  it("denies requests with an opaque origin", async () => {
-    const res = await fetch(`${baseUrl}/api/auth/has`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "null" },
-      body: JSON.stringify({ credential: { kind: "anthropic" } }),
-    });
-    expect(res.status).toBe(403);
-  });
-});
-
 describe("POST /api/auth/clear", () => {
   it("clears a stored credential", async () => {
     await postJson(`${baseUrl}/api/auth/set`, {
@@ -994,10 +957,9 @@ describe("POST /api/auth/clear", () => {
     });
     expect(clear.status).toBe(200);
     expect(clear.body.ok).toBe(true);
-    const has = await postJson(`${baseUrl}/api/auth/has`, {
-      credential: { kind: "github", host: "github.com" },
-    });
-    expect(has.body.present).toBe(false);
+    const listAfter = await fetch(`${baseUrl}/api/auth/list`);
+    const listJson = (await listAfter.json()) as { credentials: unknown[] };
+    expect(listJson.credentials).toEqual([]);
   });
 
   it("is a no-op for an unset credential", async () => {

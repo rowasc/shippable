@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { authSet, authHas, authClear, authList, AuthClientError } from "./client";
+import { authSet, authClear, authList, AuthClientError } from "./client";
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -34,15 +34,6 @@ describe("authSet", () => {
       (e: unknown) =>
         e instanceof AuthClientError && e.discriminator === "host_blocked",
     );
-  });
-});
-
-describe("authHas", () => {
-  it("returns the boolean from { present }", async () => {
-    vi.stubGlobal("fetch", mockFetch(200, { present: true }));
-    expect(await authHas({ kind: "anthropic" })).toBe(true);
-    vi.stubGlobal("fetch", mockFetch(200, { present: false }));
-    expect(await authHas({ kind: "anthropic" })).toBe(false);
   });
 });
 

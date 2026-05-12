@@ -43,13 +43,6 @@ export async function authSet(credential: Credential, value: string): Promise<vo
   await postJson("/api/auth/set", { credential, value });
 }
 
-export async function authHas(credential: Credential): Promise<boolean> {
-  const json = (await postJson("/api/auth/has", { credential })) as {
-    present?: unknown;
-  };
-  return json.present === true;
-}
-
 export async function authClear(credential: Credential): Promise<void> {
   await postJson("/api/auth/clear", { credential });
 }

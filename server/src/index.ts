@@ -14,7 +14,6 @@ import { removePortFile, writePortFile } from "./port-file.ts";
 import { getCredential, hasCredential } from "./auth/store.ts";
 import {
   handleAuthSet,
-  handleAuthHas,
   handleAuthClear,
   handleAuthList,
 } from "./auth/endpoints.ts";
@@ -118,9 +117,6 @@ export function createApp(): Server {
     }
     if (req.method === "POST" && req.url === "/api/auth/set") {
       return await handleAuthSet(req, res, origin);
-    }
-    if (req.method === "POST" && req.url === "/api/auth/has") {
-      return await handleAuthHas(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/auth/clear") {
       return await handleAuthClear(req, res, origin);

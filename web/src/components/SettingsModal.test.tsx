@@ -52,6 +52,16 @@ describe("SettingsModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("exposes the dialog role with aria-modal and an aria-label", async () => {
+    render(
+      <CredentialsProvider>
+        <SettingsModal onClose={vi.fn()} />
+      </CredentialsProvider>,
+    );
+    const dialog = await screen.findByRole("dialog", { name: /settings/i });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+  });
+
   it("invokes onClose when Esc is pressed", async () => {
     const onClose = vi.fn();
     render(
