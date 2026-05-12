@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   githubApiBaseForHost,
@@ -20,6 +20,14 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [trustedHosts, setTrustedHosts] = useState(readTrustedGithubHosts);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !busy) onCancel();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
 
   const needsHostTrust = !isGithubDotCom(host);
   const hostTrusted =
