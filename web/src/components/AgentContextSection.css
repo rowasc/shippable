@@ -296,6 +296,49 @@
   font-size: 11px;
   border-radius: 2px;
 }
+.ac__agent-comments {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.ac__agent-comments-list {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ac__agent-comment {
+  border-left: 2px solid var(--border);
+  padding: 4px 0 4px 8px;
+}
+.ac__agent-comment-head {
+  font-size: 11px;
+  color: var(--fg-mute);
+}
+.ac__agent-comment-label {
+  color: var(--fg);
+  font-weight: 500;
+}
+.ac__agent-comment-sep {
+  color: var(--fg-mute);
+}
+.ac__agent-comment-loc {
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ac__agent-comment-time {
+  color: var(--fg-mute);
+}
+.ac__agent-comment-body {
+  color: var(--fg);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 2px 0 4px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .ac__delivered {
   margin-top: 8px;
   padding-top: 6px;

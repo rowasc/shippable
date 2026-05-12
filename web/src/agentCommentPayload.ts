@@ -4,7 +4,7 @@
 // docs/plans/share-review-comments.md § Format the agent sees for the wire
 // shape — `lines` is a string of file line numbers, not array indices.
 
-import type { ChangeSet, CommentKind } from "./types";
+import type { AgentComment, ChangeSet, CommentKind } from "./types";
 import { parseReplyKey } from "./types";
 
 export interface DerivedCommentPayload {
@@ -14,19 +14,41 @@ export interface DerivedCommentPayload {
   /** `"118"` for a single line; `"72-79"` for a range. Omitted for thread
    *  kinds where line context isn't meaningful (hunkSummary, teammate). */
   lines?: string;
+  /**
+   * Server-minted `AgentComment.id` for the parent. Set only when
+   * `kind === "reply-to-agent-comment"`. The enqueue endpoint requires it.
+   */
+  parentAgentCommentId?: string;
 }
 
 /**
- * Returns null when the targetKey can't be resolved against the changeset
- * (stale hunk, etc.). Caller should skip enqueueing in that case rather than
- * sending a malformed payload.
+ * Returns null when the targetKey can't be resolved (stale hunk, missing
+ * agent-comment, etc.). Caller should skip enqueueing in that case rather
+ * than sending a malformed payload.
+ *
+ * Agent-comment threads are looked up by id in the `agentComments` slot
+ * rather than by hunk position in the changeset. Pass that slot in so the
+ * function can resolve the anchor `file` and `lines`.
  */
 export function deriveCommentPayload(
   targetKey: string,
   cs: ChangeSet,
+  agentComments: AgentComment[] = [],
 ): DerivedCommentPayload | null {
   const parsed = parseReplyKey(targetKey);
   if (!parsed) return null;
+
+  if (parsed.kind === "agentComment") {
+    const parent = agentComments.find((c) => c.id === parsed.agentCommentId);
+    if (!parent || !parent.anchor) return null;
+    return {
+      kind: "reply-to-agent-comment",
+      file: parent.anchor.file,
+      lines: parent.anchor.lines,
+      parentAgentCommentId: parent.id,
+    };
+  }
+
   const located = locateHunk(cs, parsed.hunkId);
   if (!located) return null;
 

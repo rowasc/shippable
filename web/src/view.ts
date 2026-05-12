@@ -441,6 +441,10 @@ function buildCommentCounts(
   for (const [key, list] of Object.entries(replies)) {
     const parsed = parseReplyKey(key);
     if (!parsed) continue;
+    // Agent-comment threads are addressed by the AgentComment's id, not by
+    // a hunk. The hunk-based counter skips them here; the file badge picks
+    // them up via the state.agentComments-aware counter (added in T22).
+    if (parsed.kind === "agentComment") continue;
     const fileId = hunkToFile.get(parsed.hunkId);
     if (!fileId) continue;
     counts.set(fileId, (counts.get(fileId) ?? 0) + list.length);

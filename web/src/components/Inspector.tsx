@@ -1,5 +1,6 @@
 import "./Inspector.css";
 import type {
+  AgentComment,
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
@@ -95,6 +96,27 @@ interface Props {
    * so reopening restores what the user typed.
    */
   draftBodies: Record<string, string>;
+  /**
+   * Top-level agent comments for the active worktree. Forwarded to
+   * `AgentContextSection` for the new agent-comments block. Empty list
+   * hides the block. Optional because non-worktree changesets don't
+   * surface this UI at all.
+   */
+  agentComments?: AgentComment[];
+  /**
+   * The reviewer's reply map (`state.replies`). Forwarded to the
+   * agent-comments block so it can look up replies under the
+   * `agentComment:<id>` reply-key prefix. Optional for the same reason
+   * as `agentComments`.
+   */
+  repliesByKey?: Record<string, Reply[]>;
+  /**
+   * Which reply key currently has its composer open, or null when no
+   * composer is active. Forwarded to the agent-comments block so its
+   * `ReplyThread` knows whether to render the composer or the "+ reply"
+   * button. Optional; defaults to null.
+   */
+  draftingKey?: string | null;
   onJump: (c: Cursor) => void;
   /**
    * Clicking a block-scoped comment should re-select its range so the user
@@ -185,6 +207,9 @@ export function Inspector({
   viewModel,
   symbols,
   draftBodies,
+  agentComments,
+  repliesByKey,
+  draftingKey,
   onJump,
   onJumpToBlock,
   onToggleAck,
@@ -361,6 +386,17 @@ export function Inspector({
           onJump={onJump}
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
+          agentComments={agentComments ?? []}
+          replies={repliesByKey ?? {}}
+          draftingKey={draftingKey ?? null}
+          draftFor={draftFor}
+          deliveredById={deliveredById ?? {}}
+          onStartDraft={onStartDraft}
+          onCloseDraft={onCloseDraft}
+          onChangeDraft={onChangeDraft}
+          onSubmitReply={onSubmitReply}
+          onDeleteReply={onDeleteReply}
+          onRetryReply={onRetryReply}
         />
       )}
 

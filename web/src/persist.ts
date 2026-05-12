@@ -13,6 +13,7 @@
  */
 
 import type {
+  AgentComment,
   ChangeSet,
   Cursor,
   DetachedReply,
@@ -70,11 +71,11 @@ export function setLiveReloadEnabled(
  * the same change. Old blobs in users' localStorage are migrated forward
  * on load; we never write old shapes back.
  */
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 /** What we actually serialize — Sets become arrays, ephemeral fields drop. */
 interface PersistedSnapshot {
-  v: 2;
+  v: 3;
   cursor: Cursor;
   /** Set<number> → number[] per hunk id. */
   readLines: Record<string, number[]>;
@@ -88,6 +89,13 @@ interface PersistedSnapshot {
    * threadKey so the persisted shape stays interpretable. New in v2.
    */
   detachedReplies: DetachedReply[];
+  /**
+   * Top-level agent comments for the active worktree (anchor-shaped). New
+   * in v3. Reply-shaped agent entries nest under `Reply.agentReplies[]` and
+   * are persisted there; this slot is only for the new top-level roots.
+   * See `docs/sdd/agent-comments/spec.md`.
+   */
+  agentComments: AgentComment[];
 }
 
 /**
@@ -109,6 +117,14 @@ const migrations: Record<number, (prev: unknown) => unknown> = {
     ...(v1 as PersistedSnapshot),
     v: 2,
     detachedReplies: [],
+  }),
+  // v: 3 added the agentComments slot for top-level agent-authored comments.
+  // Older snapshots had no such concept — start with an empty list; the
+  // next poll of /api/agent/comments rehydrates it from the server.
+  3: (v2) => ({
+    ...(v2 as PersistedSnapshot),
+    v: 3,
+    agentComments: [],
   }),
 };
 
@@ -150,6 +166,7 @@ export interface HydratedSession {
     | "ackedNotes"
     | "replies"
     | "detachedReplies"
+    | "agentComments"
   > | null;
   drafts: Record<string, string>;
 }
@@ -179,7 +196,7 @@ export function buildSnapshot(
     (d) => !d.reply.external,
   );
   return {
-    v: 2,
+    v: 3,
     cursor: state.cursor,
     readLines,
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
@@ -188,6 +205,7 @@ export function buildSnapshot(
     replies,
     drafts,
     detachedReplies,
+    agentComments: state.agentComments,
   };
 }
 
@@ -317,6 +335,10 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
       // Detached entries don't reference live hunk ids — they survive even
       // when the originating hunk is gone, by definition. Keep them all.
       detachedReplies: snapshot.detachedReplies,
+      // Agent comments are addressed by id, not by hunk, so they survive
+      // changeset switches unconditionally. The next poll of
+      // /api/agent/comments will reconcile against the live store.
+      agentComments: snapshot.agentComments,
     },
     drafts: filterDraftsByHunk(snapshot.drafts, validHunkIds),
   };
@@ -328,7 +350,7 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
   return (
-    o.v === 2 &&
+    o.v === 3 &&
     typeof o.cursor === "object" &&
     typeof o.readLines === "object" &&
     Array.isArray(o.reviewedFiles) &&
@@ -336,7 +358,8 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
     Array.isArray(o.ackedNotes) &&
     typeof o.replies === "object" &&
     typeof o.drafts === "object" &&
-    Array.isArray(o.detachedReplies)
+    Array.isArray(o.detachedReplies) &&
+    Array.isArray(o.agentComments)
   );
 }
 
@@ -427,6 +450,7 @@ function filterDraftsByHunk(
  * Reply-key shapes (see types.ts):
  *   note:hunkId:lineIdx · user:hunkId:lineIdx · block:hunkId:lo-hi
  *   hunkSummary:hunkId  · teammate:hunkId
+ *   agentComment:<id>   (id is server-minted; never a hunk reference)
  * The hunkId can contain `/` and `#`, so we split on the first colon to
  * get the prefix and treat the remainder accordingly.
  */
@@ -439,6 +463,12 @@ function replyKeyTargetsValidHunk(
   const prefix = key.slice(0, colon);
   const rest = key.slice(colon + 1);
   switch (prefix) {
+    case "agentComment":
+      // Agent-comment threads are addressed by id, not by hunk. The live
+      // poll reconciles whether the parent agent comment still exists; if
+      // it doesn't, the renderer treats the thread as orphaned. Accept all
+      // non-empty ids on rehydrate.
+      return rest.length > 0;
     case "hunkSummary":
     case "teammate":
       return validHunkIds.has(rest);

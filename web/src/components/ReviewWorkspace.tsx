@@ -224,6 +224,7 @@ export function ReviewWorkspace({
   const {
     delivered: deliveredComments,
     agentReplies: polledAgentReplies,
+    agentComments: polledAgentComments,
     lastSuccessfulPollAt: deliveredLastSuccessAt,
     error: deliveredErrorState,
   } = useDeliveredPolling({ worktreePath: wtPath });
@@ -235,6 +236,12 @@ export function ReviewWorkspace({
     if (polledAgentReplies.length === 0) return;
     dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
   }, [polledAgentReplies, dispatch]);
+
+  // Same shape on the top-level side: idempotent merge into state.agentComments.
+  useEffect(() => {
+    if (polledAgentComments.length === 0) return;
+    dispatch({ type: "MERGE_AGENT_COMMENTS", polled: polledAgentComments });
+  }, [polledAgentComments, dispatch]);
 
   const wantedFetchKey =
     wtPath && wtSha
@@ -1203,6 +1210,9 @@ export function ReviewWorkspace({
               replies: state.replies,
               draftingKey,
             })}
+            agentComments={state.agentComments}
+            repliesByKey={state.replies}
+            draftingKey={draftingKey}
             commentCount={buildCommentStops(cs, state.replies).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
             onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
@@ -1247,7 +1257,7 @@ export function ReviewWorkspace({
               // Non-worktree loads (paste/url/upload) save the Reply
               // locally only; the pip never appears.
               if (activeWorktreeSource) {
-                const derived = deriveCommentPayload(key, cs);
+                const derived = deriveCommentPayload(key, cs, state.agentComments);
                 if (derived) {
                   enqueueComment({
                     worktreePath: activeWorktreeSource.worktreePath,
