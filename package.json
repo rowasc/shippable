@@ -4,6 +4,7 @@
   "scripts": {
     "desktop:setup": "(cd server && bun install) && (cd web && npm install)",
     "desktop:dev": "cd src-tauri && cargo tauri dev",
-    "build:dmg": "node scripts/build-dmg.mjs"
+    "build:dmg": "node scripts/build-dmg.mjs",
+    "release": "node scripts/release.mjs"
   }
 }

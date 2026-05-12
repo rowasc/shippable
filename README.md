@@ -163,6 +163,8 @@ The repo intentionally creates the final `.dmg` with `hdiutil` after Tauri produ
 
 The .dmg is unsigned, so first launch trips macOS Gatekeeper — right-click the .app in Finder → Open → confirm once. Subsequent launches don't prompt.
 
+To publish a build as a GitHub release, see [`docs/RELEASE.md`](./docs/RELEASE.md).
+
 ### First launch
 
 If no Anthropic API key is in the Keychain, the app shows a setup modal where you can paste one. The key is stored at `service=shippable, account=ANTHROPIC_API_KEY` in your login Keychain (same entry the dev backend uses). Quit and relaunch after saving — the bundled backend is spawned at app startup, so it only picks up new keys on the next run.
