@@ -1,5 +1,5 @@
 import "./Welcome.css";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import type { ChangeSet, DetachedReply, Reply } from "../types";
 import { parseDiff } from "../parseDiff";
 import { STUBS } from "../fixtures";
@@ -38,7 +38,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   // below") always points at something the eye can find.
   const [heroDropActive, setHeroDropActive] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function deliver(
     cs: ChangeSet,
@@ -289,7 +288,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               <span> or </span>
               <span className="welcome__drop-strong">click to choose a file</span>
               <input
-                ref={fileInputRef}
                 type="file"
                 accept=".diff,.patch,text/plain"
                 onChange={(e) => {
@@ -365,7 +363,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               <span> or </span>
               <span className="welcome__drop-strong">click to choose a file</span>
               <input
-                ref={fileInputRef}
                 type="file"
                 accept=".diff,.patch,text/plain"
                 onChange={(e) => {
