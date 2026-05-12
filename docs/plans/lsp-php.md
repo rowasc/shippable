@@ -12,7 +12,7 @@ This is the second language module after JS/TS. It exists to prove out the "smal
 
 PHP is the highest-leverage second target:
 
-- a8c reviewers spend most of their day in PHP. JS/TS-only is a hard limit on how useful Shippable feels in real reviews here.
+- many of the codebases we want to review are PHP. JS/TS-only is a hard limit on how useful Shippable feels in real reviews.
 - there are two production-grade LSPs (intelephense, phpactor) that already work the way TS-LSP does — discover binary on `PATH`, speak LSP over stdio, return `Location`/`LocationLink`.
 - we already pull `@php-wasm/web` for the runner, so the deferred memory-only path (browser-hosted analyzer) has a sunk-cost runtime to lean on later — see plan-symbols.md → "Memory-only PHP analysis (deferred path)".
 
