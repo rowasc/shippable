@@ -1,5 +1,13 @@
 # Worktree directory picker
 
+## Status: shipped
+
+Both Welcome and LoadModal lead with `Choose folder…` and keep manual entry as a fallback. Tauri uses `@tauri-apps/plugin-dialog`; browser/dev calls `POST /api/worktrees/pick-directory` (wired at `server/src/index.ts:81` → `worktrees.pickDirectory`). Shared state machine lives in `web/src/useWorktreeLoader.ts` (chosen over the `worktreePicker.ts` alternative). The Tauri sidecar starts without an Anthropic key, so worktree loading no longer requires AI config.
+
+The remainder of this doc is the original plan.
+
+---
+
 The worktree ingest flow exists today, but the first step is still wrong: both the welcome screen and the load modal ask the user to paste an absolute path. That is brittle, easy to mistype, and inconsistent with the rest of the product. This plan replaces the raw-path-first UX with an explicit directory chooser where the runtime can actually return a filesystem path, while keeping a boring fallback where it cannot.
 
 ## Why this needs its own plan
