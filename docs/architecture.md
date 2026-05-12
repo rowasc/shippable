@@ -20,9 +20,15 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 - `GET  /api/health`.
 - Origin allowlist with explicit handling of opaque origins (`Origin: null`) and `Sec-Fetch-Site`. The "null"-origin case has bitten us before; see comment in source.
 
-## API key storage
+## Credential flow
 
-macOS Keychain at `service=shippable, account=ANTHROPIC_API_KEY`. Same entry serves the dev backend and the bundled desktop app. The desktop app shows a first-run modal if the key is missing.
+One pattern serves the Anthropic API key and per-host GitHub PATs:
+
+- **Tauri Keychain** is the durable store. The Rust shell exposes `keychain_get/set/remove` Tauri commands with a small allowlist (`ANTHROPIC_API_KEY`, `GITHUB_TOKEN:<host>`). The server never reads OS credential storage.
+- **Server-side `auth/store.ts`** holds the runtime cache, keyed by a flat string (`anthropic` or `github:<host>`).
+- **Web orchestrator (`useCredentials`)** drives a boot rehydrate: it reads Keychain via the Tauri commands and pushes hits to `POST /api/auth/set`. The same hook handles user-initiated rotate / clear from the Settings panel and the reactive GitHub-token modal.
+- **Boot prompt** (Anthropic only) appears on first run if the credential is missing and the user hasn't dismissed it; the skip choice persists in `localStorage["shippable:anthropic:skip"]`.
+- **Hosted-backend future** (`AGENTS.md` deployment-shape note): the same pattern degrades cleanly — without a Tauri shell, the web app simply has no Keychain hits to push, and the user enters credentials via the Settings panel.
 
 ## Core data model (`web/src/types.ts`)
 

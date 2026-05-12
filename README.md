@@ -32,11 +32,9 @@ cd server
 npm install
 ```
 
-Set `ANTHROPIC_API_KEY` in your shell before starting the server. On macOS, store it in the system Keychain once and pull it into your shell before starting:
+The server boots without an Anthropic key — only AI plan and streaming review need one. Paste your key in the Settings panel (or the first-launch prompt); it's stored in your login Keychain (Tauri) or held in server memory until restart (dev/browser). The legacy `ANTHROPIC_API_KEY` shell export is no longer consulted.
 
 ```
-security add-generic-password -s shippable -a ANTHROPIC_API_KEY -w
-export ANTHROPIC_API_KEY=$(security find-generic-password -s shippable -a ANTHROPIC_API_KEY -w)
 npm run dev        # tsx watch on http://127.0.0.1:3001
 npm run typecheck  # tsc --noEmit
 npm run test       # vitest run
@@ -167,9 +165,9 @@ To publish a build as a GitHub release, see [`docs/RELEASE.md`](./docs/RELEASE.m
 
 ### First launch
 
-If no Anthropic API key is in the Keychain, the app shows a setup modal where you can paste one. The key is stored at `service=shippable, account=ANTHROPIC_API_KEY` in your login Keychain (same entry the dev backend uses). Quit and relaunch after saving — the bundled backend is spawned at app startup, so it only picks up new keys on the next run.
+If no Anthropic API key is configured, the app shows a setup modal where you can paste one. The key is stored at `service=shippable, account=ANTHROPIC_API_KEY` in your login Keychain. A successful save takes effect immediately — no relaunch needed. Manage credentials anytime via the topbar settings (⚙) or the Welcome-screen settings link, and skip the prompt with "Skip — use rule-based only" if you only want the rule-based plan.
 
-Remove a saved key with:
+Remove a saved key from Settings (Clear), or directly with:
 
 ```
 security delete-generic-password -s shippable -a ANTHROPIC_API_KEY
