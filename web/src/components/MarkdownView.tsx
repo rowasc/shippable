@@ -97,6 +97,7 @@ function MermaidBlock({ source }: { source: string }) {
   const renderId = useId().replace(/[:]/g, "_");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
     ensureMermaidReady();
@@ -104,6 +105,7 @@ function MermaidBlock({ source }: { source: string }) {
 
   useEffect(() => {
     let cancelled = false;
+    let createdUrl: string | null = null;
     const target = containerRef.current;
     if (!target) return;
     setError(null);
@@ -113,12 +115,18 @@ function MermaidBlock({ source }: { source: string }) {
         if (cancelled || !target) return;
         target.innerHTML = result.svg;
         if (result.bindFunctions) result.bindFunctions(target);
+        const blob = new Blob([result.svg], { type: "image/svg+xml" });
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
   }, [source, renderId]);
 
   if (error) {
@@ -134,12 +142,23 @@ function MermaidBlock({ source }: { source: string }) {
     );
   }
 
+  // Wrap in an anchor pointing to a blob URL of the rendered SVG. Left-click
+  // opens it full-size in a new tab (where the browser/webview's own zoom
+  // works); right-click gives "Open in new tab", "Save link as", etc.
   return (
-    <div
-      ref={containerRef}
-      className="md-preview__mermaid"
-      aria-label="Mermaid diagram"
-    />
+    <a
+      href={blobUrl ?? undefined}
+      target="_blank"
+      rel="noreferrer"
+      className="md-preview__mermaid-link"
+      title="Open diagram in new tab to zoom"
+    >
+      <div
+        ref={containerRef}
+        className="md-preview__mermaid"
+        aria-label="Mermaid diagram"
+      />
+    </a>
   );
 }
 
