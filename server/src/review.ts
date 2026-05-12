@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { getCredential } from "./auth/store.ts";
 
 const RequestSchema = z.object({
   // Pre-rendered prompt text. The frontend renders templates client-side;
@@ -67,7 +68,7 @@ export async function streamReview(
   const started = Date.now();
 
   try {
-    const client = new Anthropic();
+    const client = new Anthropic({ apiKey: getCredential({ kind: "anthropic" }) });
     const stream = client.messages.stream(
       {
         model: parsed.model ?? DEFAULT_MODEL,

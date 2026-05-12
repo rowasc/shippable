@@ -11,7 +11,7 @@ import * as mcpStatus from "./mcp-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
 import { removePortFile, writePortFile } from "./port-file.ts";
-import { getCredential } from "./auth/store.ts";
+import { getCredential, hasCredential } from "./auth/store.ts";
 import {
   handleAuthSet,
   handleAuthHas,
@@ -163,12 +163,7 @@ export function createApp(): Server {
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(
-        JSON.stringify({
-          ok: true,
-          anthropic: process.env.ANTHROPIC_API_KEY ? "present" : "missing",
-        }),
-      );
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
     writeCorsHeaders(res, origin);
@@ -199,10 +194,10 @@ async function handlePlan(
   res: ServerResponse,
   origin: string | null,
 ) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!hasCredential({ kind: "anthropic" })) {
     writeCorsHeaders(res, origin);
     res.writeHead(503, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    res.end(JSON.stringify({ error: "anthropic_key_missing" }));
     return;
   }
   const body = await readBody(req);
@@ -269,10 +264,10 @@ async function handleReview(
   res: ServerResponse,
   origin: string | null,
 ) {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!hasCredential({ kind: "anthropic" })) {
     writeCorsHeaders(res, origin);
     res.writeHead(503, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "ANTHROPIC_API_KEY not set on the server" }));
+    res.end(JSON.stringify({ error: "anthropic_key_missing" }));
     return;
   }
   const ip = req.socket.remoteAddress ?? "unknown";
@@ -1580,14 +1575,9 @@ function isRequestAllowed(
 }
 
 function main() {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    // AI-backed endpoints (/api/plan, /api/review) return 503 individually;
-    // worktree ingest, prompt library, and the rule-based plan don't need a
-    // key, so refusing to boot just to enforce the AI key punishes the
-    // non-AI paths. The web gate surfaces the missing-key state via
-    // /api/health.
+  if (process.env.ANTHROPIC_API_KEY) {
     console.warn(
-      "[server] ANTHROPIC_API_KEY is not set; AI-backed endpoints will return 503 until one is provided. On macOS: `export ANTHROPIC_API_KEY=$(security find-generic-password -s anthropic-key-shippable -w)` before `npm run dev`.",
+      "[server] ANTHROPIC_API_KEY is set in the environment but is no longer used; configure via the Settings panel.",
     );
   }
   const server = createApp();

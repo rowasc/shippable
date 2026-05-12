@@ -1054,6 +1054,83 @@ describe("legacy /api/github/auth/* routes are gone", () => {
   );
 });
 
+describe("GET /api/health", () => {
+  it("returns { ok: true } only — no anthropic field", async () => {
+    const r = await getJson(`${baseUrl}/api/health`);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true });
+  });
+});
+
+describe("AI endpoints consult auth-store for anthropic key", () => {
+  it("POST /api/plan returns 503 anthropic_key_missing when not configured", async () => {
+    const r = await postJson(`${baseUrl}/api/plan`, {
+      changeset: { id: "x", files: [] },
+    });
+    expect(r.status).toBe(503);
+    expect(r.body.error).toBe("anthropic_key_missing");
+  });
+
+  it("POST /api/plan stops 503ing once the anthropic credential is set", async () => {
+    const planMod = await import("./plan.ts");
+    const spy = vi
+      .spyOn(planMod, "generatePlan")
+      .mockResolvedValue({
+        headline: "x",
+        intent: [],
+        map: { files: [], symbols: [] },
+        entryPoints: [],
+      });
+    try {
+      await postJson(`${baseUrl}/api/auth/set`, {
+        credential: { kind: "anthropic" },
+        value: "sk-test",
+      });
+      const r = await postJson(`${baseUrl}/api/plan`, {
+        changeset: { id: "x", files: [] },
+      });
+      expect(r.status).toBe(200);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("POST /api/review returns 503 anthropic_key_missing when not configured", async () => {
+    const res = await fetch(`${baseUrl}/api/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "hi" }),
+    });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe("anthropic_key_missing");
+  });
+
+  it("POST /api/review stops 503ing once the anthropic credential is set", async () => {
+    const reviewMod = await import("./review.ts");
+    const spy = vi
+      .spyOn(reviewMod, "streamReview")
+      .mockImplementation(async (_body, _req, res) => {
+        res.writeHead(200, { "Content-Type": "text/event-stream" });
+        res.end("data: {}\n\n");
+      });
+    try {
+      await postJson(`${baseUrl}/api/auth/set`, {
+        credential: { kind: "anthropic" },
+        value: "sk-test",
+      });
+      const res = await fetch(`${baseUrl}/api/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "hi" }),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 // ─── POST /api/github/pr/load ─────────────────────────────────────────────
 
 // Minimal GitHub API canned responses for pr/load integration tests.

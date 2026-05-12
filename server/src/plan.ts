@@ -10,6 +10,7 @@ import type {
   StructureMap,
 } from "../../web/src/types.ts";
 import { buildStructureMap } from "../../web/src/plan.ts";
+import { getCredential } from "./auth/store.ts";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-4-6";
 
@@ -81,7 +82,7 @@ export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
   const map = buildStructureMap(cs);
   const userContent = buildUserMessage(cs, map);
 
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey: getCredential({ kind: "anthropic" }) });
 
   const response = await client.messages.parse({
     model: MODEL,
