@@ -98,13 +98,17 @@ export function CredentialsPanel({ mode }: Props) {
         ))}
 
       {mode === "boot" && (
-        <div className="creds__actions">
+        <div className="creds__skip">
           <button
-            className="creds__btn"
+            type="button"
+            className="creds__skip-btn"
             onClick={() => credentials.skipAnthropic()}
           >
             Skip — use rule-based only
           </button>
+          <span className="creds__skip-hint">
+            You can re-enable later from Settings.
+          </span>
         </div>
       )}
 

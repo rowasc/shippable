@@ -240,3 +240,38 @@ describe("Welcome — settings affordance", () => {
     );
   });
 });
+
+describe("Welcome — AI off chip", () => {
+  it("is hidden when anthropic is configured", async () => {
+    const { authList } = await import("../auth/client");
+    vi.mocked(authList).mockResolvedValueOnce([{ kind: "anthropic" }]);
+    renderWelcome();
+    // Wait for credentials to settle before asserting absence.
+    await waitFor(() =>
+      expect(screen.getByText(/from a url/i)).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button", { name: /ai off/i })).toBeNull();
+  });
+
+  it("is hidden when anthropic is missing but not skipped (gate's territory)", async () => {
+    renderWelcome();
+    await waitFor(() =>
+      expect(screen.getByText(/from a url/i)).toBeTruthy(),
+    );
+    expect(screen.queryByRole("button", { name: /ai off/i })).toBeNull();
+  });
+
+  it("renders when anthropic is missing AND skipped, and opens Settings", async () => {
+    window.localStorage.setItem("shippable:anthropic:skip", "true");
+    renderWelcome();
+    const chip = await waitFor(() =>
+      screen.getByRole("button", { name: /ai off/i }),
+    );
+    fireEvent.click(chip);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /add github host/i }),
+      ).toBeTruthy(),
+    );
+  });
+});

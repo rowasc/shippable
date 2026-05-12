@@ -70,7 +70,7 @@ For the prototype, `server/src/plan.ts` calls Anthropic directly:
 - **Model** — `claude-sonnet-4-6` by default, override with `CLAUDE_MODEL`.
 - **Structured output** — `client.messages.parse()` with `zodOutputFormat(PlanResponseSchema)`. The SDK constrains Claude's response to JSON matching the schema; we get a typed `parsed_output` back, no `JSON.parse`. If the model can't produce a matching response (rare), `parsed_output` is null and the server returns 502.
 - **Caching** — the system prompt is the same on every request, so it's marked `cache_control: { type: "ephemeral" }`. First request writes the cache, subsequent ones hit it (cheaper and faster). The variable parts (structure map and diff) sit after the cached prefix.
-- **Auth** — `ANTHROPIC_API_KEY` from the environment, read out of macOS Keychain (see the README).
+- **Auth** — `getCredential({ kind: "anthropic" })` from the server's in-memory `auth-store`. The web app rehydrates it via `/api/auth/set` at boot (on Tauri it reads the Keychain; on dev the user pastes via Settings). The SDK never falls back to `process.env.ANTHROPIC_API_KEY`: the call sites assert non-empty and the Tauri sidecar spawns with `ANTHROPIC_API_KEY=""` to close the env-leak path.
 
 When another provider gets added, only the caching bit is provider-specific (each API has its own caching mechanism). Everything else is a one-to-one translation.
 

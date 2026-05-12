@@ -396,7 +396,7 @@ function installDemoMocks() {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     if (url.endsWith("/api/health")) {
-      return jsonResponse({ ok: true, anthropic: "present" });
+      return jsonResponse({ ok: true });
     }
     if (url.endsWith("/api/library/prompts")) {
       return jsonResponse({ prompts: DEMO_LIBRARY_PROMPTS });

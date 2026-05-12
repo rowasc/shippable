@@ -103,8 +103,8 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   useEffect(() => {
-    void rehydrate();
     // eslint-disable-next-line react-hooks/set-state-in-effect
+    void rehydrate();
   }, [rehydrate]);
 
   const set = useCallback(

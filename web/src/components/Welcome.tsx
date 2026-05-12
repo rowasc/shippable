@@ -9,6 +9,7 @@ import { useWorktreeLoader } from "../useWorktreeLoader";
 import { useGithubPrLoad, isGithubPrUrl } from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
 import { SettingsModal } from "./SettingsModal";
+import { useCredentials } from "../auth/useCredentials";
 
 interface Props {
   recents: RecentEntry[];
@@ -26,6 +27,14 @@ interface Props {
 export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   const [err, setErr] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const credentials = useCredentials();
+  // Mirror the workspace topbar: when Anthropic is missing AND the user has
+  // explicitly skipped, surface "AI off" so the dismissal is visible without
+  // the boot prompt. Plain "missing + not skipped" is the gate's job —
+  // Welcome would never render in that state anyway.
+  const showAiOffChip =
+    credentials.anthropicSkipped &&
+    !credentials.list.some((c) => c.kind === "anthropic");
 
   // Single URL field (handles both raw diff URLs and GitHub PR HTML URLs).
   const [url, setUrl] = useState("");
@@ -142,6 +151,19 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
         <span className="welcome__brand">shippable</span>
         <span className="welcome__sep">│</span>
         <span className="welcome__sub">an AI-assisted code review prototype</span>
+        {showAiOffChip && (
+          <>
+            <span className="welcome__top-spacer" />
+            <button
+              type="button"
+              className="welcome__ai-off"
+              title="AI is disabled — click to enable"
+              onClick={() => setShowSettings(true)}
+            >
+              ✦ AI off
+            </button>
+          </>
+        )}
       </header>
 
       <div className="welcome__body">

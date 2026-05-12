@@ -33,6 +33,28 @@
 .welcome__sub {
   color: var(--fg-dim);
 }
+/* Pushes the AI-off affordance to the trailing edge of the header row so it
+ * doesn't fight the brand/subtitle pair on the left. */
+.welcome__top-spacer {
+  flex: 1;
+}
+.welcome__ai-off {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg-dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.welcome__ai-off:hover {
+  color: var(--fg);
+  border-color: var(--fg-dim);
+}
 
 .welcome__body {
   flex: 1;

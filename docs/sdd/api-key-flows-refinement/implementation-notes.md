@@ -208,6 +208,32 @@ because the spec did not anticipate them.
   The duplication is deliberate at the prototype stage; revisit once
   a third surface (e.g. PR-load preflight) needs the same staging.
 
+### R10. Welcome surfaces "AI off"; boot-mode Skip de-escalated
+- **What changed:** The workspace topbar carried an "AI off" chip when
+  Anthropic was missing and dismissed, but the Welcome screen had no
+  comparable signal — a skipped-at-boot user staring at Welcome had no
+  visible reminder that AI was disabled. Welcome now renders the same
+  chip in its header row (right-aligned), clicking opens Settings.
+- The boot-mode Skip button rendered with the same visual weight as
+  Save, with no consequence hint. It is now a subdued underlined text
+  link followed by a one-line "You can re-enable later from Settings"
+  hint, so the eye reads Save as the intended action.
+
+### R11. Stale references in older docs and Demo cleaned up
+- **What changed:** `docs/features/api-key-setup.md` still described
+  "post-save state that makes the restart requirement explicit" — the
+  refactor removed the restart entirely. Rewritten to describe the
+  unified Settings surface and the persistent-skip "AI off" chip.
+- `docs/architecture.md` UI-surface inventory still listed `KeySetup`
+  (deleted); added `CredentialsPanel`, `SettingsModal`,
+  `ServerHealthGate`, and `GitHubTokenModal`.
+- `docs/plans/ai-plan.md` and `docs/plans/worktree-directory-picker.md`
+  described env-driven Anthropic auth; updated to point at the
+  auth-store path with the env-fallback closure noted explicitly.
+- `web/src/components/Demo.tsx` mocked `/api/health` returning
+  `{ ok: true, anthropic: "present" }` — the `anthropic` field was
+  removed when the endpoint collapsed in Task 8. Mock now matches.
+
 ## Manual smoke steps the headless harness cannot run
 
 These remain pending for a human (or a Tauri-capable environment):
