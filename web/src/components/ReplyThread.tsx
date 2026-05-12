@@ -63,7 +63,7 @@ export function ReplyThread({
   if (replies.length === 0 && !isDrafting) {
     return (
       <div className="thread thread--empty">
-        <button className="thread__start" onClick={onStartDraft}>
+        <button type="button" className="thread__start" onClick={onStartDraft}>
           {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       </div>
@@ -136,6 +136,7 @@ export function ReplyThread({
                       </span>
                     ) : (
                       <button
+                        type="button"
                         className="reply__delete"
                         onClick={() => setArmedDeleteId(r.id)}
                         title={deleteTitle}
@@ -169,7 +170,7 @@ export function ReplyThread({
           onSubmit={onSubmitReply}
         />
       ) : (
-        <button className="thread__start" onClick={onStartDraft}>
+        <button type="button" className="thread__start" onClick={onStartDraft}>
           {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       )}
@@ -294,10 +295,11 @@ function Composer({
         <span className="composer__hint">
           <kbd>⌘Enter</kbd> send · <kbd>Esc</kbd> close (saves draft)
         </span>
-        <button className="composer__cancel" onClick={onClose}>
+        <button type="button" className="composer__cancel" onClick={onClose}>
           close
         </button>
         <button
+          type="button"
           className="composer__send"
           disabled={!body.trim()}
           onClick={() => onSubmit(body.trim())}
