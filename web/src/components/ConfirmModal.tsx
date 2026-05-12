@@ -39,17 +39,18 @@ export function ConfirmModal({
       <div className="modal__box" onClick={(e) => e.stopPropagation()}>
         <header className="modal__h">
           <span className="modal__h-label">{title}</span>
-          <button className="modal__close" onClick={onCancel}>
+          <button type="button" className="modal__close" onClick={onCancel}>
             × close
           </button>
         </header>
         <section className="modal__sec">
           <p className="modal__hint">{message}</p>
           <div className="modal__row modal__row--end">
-            <button className="modal__btn" onClick={onCancel}>
+            <button type="button" className="modal__btn" onClick={onCancel}>
               {cancelLabel}
             </button>
             <button
+              type="button"
               ref={confirmRef}
               className={
                 danger
