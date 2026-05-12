@@ -10,6 +10,7 @@ import * as agentContext from "./agent-context.ts";
 import * as mcpStatus from "./mcp-status.ts";
 import * as agentQueue from "./agent-queue.ts";
 import type { Comment, CommentKind } from "./agent-queue.ts";
+import { removePortFile, writePortFile } from "./port-file.ts";
 import * as authStore from "./github/auth-store.ts";
 import { parsePrUrl } from "./github/url.ts";
 import { loadPr } from "./github/pr-load.ts";
@@ -1557,6 +1558,26 @@ function main() {
     const allowed = ALLOWED_ORIGINS.size > 0 ? [...ALLOWED_ORIGINS].join(", ") : "(none)";
     console.log(`[server] listening on http://${HOST}:${PORT}`);
     console.log(`[server] allowed browser origins: ${allowed}`);
+    // Advertise our port to sibling processes (today: the MCP server, which
+    // has no IPC channel back to the Tauri host and otherwise can't find the
+    // ephemeral port the sidecar binds to).
+    void writePortFile(PORT);
+  });
+
+  // Best-effort cleanup. Stale files are tolerated by the MCP side (it
+  // health-checks before trusting the port), but removing on graceful exit
+  // keeps the file from accumulating bogus state on dev boxes that bounce
+  // the sidecar frequently.
+  const cleanup = () => {
+    void removePortFile();
+  };
+  process.once("SIGINT", () => {
+    cleanup();
+    process.exit(130);
+  });
+  process.once("SIGTERM", () => {
+    cleanup();
+    process.exit(143);
   });
 }
 

@@ -1,9 +1,16 @@
+import { discoverSidecarPort } from "./port-discovery.js";
+
 export const DEFAULT_PORT = 3001;
 
 export interface HandlerDeps {
   fetchFn?: typeof fetch;
   port?: number;
   cwd?: () => string;
+  /**
+   * Discovery override. The default reads the sidecar's port file and
+   * health-checks it. Tests stub this to bypass the filesystem.
+   */
+  discoverPort?: () => Promise<number | null>;
 }
 
 export interface ToolResult {
@@ -17,13 +24,26 @@ interface PullResponse {
   ids: string[];
 }
 
-function resolvePort(deps?: HandlerDeps): number {
+// Resolution order:
+//   1. `deps.port` — explicit test override.
+//   2. `SHIPPABLE_PORT` env — explicit user/dev override.
+//   3. Sidecar port-file discovery (verified via /api/health).
+//   4. `DEFAULT_PORT` (3001) — the dev-server default.
+//
+// Discovery sits below the env var so devs can still pin the MCP at a
+// specific port (e.g. when running two sidecars side-by-side); it sits above
+// the default so the Tauri-spawned sidecar — which uses an ephemeral port
+// and never has `SHIPPABLE_PORT` set — is found automatically.
+async function resolvePort(deps?: HandlerDeps): Promise<number> {
   if (deps?.port !== undefined) return deps.port;
   const envPort = process.env.SHIPPABLE_PORT;
   if (envPort !== undefined && envPort !== "") {
     const parsed = Number(envPort);
     if (Number.isFinite(parsed)) return parsed;
   }
+  const discover = deps?.discoverPort ?? (() => discoverSidecarPort({ fetchFn: deps?.fetchFn }));
+  const discovered = await discover();
+  if (discovered !== null) return discovered;
   return DEFAULT_PORT;
 }
 
@@ -49,7 +69,7 @@ export async function handleCheckReviewComments(
   input: { worktreePath?: string },
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
-  const port = resolvePort(deps);
+  const port = await resolvePort(deps);
   const worktreePath = resolveWorktreePath(input, deps);
   const baseUrl = `http://127.0.0.1:${port}`;
   const url = `${baseUrl}/api/agent/pull`;
@@ -116,7 +136,7 @@ export async function handlePostReviewReply(
   input: PostReplyInput,
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
-  const port = resolvePort(deps);
+  const port = await resolvePort(deps);
   const worktreePath = resolveWorktreePath(input, deps);
   const baseUrl = `http://127.0.0.1:${port}`;
   const url = `${baseUrl}/api/agent/replies`;

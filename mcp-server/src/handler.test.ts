@@ -30,6 +30,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// Default discovery stub for tests that don't care about port-file lookup.
+// Without this the real disk would be consulted and a stray port file on a
+// dev box would flip test results. Tests that exercise discovery pass an
+// explicit `discoverPort` stub instead.
+const noDiscovery = async () => null;
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -42,7 +48,7 @@ describe("handleCheckReviewComments", () => {
 
     const result = await handleCheckReviewComments(
       { worktreePath: "/repo" },
-      { fetchFn },
+      { fetchFn, discoverPort: noDiscovery },
     );
 
     expect(result.isError).toBeUndefined();
@@ -54,7 +60,7 @@ describe("handleCheckReviewComments", () => {
 
     const result = await handleCheckReviewComments(
       { worktreePath: "/repo" },
-      { fetchFn },
+      { fetchFn, discoverPort: noDiscovery },
     );
 
     expect(result.isError).toBeUndefined();
@@ -70,7 +76,7 @@ describe("handleCheckReviewComments", () => {
 
     await handleCheckReviewComments(
       {},
-      { fetchFn, cwd: () => "/tmp/x" },
+      { fetchFn, cwd: () => "/tmp/x", discoverPort: noDiscovery },
     );
 
     expect(calls).toHaveLength(1);
@@ -85,7 +91,7 @@ describe("handleCheckReviewComments", () => {
 
     await handleCheckReviewComments(
       { worktreePath: "/tmp/y" },
-      { fetchFn, cwd: () => "/tmp/x" },
+      { fetchFn, cwd: () => "/tmp/x", discoverPort: noDiscovery },
     );
 
     expect(calls).toHaveLength(1);
@@ -165,7 +171,7 @@ describe("handleCheckReviewComments", () => {
     expect(calls[0]!.url).toBe("http://127.0.0.1:5000/api/agent/pull");
   });
 
-  it("falls back to DEFAULT_PORT when both deps.port and SHIPPABLE_PORT are absent", async () => {
+  it("falls back to DEFAULT_PORT when deps.port, SHIPPABLE_PORT, and discovery are all absent", async () => {
     vi.stubEnv("SHIPPABLE_PORT", "");
     const { fetchFn, calls } = makeFetch(
       jsonResponse({ payload: "", ids: [] }),
@@ -173,11 +179,39 @@ describe("handleCheckReviewComments", () => {
 
     await handleCheckReviewComments(
       { worktreePath: "/repo" },
-      { fetchFn },
+      { fetchFn, discoverPort: noDiscovery },
     );
 
     expect(DEFAULT_PORT).toBe(3001);
     expect(calls[0]!.url).toBe(`http://127.0.0.1:${DEFAULT_PORT}/api/agent/pull`);
+  });
+
+  it("uses the discovered port when SHIPPABLE_PORT is unset", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, discoverPort: async () => 52613 },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:52613/api/agent/pull");
+  });
+
+  it("SHIPPABLE_PORT wins over discovery", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "6000");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, discoverPort: async () => 52613 },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:6000/api/agent/pull");
   });
 });
 
@@ -192,7 +226,7 @@ describe("handlePostReviewReply", () => {
         replyText: "fixed it",
         outcome: "addressed",
       },
-      { fetchFn },
+      { fetchFn, discoverPort: noDiscovery },
     );
 
     expect(result.isError).toBeUndefined();
@@ -215,7 +249,7 @@ describe("handlePostReviewReply", () => {
 
     await handlePostReviewReply(
       { commentId: "c1", replyText: "x", outcome: "noted" },
-      { fetchFn, cwd: () => "/tmp/cwd" },
+      { fetchFn, cwd: () => "/tmp/cwd", discoverPort: noDiscovery },
     );
 
     expect(calls).toHaveLength(1);
