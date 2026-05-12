@@ -59,15 +59,12 @@ function findRanges(query: string): Range[] {
 
 function setHighlight(name: string, ranges: Range[]) {
   if (!hasHighlightApi()) return;
-  // @ts-expect-error — Highlight is a Web API, TS DOM lib doesn't ship it yet.
   const hl = new Highlight(...ranges);
-  // @ts-expect-error — see above
   CSS.highlights.set(name, hl);
 }
 
 function clearHighlight(name: string) {
   if (!hasHighlightApi()) return;
-  // @ts-expect-error — see above
   CSS.highlights.delete(name);
 }
 
