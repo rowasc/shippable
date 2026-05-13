@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
@@ -84,6 +86,8 @@ You will be called via structured output (JSON schema). Return only the schema-c
 export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
   const map = buildStructureMap(cs);
   const userContent = buildUserMessage(cs, map);
+
+  await maybeLogPlanRequest(cs, userContent);
 
   const client = new Anthropic();
 
@@ -176,6 +180,35 @@ const BINARY_EXTENSIONS = new Set([
   "mp3", "mp4", "mov", "wav", "ogg", "webm",
   "wasm", "exe", "dll", "so", "dylib",
 ]);
+
+// Opt-in debug dump of the exact payload we send to Claude. Off by default
+// because diffs may include proprietary code; set SHIPPABLE_PLAN_LOG_DIR to a
+// path you control to enable. Failure to write is logged but never raised —
+// debug logging must not break the request path.
+async function maybeLogPlanRequest(
+  cs: ChangeSet,
+  userContent: string,
+): Promise<void> {
+  const dir = process.env.SHIPPABLE_PLAN_LOG_DIR;
+  if (!dir) return;
+  try {
+    await mkdir(dir, { recursive: true });
+    const safeId = cs.id.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const file = join(dir, `plan-${safeId}-${stamp}.json`);
+    const payload = {
+      model: MODEL,
+      changesetId: cs.id,
+      userContentBytes: Buffer.byteLength(userContent, "utf8"),
+      system: SYSTEM_PROMPT,
+      user: userContent,
+    };
+    await writeFile(file, JSON.stringify(payload, null, 2), "utf8");
+    console.log(`[plan] wrote request dump to ${file}`);
+  } catch (err) {
+    console.warn("[plan] failed to write request dump:", err);
+  }
+}
 
 export function elideReason(path: string): string | null {
   const basename = path.slice(path.lastIndexOf("/") + 1);
