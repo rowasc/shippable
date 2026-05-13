@@ -48,6 +48,13 @@ export interface ExpandBarViewModel {
   maxLevel: number;
   /** Line count in the next block (shown on the expand button). */
   nextSize: number;
+  /**
+   * Optimistic placeholder: file source isn't loaded yet, so we don't know
+   * how many lines / blocks exist. Click triggers a lazy hydration fetch,
+   * after which the bar replaces itself with the real `level/maxLevel/nextSize`
+   * shape.
+   */
+  pending?: boolean;
 }
 
 // ─── Hunk-level view model ────────────────────────────────────────────────────
@@ -156,6 +163,12 @@ export interface BuildDiffViewModelArgs {
   imageAssets?: Record<string, string>;
   /** Active shift-extended selection, or null. */
   selection?: LineSelection | null;
+  /**
+   * The enclosing changeset can lazy-fetch this file's source on demand
+   * (i.e. it has a worktreeSource and the file isn't deleted). Drives the
+   * optimistic placeholder bars/Source-tab that show before hydration runs.
+   */
+  canHydrateExpansion?: boolean;
 }
 
 export function buildDiffViewModel({
@@ -172,8 +185,10 @@ export function buildDiffViewModel({
   filePreviewing,
   imageAssets,
   selection,
+  canHydrateExpansion,
 }: BuildDiffViewModelArgs): DiffViewModel {
-  const canExpandFile = !!file.fullContent;
+  const hydrationPending = !!canHydrateExpansion && !file.fullContent;
+  const canExpandFile = !!file.fullContent || hydrationPending;
   const canPreview =
     file.language === "markdown" && (!!file.fullContent || !!file.postChangeText);
   const previewing = filePreviewing && canPreview;
@@ -236,8 +251,13 @@ export function buildDiffViewModel({
                     ? aboveBlocks[levelAbove].length
                     : 0,
               }
-            : undefined;
+            : hydrationPending && hunk.newStart > 1
+              ? { level: 0, maxLevel: 0, nextSize: 0, pending: true }
+              : undefined;
 
+        // Below: until we've seen the file we can't tell whether the hunk
+        // ends at EOF, so render the placeholder unconditionally — the bar
+        // disappears post-hydrate if there really was nothing below.
         const expandBelow: ExpandBarViewModel | undefined =
           belowBlocks.length > 0
             ? {
@@ -248,7 +268,9 @@ export function buildDiffViewModel({
                     ? belowBlocks[levelBelow].length
                     : 0,
               }
-            : undefined;
+            : hydrationPending
+              ? { level: 0, maxLevel: 0, nextSize: 0, pending: true }
+              : undefined;
 
         // Selection range — only applies when it targets this hunk.
         const selForHunk =

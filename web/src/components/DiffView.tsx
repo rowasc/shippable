@@ -563,6 +563,19 @@ function ExpandBar({
   onCollapse: () => void;
 }) {
   const arrow = dir === "above" ? "↑" : "↓";
+  if (bar.pending) {
+    return (
+      <div className="expandbar">
+        <button
+          className="expandbar__main"
+          type="button"
+          onClick={onExpand}
+        >
+          <span className="expandbar__arrow">{arrow}</span> load context {dir}
+        </button>
+      </div>
+    );
+  }
   const hasMore = bar.level < bar.maxLevel;
   return (
     <div className="expandbar">
