@@ -75,6 +75,10 @@ Do NOT fabricate paths, hunk ids, or symbol names. If you cannot cite evidence, 
 - Each entry point's reason must explain *why start here*, not just *what's here*.
 - If a specific hunk is the best starting point (e.g., the main definition), include its hunkId.
 
+## Elided files
+
+To keep the diff under token limits, files that are auto-generated (e.g. \`package-lock.json\`) or that match common binary asset extensions are listed in the diff with their path and status but **without** hunk content — they appear as \`### <path> (<status>) — content elided: <reason>\`. Treat their content as unreviewable here, but you can still cite them with \`{ kind: "file", path: "..." }\` evidence for claims like "bumps dependency X" inferred from the rest of the changeset.
+
 You will be called via structured output (JSON schema). Return only the schema-conformant object. Do not include prose outside the structured output.`;
 
 export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
@@ -125,6 +129,11 @@ function buildUserMessage(cs: ChangeSet, map: StructureMap): string {
   lines.push("");
   lines.push("## Diff");
   for (const file of cs.files) {
+    const elide = elideReason(file.path);
+    if (elide) {
+      lines.push(`### ${file.path} (${file.status}) — content elided: ${elide}`);
+      continue;
+    }
     lines.push(`### ${file.path} (${file.status})`);
     for (const h of file.hunks) {
       lines.push(`#### hunk ${h.id} — ${h.header}`);
@@ -137,6 +146,46 @@ function buildUserMessage(cs: ChangeSet, map: StructureMap): string {
     }
   }
   return lines.join("\n");
+}
+
+// Files whose diff content costs many tokens and offers nothing useful for the
+// plan. Binary diffs are already filtered upstream (parseDiff.ts + the worktree
+// changeset endpoint), but the extension check stays as a defensive backstop
+// in case a future ingest path lets one through.
+const LOCKFILE_BASENAMES = new Set([
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "bun.lock",
+  "bun.lockb",
+  "Cargo.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "Pipfile.lock",
+  "poetry.lock",
+  "uv.lock",
+  "go.sum",
+  "flake.lock",
+  "mix.lock",
+]);
+
+const BINARY_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "tiff",
+  "pdf", "zip", "tar", "gz", "tgz", "bz2", "7z", "rar",
+  "woff", "woff2", "ttf", "otf", "eot",
+  "mp3", "mp4", "mov", "wav", "ogg", "webm",
+  "wasm", "exe", "dll", "so", "dylib",
+]);
+
+export function elideReason(path: string): string | null {
+  const basename = path.slice(path.lastIndexOf("/") + 1);
+  if (LOCKFILE_BASENAMES.has(basename)) return "auto-generated lockfile";
+  const dot = basename.lastIndexOf(".");
+  if (dot >= 0) {
+    const ext = basename.slice(dot + 1).toLowerCase();
+    if (BINARY_EXTENSIONS.has(ext)) return `binary (.${ext})`;
+  }
+  return null;
 }
 
 function assemblePlan(
