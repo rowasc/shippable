@@ -40,49 +40,70 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
 
   /**
    * Fire a PR load. On `github_token_required`, try the Tauri Keychain
-   * cache first; fall back to opening the token modal. On
-   * `github_auth_failed`, open the modal in the "rejected" state. Other
-   * discriminators surface as an inline error.
+   * cache once; on miss, open the token modal in the "first-time" state.
+   * On `github_auth_failed`, open the modal in the "rejected" state.
+   * Other discriminators surface as an inline error.
+   *
+   * The cache-hit retry is bounded to a single attempt — without that
+   * bound, a server that maps GitHub 401 to `github_token_required`
+   * (the api-client's old behavior) would put us in an infinite loop:
+   * push cached → retry → token_required → push cached → retry →
+   * token_required → … forever, with no modal ever surfacing because
+   * the recursion never reaches a terminal branch. If the bounded retry
+   * still comes back with `github_token_required`, the cached token is
+   * the problem — treat it like a rejection and open the modal that
+   * way.
    */
   async function loadPr(prUrl: string): Promise<void> {
     if (!prUrl.trim()) return;
     setError(null);
     setBusy(true);
     try {
-      const result = await loadGithubPr(prUrl);
-      onResult(result, prUrl);
-    } catch (err) {
-      if (err instanceof GithubFetchError) {
-        if (err.discriminator === "github_token_required" && err.host) {
-          if (isTauri()) {
-            const cached = await keychainGet(
-              keychainAccountFor({ kind: "github", host: err.host }),
-            );
-            if (cached) {
-              await credentials.set({ kind: "github", host: err.host }, cached);
-              setBusy(false);
-              return loadPr(prUrl); // retry once with the cached token
-            }
-          }
-          setTokenModal({
-            host: err.host,
-            reason: "first-time",
-            pendingPrUrl: prUrl,
-          });
-        } else if (err.discriminator === "github_auth_failed") {
-          setTokenModal({
-            host: err.host ?? "github.com",
-            reason: "rejected",
-            pendingPrUrl: prUrl,
-          });
-        } else {
-          setError(GH_ERROR_MESSAGES[err.discriminator] ?? err.discriminator);
-        }
-      } else {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      }
+      await attemptLoad(prUrl, false);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function attemptLoad(
+    prUrl: string,
+    afterCacheRetry: boolean,
+  ): Promise<void> {
+    try {
+      const result = await loadGithubPr(prUrl);
+      onResult(result, prUrl);
+      return;
+    } catch (err) {
+      if (!(err instanceof GithubFetchError)) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+        return;
+      }
+      if (err.discriminator === "github_token_required" && err.host) {
+        if (!afterCacheRetry && isTauri()) {
+          const cached = await keychainGet(
+            keychainAccountFor({ kind: "github", host: err.host }),
+          );
+          if (cached) {
+            await credentials.set({ kind: "github", host: err.host }, cached);
+            return attemptLoad(prUrl, true);
+          }
+        }
+        setTokenModal({
+          host: err.host,
+          reason: afterCacheRetry ? "rejected" : "first-time",
+          pendingPrUrl: prUrl,
+        });
+        return;
+      }
+      if (err.discriminator === "github_auth_failed") {
+        setTokenModal({
+          host: err.host ?? "github.com",
+          reason: "rejected",
+          pendingPrUrl: prUrl,
+        });
+        return;
+      }
+      setError(GH_ERROR_MESSAGES[err.discriminator] ?? err.discriminator);
     }
   }
 
@@ -105,14 +126,22 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
       onResult(result, pendingUrl);
       setTokenModal(null);
     } catch (err) {
-      if (
+      // After we've just pushed a token, both `github_auth_failed` (the
+      // current server's response to a GitHub 401 with our token attached)
+      // and `github_token_required` (the response an older sidecar that
+      // doesn't yet carry the api-client fix would return for the same
+      // situation) mean the token we just submitted didn't work. Treat
+      // them identically: re-throw so the modal's handleSubmit catches
+      // and renders the rejection inline, keeping the password input in
+      // place for another try.
+      const isRejection =
         err instanceof GithubFetchError &&
-        err.discriminator === "github_auth_failed"
-      ) {
-        // Re-throw — the modal's handleSubmit catches and renders this
-        // inline, keeping the password input in place for another try.
+        (err.discriminator === "github_auth_failed" ||
+          err.discriminator === "github_token_required");
+      if (isRejection) {
+        const e = err as GithubFetchError;
         throw new Error(
-          `Token rejected by ${err.host ?? host}. Check the PAT scopes (repo + read:org for private repos) and try again.`,
+          `Token rejected by ${e.host ?? host}. Check the PAT scopes (repo + read:org for private repos) and try again.`,
           { cause: err },
         );
       }
