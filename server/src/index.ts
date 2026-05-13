@@ -1444,10 +1444,6 @@ async function handleAgentUnenqueue(
   res.end(JSON.stringify({ unenqueued }));
 }
 
-// Cap the bytes any single request body can grow to. Local server, but we
-// share the box with anything else on 127.0.0.1, and an agent / browser tab
-// spamming multi-MB POSTs would trivially OOM us otherwise. 1 MiB is a
-// loose upper bound on legitimate review-comment / reply prose.
 function parseOrigin(value: string): string | null {
   try {
     const url = new URL(value);

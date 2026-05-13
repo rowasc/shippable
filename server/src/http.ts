@@ -4,7 +4,13 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-export const MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024;
+// Cap the bytes any single request body can grow to. Local server, but we
+// share the box with anything else on 127.0.0.1, and an agent / browser tab
+// spamming multi-MB POSTs would trivially OOM us otherwise. 2 MiB fits the
+// largest endpoint (the /api/plan changeset body for real-world PRs after
+// lockfile elision), with headroom; review-comment / reply prose lives well
+// under this.
+export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 export class RequestBodyTooLargeError extends Error {
   constructor(limit: number) {
