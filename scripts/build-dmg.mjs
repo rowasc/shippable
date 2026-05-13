@@ -73,6 +73,10 @@ if (targetArg && targetTriple !== hostTriple) {
 
 const cargoArgs = ["tauri", "build", "-b", "app"];
 if (targetArg) cargoArgs.push("--target", targetTriple);
+if (process.env.SHIPPABLE_DEVTOOLS) {
+  cargoArgs.push("--features", "devtools");
+  console.log("[build-dmg] SHIPPABLE_DEVTOOLS set — enabling devtools feature");
+}
 run("cargo", cargoArgs, tauriDir);
 
 if (!existsSync(appPath)) {

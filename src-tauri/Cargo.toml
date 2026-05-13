@@ -20,7 +20,15 @@ tauri-build = { version = "2.5.6", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.10.3", features = ['devtools'] }
+tauri = { version = "2.10.3", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 keyring = { version = "3", features = ["apple-native"] }
+
+# Enables Safari Web Inspector / right-click→Inspect in release builds. Off by
+# default — flip on for debug DMGs by passing `--features devtools` to cargo.
+# `scripts/build-dmg.mjs` does this when SHIPPABLE_DEVTOOLS is set in the env.
+# Debug builds (`tauri dev`) already get devtools without this flag.
+[features]
+default = []
+devtools = ["tauri/devtools"]
