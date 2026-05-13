@@ -169,9 +169,10 @@ describe("postReply / listReplies", () => {
     expect(id).toBeTruthy();
     const replies = listReplies(WT);
     expect(replies).toHaveLength(1);
-    expect(replies[0].id).toBe(id);
-    expect(replies[0].parentId).toBe("c1");
-    expect(replies[0].body).toBe("fixed it");
+    const first = replies[0];
+    expect(first.id).toBe(id);
+    expect("parentId" in first ? first.parentId : null).toBe("c1");
+    expect(first.body).toBe("fixed it");
     expect(replies[0].intent).toBe("accept");
     expect(replies[0].authorRole).toBe("agent");
     expect(replies[0].postedAt).toBeTruthy();

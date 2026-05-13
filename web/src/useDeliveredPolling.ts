@@ -30,7 +30,8 @@ export interface DeliveredPollingResult {
   /**
    * Polled agent replies (flat list with `commentId` on each entry). The
    * caller dispatches `MERGE_AGENT_REPLIES` with this on change so the
-   * reducer reconciles into the matching reviewer Reply's `agentReplies`.
+   * reducer reconciles them into the matching thread by parentId →
+   * enqueuedCommentId, or by (file, lines) → hunkId for top-level entries.
    */
   agentReplies: PolledAgentReply[];
   /** ISO of the last successful fetch; null until the first one lands. */

@@ -61,6 +61,7 @@ function renderPanel(opts: RenderOpts = {}) {
       delivered={opts.delivered ?? []}
       lastSuccessfulPollAt={opts.lastSuccessfulPollAt ?? null}
       deliveredError={opts.deliveredError ?? false}
+      agentStartedThreads={[]}
       onPickSession={noop}
       onRefresh={noop}
     />,

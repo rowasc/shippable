@@ -2,17 +2,14 @@ import { describe, expect, it } from "vitest";
 import { selectInteractions } from "./interactions";
 import {
   ackedNotesToInteractions,
-  detachedRepliesToDetachedInteractions,
+  firstTargetForKey,
   initialState,
   mergeInteractionMaps,
-  repliesToInteractions,
-} from "./state";
-import type {
-  DetachedReplyShape as DetachedReply,
-  ReplyShape as Reply,
+  replyTargetForKey,
 } from "./state";
 import type {
   ChangeSet,
+  DetachedInteraction,
   DiffFile,
   DiffLine,
   Hunk,
@@ -28,6 +25,105 @@ import {
   teammateReplyKey,
   userCommentKey,
 } from "./types";
+
+// Minimal user-Interaction literal for fixture construction.
+interface UserReplyLiteral {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  enqueuedCommentId?: string | null;
+  enqueueError?: boolean;
+  anchorPath?: string;
+  anchorContext?: DiffLine[];
+  anchorHash?: string;
+  anchorLineNo?: number;
+  originSha?: string;
+  originType?: "committed" | "dirty";
+  external?: { source: "pr"; htmlUrl: string };
+  agentReplies?: AgentReplyLiteral[];
+}
+interface AgentReplyLiteral {
+  id: string;
+  body: string;
+  outcome: "addressed" | "declined" | "noted";
+  postedAt: string;
+  agentLabel?: string;
+}
+
+function userInteraction(
+  threadKey: string,
+  isFirst: boolean,
+  literal: UserReplyLiteral,
+): Interaction {
+  return {
+    id: literal.id,
+    threadKey,
+    target: isFirst ? firstTargetForKey(threadKey) : replyTargetForKey(threadKey),
+    intent: "comment",
+    author: literal.author,
+    authorRole: "user",
+    body: literal.body,
+    createdAt: literal.createdAt,
+    enqueuedCommentId: literal.enqueuedCommentId,
+    enqueueError: literal.enqueueError,
+    anchorPath: literal.anchorPath,
+    anchorHash: literal.anchorHash,
+    anchorContext: literal.anchorContext,
+    anchorLineNo: literal.anchorLineNo,
+    originSha: literal.originSha,
+    originType: literal.originType,
+    external: literal.external,
+  };
+}
+
+function agentInteraction(
+  threadKey: string,
+  literal: AgentReplyLiteral,
+): Interaction {
+  const intent: InteractionIntent =
+    literal.outcome === "addressed"
+      ? "accept"
+      : literal.outcome === "declined"
+        ? "reject"
+        : "ack";
+  return {
+    id: literal.id,
+    threadKey,
+    target: replyTargetForKey(threadKey),
+    intent,
+    author: literal.agentLabel ?? "agent",
+    authorRole: "agent",
+    body: literal.body,
+    createdAt: literal.postedAt,
+  };
+}
+
+function repliesToInteractionMap(
+  replies: Record<string, UserReplyLiteral[]>,
+): Record<string, Interaction[]> {
+  const out: Record<string, Interaction[]> = {};
+  for (const [key, list] of Object.entries(replies)) {
+    const ixs: Interaction[] = [];
+    list.forEach((r, i) => {
+      ixs.push(userInteraction(key, i === 0, r));
+      for (const a of r.agentReplies ?? []) {
+        ixs.push(agentInteraction(key, a));
+      }
+    });
+    out[key] = ixs;
+  }
+  return out;
+}
+
+function mkDetachedInteractions(
+  detached: Array<{ literal: UserReplyLiteral; threadKey: string }>,
+): DetachedInteraction[] {
+  return detached.map(({ literal, threadKey }) => ({
+    interaction: userInteraction(threadKey, true, literal),
+    threadKey,
+  }));
+}
 
 // ── Fixture helpers ──────────────────────────────────────────────────────
 //
@@ -167,13 +263,13 @@ function makeChangeset(id: string, files: DiffFile[]): ChangeSet {
 
 function withReplies(
   state: ReviewState,
-  replies: Record<string, Reply[]>,
+  replies: Record<string, UserReplyLiteral[]>,
 ): ReviewState {
   return {
     ...state,
     interactions: mergeInteractionMaps(
       state.interactions,
-      repliesToInteractions(replies),
+      repliesToInteractionMap(replies),
     ),
   };
 }
@@ -329,7 +425,11 @@ describe("selectInteractions — user replies", () => {
     return makeHunk(HUNK_ID, 3);
   }
 
-  function mkReply(id: string, body: string, createdAt = "2026-05-06T10:00:00Z"): Reply {
+  function mkReply(
+    id: string,
+    body: string,
+    createdAt = "2026-05-06T10:00:00Z",
+  ): UserReplyLiteral {
     return { id, author: "you", body, createdAt };
   }
 
@@ -387,10 +487,10 @@ describe("selectInteractions — user replies", () => {
     expect(ix.threadKey).toBe(key);
   });
 
-  it("carries Reply provenance fields (anchorPath, external, enqueuedCommentId) through", () => {
+  it("carries Interaction provenance fields (anchorPath, external, enqueuedCommentId) through", () => {
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [baseHunk()])]);
     const key = userCommentKey(HUNK_ID, 0);
-    const reply: Reply = {
+    const reply: UserReplyLiteral = {
       id: "u1",
       author: "you",
       body: "x",
@@ -529,7 +629,7 @@ describe("selectInteractions — thread summary", () => {
   it("rolls up multiple authors — latest response wins across authors", () => {
     // Today we can't synthesize a thread with two response authors using the
     // legacy carriers alone (state.ackedNotes is single-user). We can drive
-    // it via Reply.agentReplies though: a user 'reject' reply + an agent
+    // it via the agentReplies literal though: a user 'reject' reply + an agent
     // 'addressed' (accept) reply on the same thread. Agent posts later, so
     // accept wins.
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [makeHunk(HUNK_ID, 3)])]);
@@ -556,22 +656,24 @@ describe("selectInteractions — thread summary", () => {
 describe("selectInteractions — detached replies", () => {
   it("projects detached replies under their stored threadKey", () => {
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [makeHunk(HUNK_ID, 3)])]);
-    const detached: DetachedReply = {
-      reply: {
-        id: "d1",
-        author: "you",
-        body: "stranded",
-        createdAt: "2026-05-06T10:00:00Z",
-      },
-      threadKey: userCommentKey("ghost-hunk", 0),
-    };
+    const threadKey = userCommentKey("ghost-hunk", 0);
     const state: ReviewState = {
       ...initialState([cs]),
-      detachedInteractions: detachedRepliesToDetachedInteractions([detached]),
+      detachedInteractions: mkDetachedInteractions([
+        {
+          literal: {
+            id: "d1",
+            author: "you",
+            body: "stranded",
+            createdAt: "2026-05-06T10:00:00Z",
+          },
+          threadKey,
+        },
+      ]),
     };
     const sel = selectInteractions(state);
     expect(sel.all).toHaveLength(1);
     expect(sel.all[0].id).toBe("d1");
-    expect(sel.all[0].threadKey).toBe(detached.threadKey);
+    expect(sel.all[0].threadKey).toBe(threadKey);
   });
 });

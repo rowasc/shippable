@@ -67,6 +67,13 @@ export interface AgentContextProps {
    * panel-level "Agent status unavailable" banner; pips freeze in place.
    */
   deliveredError: boolean;
+  /**
+   * Agent-started threads (top-level Interactions whose first entry is
+   * authored by the agent). Drives the "Comments" rollup at the bottom
+   * of the panel — a sidebar overview separate from the inline render
+   * in the DiffView.
+   */
+  agentStartedThreads: Array<{ threadKey: string; head: Interaction }>;
   onPickSession: (sessionFilePath: string) => void;
   onRefresh: () => void;
 }
@@ -112,9 +119,9 @@ interface Props {
    *  user-authored entries; the reducer enforces no other contracts. */
   onDeleteReply: (key: string, replyId: string) => void;
   /**
-   * Retry the enqueue for a Reply whose previous attempt errored. Wired
+   * Retry the enqueue for an Interaction whose previous attempt errored. Wired
    * from the errored pip in ReplyThread. The handler in the parent looks
-   * up the Reply by id, re-derives the payload, and POSTs without
+   * up the Interaction by id, re-derives the payload, and POSTs without
    * `supersedes` — the original POST never landed an id, so there's no
    * predecessor to replace.
    */
@@ -358,6 +365,7 @@ export function Inspector({
           delivered={agentContext.delivered}
           lastSuccessfulPollAt={agentContext.lastSuccessfulPollAt}
           deliveredError={agentContext.deliveredError}
+          agentStartedThreads={agentContext.agentStartedThreads}
           onJump={onJump}
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}

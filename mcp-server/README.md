@@ -3,7 +3,7 @@
 A TypeScript MCP server that exposes two tools over stdio for the Shippable review loop:
 
 - `shippable_check_review_comments` — pulls pending reviewer feedback from the local Shippable server.
-- `shippable_post_review_comment` — posts either a per-comment reply or a fresh top-level comment anchored to the diff, so the reviewer can see what the agent did or noticed.
+- `shippable_post_review_interaction` — posts either a reply to a delivered reviewer interaction or a fresh top-level interaction anchored to the diff, so the reviewer can see what the agent did or noticed.
 
 Both tools talk to the local Shippable server over `127.0.0.1`.
 
@@ -11,8 +11,8 @@ Both tools talk to the local Shippable server over `127.0.0.1`.
 
 Two phrases trigger the round-trip explicitly when prompt drift suppresses the implicit triggers in the tool descriptions:
 
-- **`check shippable`** — pull pending reviewer comments.
-- **`report back to shippable`** — post replies (or fresh comments) for what the agent just looked at.
+- **`check shippable`** — pull pending reviewer interactions.
+- **`report back to shippable`** — post replies (or fresh interactions) for what the agent just looked at.
 
 The descriptions were tuned for prompt drift on adjacent phrasings ("pull review comments", "any reviewer feedback", "let shippable know what you did"). If the agent doesn't pick them up, fall back to the literal phrases.
 
@@ -22,36 +22,36 @@ The descriptions were tuned for prompt drift on adjacent phrasings ("pull review
 
 Input: `{ worktreePath?: string }` — defaults to the agent's `cwd()`.
 
-Returns the formatted reviewer-feedback envelope, or `"No pending comments."` when the queue is empty. When the envelope is non-empty, the response also carries a short trailing next-step hint reminding the agent to call `shippable_post_review_comment` once per comment — the exact wording lives in `src/handler.ts` (`NEXT_STEP_HINT`) so it stays a single source of truth.
+Returns the formatted reviewer-feedback envelope, or `"No pending comments."` when the queue is empty. The envelope is a `<reviewer-feedback>` element with one `<interaction id="…" target="…" intent="…" author="…" authorRole="…" file="…" lines="…">…</interaction>` child per pending entry. Capture the `id` attribute — the pending queue is drained on read, so this is the only chance to read it.
 
-When a queued reviewer comment is of kind `reply-to-agent-comment`, the envelope inlines the parent agent comment's body as a `<parent id="…" file="…" lines="…">…</parent>` child element so the agent has context for its reply. If the parent has aged out of the per-worktree cap, the envelope emits `parent-missing="true"` instead.
-
-### `shippable_post_review_comment`
+### `shippable_post_review_interaction`
 
 One tool, two input shapes. Exactly one shape per call:
 
-**Reply mode** — thread under a reviewer comment after addressing it:
+**Reply mode** — thread under a delivered reviewer interaction:
 
-- `parentId: string` — the id of the reviewer comment this reply answers (the `id` attribute on the `<comment>` element returned by `shippable_check_review_comments`).
-- `outcome: 'addressed' | 'declined' | 'noted'` — what happened:
-  - `addressed` — you fixed it.
-  - `declined` — you intentionally won't.
-  - `noted` — you saw it but no action.
-- `replyText: string` — see below.
+- `parentId: string` — the id of the reviewer interaction this reply answers (the `id` attribute on the `<interaction>` element returned by `shippable_check_review_comments`).
+- `intent: 'ack' | 'accept' | 'reject'` — what happened:
+  - `accept` — you agreed and acted on it (or will).
+  - `reject` — you disagree and won't.
+  - `ack` — you saw it but no commitment either way.
+- `body: string` — see below.
 - `worktreePath?: string` — defaults to the agent's `cwd()`.
 
-**Top-level mode** — leave a proactive comment anchored to the diff:
+**Top-level mode** — leave a fresh interaction anchored to the diff:
 
-- `file: string` — repo-relative path your comment is about.
-- `lines: string` — `"42"` for a single line or `"40-58"` for a range. File-level (no `lines`) is not supported yet — the reviewer UI has no file-level comment slot.
-- `replyText: string` — see below.
+- `target: 'line' | 'block'` — `line` for a single line, `block` for a range.
+- `file: string` — repo-relative path the interaction is about.
+- `lines: string` — `"42"` for a single line or `"40-58"` for a range.
+- `intent: 'comment' | 'question' | 'request' | 'blocker'` — the asks vocabulary (see `docs/plans/typed-review-interactions.md`).
+- `body: string` — see below.
 - `worktreePath?: string` — defaults to the agent's `cwd()`.
 
 Shared:
 
-- `replyText: string` — free-form prose. Plain text or Markdown; no XML/HTML wrapping needed. (Named `replyText` rather than `body` because some model serializers conflate `body` with HTML's `<body>` element and emit `</body>` close tags into the value. The HTTP wire field on the local Shippable server stays `body` — the rename is contained to the MCP boundary.)
+- `body: string` — free-form prose. Plain text or Markdown; no XML/HTML wrapping needed.
 
-Returns the assigned id on success. Multiple replies to the same `parentId` are allowed and append. Multiple top-level comments on the same `file:lines` are also allowed and append.
+Returns the assigned id on success.
 
 ## Install
 
@@ -105,11 +105,13 @@ the absolute path to your local `dist/index.js`:
 After the npm publish lands, the `command` becomes `"npx"` with
 `args: ["-y", "@shippable/mcp-server"]`.
 
+If you've previously installed the older `shippable_post_review_reply` tool, reinstall the MCP server — the tool name changed to `shippable_post_review_interaction` and the input schema is now the unified shape above.
+
 ## Configuration
 
 - `SHIPPABLE_PORT` (default `3001`) — the port the local Shippable server is listening on. Override if you've changed `PORT` for `server/`.
 
-The MCP server connects to `http://127.0.0.1:$SHIPPABLE_PORT/api/agent/pull` (for `shippable_check_review_comments`) and `…/api/agent/comments` (for `shippable_post_review_comment`) — localhost only, no LAN exposure.
+The MCP server connects to `http://127.0.0.1:$SHIPPABLE_PORT/api/agent/pull` (for `shippable_check_review_comments`) and `…/api/agent/replies` (for `shippable_post_review_interaction`) — localhost only, no LAN exposure.
 
 ## Local development
 

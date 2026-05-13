@@ -51,17 +51,33 @@ export interface DeliveredInteraction extends Interaction {
  *  is a local toggle, not something an agent posts back. */
 export type AgentResponseIntent = Exclude<ResponseIntent, "unack">;
 
-export interface AgentReply {
-  id: string;
-  /** The delivered interaction id this reply answers. */
-  parentId: string;
-  body: string;
-  intent: AgentResponseIntent;
-  /** ISO timestamp stamped at post time. */
-  postedAt: string;
-  /** Optional generic identity surface; reserved for future per-harness label. */
-  agentLabel?: string;
-}
+/**
+ * An agent's post-back to the review server. One shape covers both modes:
+ *   - reply (`parentId` set) — a response to a delivered reviewer
+ *     interaction. Intent is constrained to the response-intent subset
+ *     (ack / accept / reject).
+ *   - top-level (`file` + `lines` + `target` set) — a fresh thread the
+ *     agent started on its own. Intent is one of the ask intents.
+ */
+export type AgentReply =
+  | {
+      id: string;
+      parentId: string;
+      body: string;
+      intent: AgentResponseIntent;
+      postedAt: string;
+      agentLabel?: string;
+    }
+  | {
+      id: string;
+      file: string;
+      lines: string;
+      target: "line" | "block";
+      body: string;
+      intent: AskIntent;
+      postedAt: string;
+      agentLabel?: string;
+    };
 
 interface QueueEntry {
   pending: Interaction[];
@@ -155,6 +171,11 @@ export function unenqueue(worktreePath: string, id: string): boolean {
   return true;
 }
 
+/**
+ * Post a reply-shaped agent entry (responds to a delivered reviewer
+ * interaction). Caller already validated the parentId exists in the
+ * delivered set.
+ */
 export function postReply(
   worktreePath: string,
   payload: {
@@ -171,8 +192,48 @@ export function postReply(
     body: payload.body,
     intent: payload.intent,
     postedAt: new Date().toISOString(),
+    ...(payload.agentLabel !== undefined
+      ? { agentLabel: payload.agentLabel }
+      : {}),
   };
-  if (payload.agentLabel !== undefined) reply.agentLabel = payload.agentLabel;
+  appendReply(worktreePath, reply);
+  return id;
+}
+
+/**
+ * Post a top-level agent-started entry — a fresh thread anchored to
+ * (file, lines). Intent must be an ask; target distinguishes single-line
+ * from block.
+ */
+export function postTopLevel(
+  worktreePath: string,
+  payload: {
+    file: string;
+    lines: string;
+    target: "line" | "block";
+    body: string;
+    intent: AskIntent;
+    agentLabel?: string;
+  },
+): string {
+  const id = randomUUID();
+  const reply: AgentReply = {
+    id,
+    file: payload.file,
+    lines: payload.lines,
+    target: payload.target,
+    body: payload.body,
+    intent: payload.intent,
+    postedAt: new Date().toISOString(),
+    ...(payload.agentLabel !== undefined
+      ? { agentLabel: payload.agentLabel }
+      : {}),
+  };
+  appendReply(worktreePath, reply);
+  return id;
+}
+
+function appendReply(worktreePath: string, reply: AgentReply): void {
   let list = replyStore.get(worktreePath);
   if (!list) {
     list = [];
@@ -180,26 +241,39 @@ export function postReply(
   }
   list.push(reply);
   // Bound the per-worktree reply list — a noisy agent in a long-lived
-  // process otherwise grows this without limit. Mirrors
-  // DELIVERED_HISTORY_CAP on the comment side.
+  // process otherwise grows this without limit.
   if (list.length > REPLY_HISTORY_CAP) {
     list.splice(0, list.length - REPLY_HISTORY_CAP);
   }
-  return id;
 }
 
-/** Wire shape returned by GET /api/agent/replies — an Interaction-shaped
- *  payload the web client merges straight into state.interactions. */
-export interface AgentReplyWireItem {
-  id: string;
-  parentId: string;
-  body: string;
-  intent: AgentResponseIntent;
-  author: string;
-  authorRole: "agent";
-  target: InteractionTarget;
-  postedAt: string;
-}
+/**
+ * Wire shape returned by GET /api/agent/replies — one envelope covers
+ * both reply-shaped (parentId set) and top-level-shaped (file + lines
+ * set) entries. The web client merges either into state.interactions.
+ */
+export type AgentReplyWireItem =
+  | {
+      id: string;
+      parentId: string;
+      body: string;
+      intent: AgentResponseIntent;
+      author: string;
+      authorRole: "agent";
+      target: InteractionTarget;
+      postedAt: string;
+    }
+  | {
+      id: string;
+      file: string;
+      lines: string;
+      body: string;
+      intent: AskIntent;
+      author: string;
+      authorRole: "agent";
+      target: "line" | "block";
+      postedAt: string;
+    };
 
 /** Derive the response's target from the parent interaction's target.
  *  Used both server-side (here) and client-side to keep targets uniform. */
@@ -223,20 +297,32 @@ export function targetForReplyTo(parentTarget: InteractionTarget): InteractionTa
 export function listReplies(worktreePath: string): AgentReplyWireItem[] {
   const list = replyStore.get(worktreePath);
   if (!list) return [];
-  return list.map((r) => {
-    const parentTarget =
-      lookupDeliveredTarget(worktreePath, r.parentId) ?? "line";
-    const out: AgentReplyWireItem = {
+  return list.map((r): AgentReplyWireItem => {
+    if ("parentId" in r) {
+      const parentTarget =
+        lookupDeliveredTarget(worktreePath, r.parentId) ?? "line";
+      return {
+        id: r.id,
+        parentId: r.parentId,
+        body: r.body,
+        intent: r.intent,
+        author: r.agentLabel ?? "agent",
+        authorRole: "agent",
+        target: targetForReplyTo(parentTarget),
+        postedAt: r.postedAt,
+      };
+    }
+    return {
       id: r.id,
-      parentId: r.parentId,
+      file: r.file,
+      lines: r.lines,
       body: r.body,
       intent: r.intent,
       author: r.agentLabel ?? "agent",
       authorRole: "agent",
-      target: targetForReplyTo(parentTarget),
+      target: r.target,
       postedAt: r.postedAt,
     };
-    return out;
   });
 }
 
