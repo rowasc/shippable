@@ -1,14 +1,13 @@
 import "./Inspector.css";
 import type {
-  AgentComment,
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
-  DeliveredComment,
+  DeliveredInteraction,
+  Interaction,
   LineSelection,
   PrConversationItem,
   PrSource,
-  Reply,
   WorktreeSource,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
@@ -56,7 +55,7 @@ export interface AgentContextProps {
    * Delivered (N) details block at the bottom of the panel and (via the
    * pip seam threaded through to ReplyThread) the per-reply ✓ glyph.
    */
-  delivered: DeliveredComment[];
+  delivered: DeliveredInteraction[];
   /**
    * ISO timestamp of the most recent successful `fetchDelivered` call. `null`
    * before any successful poll — banner shows "—" in that case. Used by the
@@ -96,27 +95,6 @@ interface Props {
    * so reopening restores what the user typed.
    */
   draftBodies: Record<string, string>;
-  /**
-   * Top-level agent comments for the active worktree. Forwarded to
-   * `AgentContextSection` for the new agent-comments block. Empty list
-   * hides the block. Optional because non-worktree changesets don't
-   * surface this UI at all.
-   */
-  agentComments?: AgentComment[];
-  /**
-   * The reviewer's reply map (`state.replies`). Forwarded to the
-   * agent-comments block so it can look up replies under the
-   * `agentComment:<id>` reply-key prefix. Optional for the same reason
-   * as `agentComments`.
-   */
-  repliesByKey?: Record<string, Reply[]>;
-  /**
-   * Which reply key currently has its composer open, or null when no
-   * composer is active. Forwarded to the agent-comments block so its
-   * `ReplyThread` knows whether to render the composer or the "+ reply"
-   * button. Optional; defaults to null.
-   */
-  draftingKey?: string | null;
   onJump: (c: Cursor) => void;
   /**
    * Clicking a block-scoped comment should re-select its range so the user
@@ -172,8 +150,8 @@ interface Props {
     changesetId: string,
     prSource: PrSource,
     prConversation: PrConversationItem[],
-    prReplies: Record<string, Reply[]>,
-    prDetached: import("../types").DetachedReply[],
+    prInteractions: Record<string, import("../types").Interaction[]>,
+    prDetached: import("../types").DetachedInteraction[],
   ) => void;
   /**
    * Called when the pill click fails with a GitHub auth error. The parent
@@ -207,9 +185,6 @@ export function Inspector({
   viewModel,
   symbols,
   draftBodies,
-  agentComments,
-  repliesByKey,
-  draftingKey,
   onJump,
   onJumpToBlock,
   onToggleAck,
@@ -258,7 +233,7 @@ export function Inspector({
   // is O(1). `undefined` when the agent-context bundle is absent (no
   // worktree loaded) — ReplyThread treats it as "no delivered ids known"
   // which is the right default for the fixture/URL-ingest case.
-  const deliveredById: Record<string, DeliveredComment> | undefined =
+  const deliveredById: Record<string, DeliveredInteraction> | undefined =
     agentContext
       ? Object.fromEntries(agentContext.delivered.map((d) => [d.id, d]))
       : undefined;
@@ -299,7 +274,7 @@ export function Inspector({
         changesetId,
         result.changeSet.prSource!,
         result.changeSet.prConversation ?? [],
-        result.prReplies,
+        result.prInteractions,
         result.prDetached,
       );
     } catch (err) {
@@ -386,17 +361,6 @@ export function Inspector({
           onJump={onJump}
           onPickSession={agentContext.onPickSession}
           onRefresh={agentContext.onRefresh}
-          agentComments={agentComments ?? []}
-          replies={repliesByKey ?? {}}
-          draftingKey={draftingKey ?? null}
-          draftFor={draftFor}
-          deliveredById={deliveredById ?? {}}
-          onStartDraft={onStartDraft}
-          onCloseDraft={onCloseDraft}
-          onChangeDraft={onChangeDraft}
-          onSubmitReply={onSubmitReply}
-          onDeleteReply={onDeleteReply}
-          onRetryReply={onRetryReply}
         />
       )}
 
@@ -562,7 +526,7 @@ function UserCommentsSection({
   vm: InspectorViewModel;
   symbols: SymbolIndex;
   draftFor: (key: string) => string;
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
   onJump: (c: Cursor) => void;
   onJumpToBlock?: (cursor: Cursor, selection: LineSelection) => void;
   onStartDraft: (key: string) => void;
@@ -675,7 +639,7 @@ function UserThreadCard({
   row: UserCommentRowItem;
   symbols: SymbolIndex;
   draftBody: string;
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
   onJump: (c: Cursor) => void;
   onClickLineNo: () => void;
   onStartDraft: () => void;
@@ -714,7 +678,7 @@ function UserThreadCard({
         </span>
       </div>
       <ReplyThread
-        replies={row.replies}
+        interactions={row.replies}
         isDrafting={row.isDrafting}
         draftBody={draftBody}
         onStartDraft={onStartDraft}
@@ -753,7 +717,7 @@ function NoteCard({
   draftBody: string;
   /** Attached only when this is the cursor's note — drives auto-scroll. */
   cardRef?: RefObject<HTMLLIElement | null>;
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
   onJump: (c: Cursor) => void;
   onAck: () => void;
   onClickLineNo: () => void;
@@ -818,7 +782,7 @@ function NoteCard({
         </div>
       )}
       <ReplyThread
-        replies={row.replies}
+        interactions={row.replies}
         isDrafting={row.isDrafting}
         draftBody={draftBody}
         onStartDraft={onStartDraft}
@@ -852,13 +816,13 @@ function HunkSummarySection({
   onRetryReply,
 }: {
   summary: string;
-  replies: Reply[];
+  replies: Interaction[];
   replyKey: string;
   isDrafting: boolean;
   draftBody: string;
   jumpTarget: Cursor;
   symbols: SymbolIndex;
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -879,7 +843,7 @@ function HunkSummarySection({
           <RichText text={summary} symbols={symbols} onJump={onJump} />
         </div>
         <ReplyThread
-          replies={replies}
+          interactions={replies}
           isDrafting={isDrafting}
           draftBody={draftBody}
           onStartDraft={onStartDraft}
@@ -913,7 +877,7 @@ function TeammateSection({
   teammate: NonNullable<InspectorViewModel["teammate"]>;
   symbols: SymbolIndex;
   draftBody: string;
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
   onJump: (c: Cursor) => void;
   onStartDraft: () => void;
   onCloseDraft: () => void;
@@ -941,7 +905,7 @@ function TeammateSection({
           </div>
         )}
         <ReplyThread
-          replies={teammate.replies}
+          interactions={teammate.replies}
           isDrafting={teammate.isDrafting}
           draftBody={draftBody}
           onStartDraft={onStartDraft}

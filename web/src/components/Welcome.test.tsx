@@ -86,7 +86,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
     };
     loadGithubPrMock.mockResolvedValue({
       changeSet: fakeCs,
-      prReplies: {},
+      prInteractions: {},
       prDetached: [],
     });
     const onLoad = vi.fn();
@@ -113,7 +113,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
         fakeCs,
         {},
         expect.objectContaining({ kind: "pr", prUrl: "https://github.com/owner/repo/pull/1" }),
-        { prReplies: {}, prDetached: [] },
+        { prInteractions: {}, prDetached: [] },
       ),
     );
   });
@@ -147,7 +147,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
     };
     loadGithubPrMock.mockResolvedValue({
       changeSet: fakeCs,
-      prReplies: {},
+      prInteractions: {},
       prDetached: [],
     });
     const onLoad = vi.fn();
@@ -165,7 +165,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
         fakeCs,
         {},
         { kind: "pr", prUrl: "https://github.com/owner/repo/pull/42" },
-        { prReplies: {}, prDetached: [] },
+        { prInteractions: {}, prDetached: [] },
       ),
     );
   });
@@ -179,7 +179,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
       )
       .mockResolvedValueOnce({
         changeSet: fakeCs,
-        prReplies: {},
+        prInteractions: {},
         prDetached: [],
       });
     isTauriMock.mockReturnValue(true);
@@ -197,7 +197,7 @@ describe("Welcome — unified URL field (PR + diff URL)", () => {
         fakeCs,
         {},
         expect.objectContaining({ kind: "pr" }),
-        { prReplies: {}, prDetached: [] },
+        { prInteractions: {}, prDetached: [] },
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();

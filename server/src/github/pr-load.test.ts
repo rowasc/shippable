@@ -135,14 +135,14 @@ describe("loadPr — happy path", () => {
 
   it("attaches a single-line review comment as a Reply under userCommentKey", async () => {
     stubHappyPath();
-    const { changeSet, prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+    const { changeSet, prInteractions, prDetached } = await loadPr(COORDS, TOKEN);
 
     expect(prDetached).toEqual([]);
-    const keys = Object.keys(prReplies);
+    const keys = Object.keys(prInteractions);
     expect(keys).toHaveLength(1);
     expect(keys[0]).toMatch(/^user:/);
 
-    const replies = prReplies[keys[0]];
+    const replies = prInteractions[keys[0]];
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatchObject({
       id: "pr-comment:100",
@@ -192,10 +192,10 @@ describe("loadPr — multi-line comment", () => {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     stubHappyPath(PR_FILES, [multiLineComment as any], ISSUE_COMMENTS);
-    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+    const { prInteractions, prDetached } = await loadPr(COORDS, TOKEN);
 
     expect(prDetached).toEqual([]);
-    const keys = Object.keys(prReplies);
+    const keys = Object.keys(prInteractions);
     expect(keys).toHaveLength(1);
     expect(keys[0]).toMatch(/^block:/);
   });
@@ -219,22 +219,22 @@ describe("loadPr — outdated comments become DetachedReply", () => {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     stubHappyPath(PR_FILES, [outdated as any], ISSUE_COMMENTS);
-    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+    const { prInteractions, prDetached } = await loadPr(COORDS, TOKEN);
 
-    expect(prReplies).toEqual({});
+    expect(prInteractions).toEqual({});
     expect(prDetached).toHaveLength(1);
     const d = prDetached[0];
     expect(d.threadKey).toBe("pr-detached:102");
-    expect(d.reply.anchorPath).toBe("src/foo.ts");
-    expect(d.reply.anchorLineNo).toBe(7);
-    expect(d.reply.originType).toBe("committed");
-    expect(d.reply.originSha).toBe("oldsha1");
-    expect(d.reply.external).toEqual({
+    expect(d.interaction.anchorPath).toBe("src/foo.ts");
+    expect(d.interaction.anchorLineNo).toBe(7);
+    expect(d.interaction.originType).toBe("committed");
+    expect(d.interaction.originSha).toBe("oldsha1");
+    expect(d.interaction.external).toEqual({
       source: "pr",
       htmlUrl: "https://github.com/owner/repo/pull/42#discussion_r102",
     });
-    expect(d.reply.anchorContext).toBeDefined();
-    expect(d.reply.anchorContext!.length).toBeGreaterThan(0);
+    expect(d.interaction.anchorContext).toBeDefined();
+    expect(d.interaction.anchorContext!.length).toBeGreaterThan(0);
   });
 
   it("caps anchorContext at 10 lines centered on the anchor", async () => {
@@ -260,7 +260,7 @@ describe("loadPr — outdated comments become DetachedReply", () => {
     const { prDetached } = await loadPr(COORDS, TOKEN);
 
     expect(prDetached).toHaveLength(1);
-    const ctx = prDetached[0].reply.anchorContext!;
+    const ctx = prDetached[0].interaction.anchorContext!;
     expect(ctx.length).toBeLessThanOrEqual(10);
     // The window should include the anchor line (newNo === 20).
     expect(ctx.some((l) => l.newNo === 20)).toBe(true);
@@ -283,11 +283,11 @@ describe("loadPr — outdated comments become DetachedReply", () => {
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     stubHappyPath(PR_FILES, [offPatch as any], ISSUE_COMMENTS);
-    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+    const { prInteractions, prDetached } = await loadPr(COORDS, TOKEN);
 
-    expect(prReplies).toEqual({});
+    expect(prInteractions).toEqual({});
     expect(prDetached).toHaveLength(1);
-    expect(prDetached[0].reply.anchorLineNo).toBe(50);
+    expect(prDetached[0].interaction.anchorLineNo).toBe(50);
   });
 });
 
@@ -341,11 +341,11 @@ describe("loadPr — comment dropped (path missing) becomes detached", () => {
       side: "RIGHT" as const,
     };
     stubHappyPath(PR_FILES, [unknownPathComment], ISSUE_COMMENTS);
-    const { prReplies, prDetached } = await loadPr(COORDS, TOKEN);
+    const { prInteractions, prDetached } = await loadPr(COORDS, TOKEN);
 
-    expect(prReplies).toEqual({});
+    expect(prInteractions).toEqual({});
     expect(prDetached).toHaveLength(1);
-    expect(prDetached[0].reply.anchorPath).toBe("src/nonexistent.ts");
+    expect(prDetached[0].interaction.anchorPath).toBe("src/nonexistent.ts");
   });
 });
 

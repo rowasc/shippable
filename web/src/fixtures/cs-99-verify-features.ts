@@ -1,4 +1,4 @@
-import type { ChangeSet, DiffLine, Reply } from "../types";
+import type { ChangeSet, DiffLine, Interaction } from "../types";
 import {
   blockCommentKey,
   hunkSummaryReplyKey,
@@ -12,28 +12,28 @@ import {
 // you need to eyeball a feature end-to-end without hopping between fixtures.
 //
 // Coverage matrix (one row per feature):
-//   aiNote info           — strings.ts h1
-//   aiNote question       — auth.php h1
-//   aiNote warning        — auth.php h1, strings.ts h2
-//   runRecipe (PHP)       — auth.php h1   (verify timing-leak claim)
-//   runRecipe (TS)        — strings.ts h2 (verify slugify edge case)
-//   runRecipe (JS)        — format.js h1  (verify NaN currency claim)
-//   aiSummary+aiReviewed  — auth.php h1, strings.ts h1, strings.ts h2
-//   definesSymbols        — auth.php h1, strings.ts h1
-//   referencesSymbols     — strings.ts h2, format.js h1
-//   expandAbove           — strings.ts h2
-//   expandBelow           — strings.ts h1
-//   teammateReview        — auth.php h1
-//   imageAssets           — preview.md (relative SVG)
-//   status: added         — auth.php, preview.md
-//   status: modified      — strings.ts, format.js
-//   status: deleted       — legacy.php
-//   status: renamed       — README.md (renamed from docs/intro.md)
-//   reply on line note    — strings.ts h2
-//   reply on hunk summary — auth.php h1
-//   reply on teammate     — auth.php h1
-//   reply on user comment — strings.ts h1 (single line)
-//   reply on block comment— format.js h1 (multi-line)
+//   ai note info           — strings.ts h1
+//   ai note question       — auth.php h1
+//   ai note warning        — auth.php h1, strings.ts h2
+//   runRecipe (PHP)        — auth.php h1   (verify timing-leak claim)
+//   runRecipe (TS)         — strings.ts h2 (verify slugify edge case)
+//   runRecipe (JS)         — format.js h1  (verify NaN currency claim)
+//   ai hunk summary        — auth.php h1, strings.ts h1, strings.ts h2
+//   definesSymbols         — auth.php h1, strings.ts h1
+//   referencesSymbols      — strings.ts h2, format.js h1
+//   expandAbove            — strings.ts h2
+//   expandBelow            — strings.ts h1
+//   teammate review        — auth.php h1
+//   imageAssets            — preview.md (relative SVG)
+//   status: added          — auth.php, preview.md
+//   status: modified       — strings.ts, format.js
+//   status: deleted        — legacy.php
+//   status: renamed        — README.md (renamed from docs/intro.md)
+//   reply on line note     — strings.ts h2
+//   reply on hunk summary  — auth.php h1
+//   reply on teammate      — auth.php h1
+//   reply on user comment  — strings.ts h1 (single line)
+//   reply on block comment — format.js h1 (multi-line)
 
 // ── PHP added (rich feature surface) ──────────────────────────────────────
 
@@ -41,41 +41,11 @@ const AUTH_LINES_H1: DiffLine[] = [
   { kind: "add", text: "<?php", newNo: 1 },
   { kind: "add", text: "// Token comparison helpers used by the session layer.", newNo: 2 },
   { kind: "add", text: "", newNo: 3 },
-  {
-    kind: "add",
-    text: "function compare_tokens($expected, $given) {",
-    newNo: 4,
-    aiNote: {
-      severity: "warning",
-      summary: "Non-constant-time comparison",
-      detail:
-        "`==` short-circuits at the first mismatched byte, leaking length and prefix-match timing. Use `hash_equals` for any token comparison.",
-      runRecipe: {
-        source: [
-          "function compare_tokens($expected, $given) {",
-          "  return $expected == $given;",
-          "}",
-          "",
-          "echo compare_tokens($expected, $given) ? 'match' : 'no match';",
-        ].join("\n"),
-        inputs: { expected: "abc123", given: "abc124" },
-      },
-    },
-  },
+  { kind: "add", text: "function compare_tokens($expected, $given) {", newNo: 4 },
   { kind: "add", text: "  return $expected == $given;", newNo: 5 },
   { kind: "add", text: "}", newNo: 6 },
   { kind: "add", text: "", newNo: 7 },
-  {
-    kind: "add",
-    text: "function issue_token($user_id) {",
-    newNo: 8,
-    aiNote: {
-      severity: "question",
-      summary: "Entropy source?",
-      detail:
-        "`uniqid` is time-based and predictable. Worth confirming whether this token is privileged or just a correlation id.",
-    },
-  },
+  { kind: "add", text: "function issue_token($user_id) {", newNo: 8 },
   { kind: "add", text: "  return uniqid('tok_', true);", newNo: 9 },
   { kind: "add", text: "}", newNo: 10 },
 ];
@@ -143,27 +113,7 @@ const FORMAT_LINES_H1: DiffLine[] = [
   { kind: "context", text: "", oldNo: 2, newNo: 2 },
   { kind: "context", text: "function formatCents(cents) {", oldNo: 3, newNo: 3 },
   { kind: "del", text: "  return '$' + (cents / 100).toFixed(2);", oldNo: 4 },
-  {
-    kind: "add",
-    text: "  return '$' + (Number(cents) / 100).toFixed(2);",
-    newNo: 4,
-    aiNote: {
-      severity: "info",
-      summary: "Coerce-then-divide handles string inputs",
-      detail:
-        "Catches the `formatCents('199')` callers from the checkout form. The runner shows the old version produced `NaN` for them.",
-      runRecipe: {
-        source: [
-          "function formatCents(cents) {",
-          "  return '$' + (cents / 100).toFixed(2);",
-          "}",
-          "",
-          "console.log(formatCents(cents));",
-        ].join("\n"),
-        inputs: { cents: "'199'" },
-      },
-    },
-  },
+  { kind: "add", text: "  return '$' + (Number(cents) / 100).toFixed(2);", newNo: 4 },
   { kind: "context", text: "}", oldNo: 5, newNo: 5 },
   { kind: "context", text: "", oldNo: 6, newNo: 6 },
   { kind: "context", text: "function formatLineItem(item) {", oldNo: 7, newNo: 7 },
@@ -272,13 +222,6 @@ export const CS_99: ChangeSet = {
           newCount: 10,
           definesSymbols: ["compare_tokens", "issue_token"],
           aiReviewed: true,
-          aiSummary:
-            "compare_tokens uses `==` — that's a timing-leak in any token-comparison context. issue_token uses uniqid which is time-based; fine for a correlation id, not for anything privileged.",
-          teammateReview: {
-            user: "marco",
-            verdict: "comment",
-            note: "Approved everything except compare_tokens — please switch to hash_equals before this lands.",
-          },
           lines: AUTH_LINES_H1,
         },
         {
@@ -321,8 +264,6 @@ export const CS_99: ChangeSet = {
           newCount: 3,
           definesSymbols: ["padRight"],
           aiReviewed: true,
-          aiSummary:
-            "Renaming pad → padRight clarifies direction. Default ch='' is unchanged. No callers outside this file (verified with grep).",
           expandBelow: [
             [
               { kind: "context", text: "", oldNo: 11, newNo: 11 },
@@ -330,17 +271,7 @@ export const CS_99: ChangeSet = {
             ],
           ],
           lines: [
-            {
-              kind: "del",
-              text: "export function pad(s: string, n: number): string {",
-              oldNo: 8,
-              aiNote: {
-                severity: "info",
-                summary: "Renamed to padRight",
-                detail:
-                  "The old name was ambiguous about direction. No external callers, so this is a safe rename.",
-              },
-            },
+            { kind: "del", text: "export function pad(s: string, n: number): string {", oldNo: 8 },
             { kind: "del", text: "  return s.length >= n ? s : s + ' '.repeat(n - s.length);", oldNo: 9 },
             { kind: "del", text: "}", oldNo: 10 },
             { kind: "add", text: "export function padRight(s: string, n: number, ch = ' '): string {", newNo: 8 },
@@ -358,8 +289,6 @@ export const CS_99: ChangeSet = {
           definesSymbols: ["titleCase"],
           referencesSymbols: ["slugify"],
           aiReviewed: true,
-          aiSummary:
-            "slugify becomes Unicode-stricter (drops anything non-[a-z0-9]). Existing callers passing pre-cleaned ASCII keep working; emoji/CJK inputs that previously round-tripped will now collapse to '-'.",
           expandAbove: [
             [
               { kind: "context", text: "}", oldNo: 10, newNo: 10 },
@@ -381,30 +310,7 @@ export const CS_99: ChangeSet = {
             { kind: "del", text: "}", oldNo: 14 },
             { kind: "add", text: "export function slugify(s: string): string {", newNo: 12 },
             { kind: "add", text: "  return s", newNo: 13 },
-            {
-              kind: "add",
-              text: "    .toLowerCase()",
-              newNo: 14,
-              aiNote: {
-                severity: "warning",
-                summary: "Locale-sensitive lower-case",
-                detail:
-                  "`toLowerCase` without a locale silently mangles Turkish dotted-i (`İ` → `i̇`). Try `slugify('İstanbul')` in the runner — output is `i-stanbul`, not `istanbul`.",
-                runRecipe: {
-                  source: [
-                    "function slugify(s) {",
-                    "  return s",
-                    "    .toLowerCase()",
-                    "    .replace(/[^a-z0-9]+/g, '-')",
-                    "    .replace(/(^-|-$)/g, '');",
-                    "}",
-                    "",
-                    "console.log(slugify(input));",
-                  ].join("\n"),
-                  inputs: { input: "'İstanbul'" },
-                },
-              },
-            },
+            { kind: "add", text: "    .toLowerCase()", newNo: 14 },
             { kind: "add", text: "    .replace(/[^a-z0-9]+/g, '-')", newNo: 15 },
             { kind: "add", text: "    .replace(/(^-|-$)/g, '');", newNo: 16 },
             { kind: "add", text: "}", newNo: 17 },
@@ -436,8 +342,6 @@ export const CS_99: ChangeSet = {
           definesSymbols: ["formatCents"],
           referencesSymbols: ["formatCents"],
           aiReviewed: true,
-          aiSummary:
-            "Two real fixes packed into one hunk: coerce string-cents callers (the runner shows the old version returns NaN for `formatCents('199')`), and rename `item.price` → `item.priceCents` to match the new cart shape.",
           lines: FORMAT_LINES_H1,
         },
       ],
@@ -458,8 +362,6 @@ export const CS_99: ChangeSet = {
           newStart: 1,
           newCount: PREVIEW_DOC_LINES.length,
           aiReviewed: true,
-          aiSummary:
-            "New documentation page; switch to Preview to confirm tables, alerts, code, and the inline SVG render before signing off.",
           lines: PREVIEW_DOC_LINES.map((text, i) => ({
             kind: "add",
             text,
@@ -517,60 +419,260 @@ export const CS_99: ChangeSet = {
 // Suppress unused-warning for the OLD content; kept above for readability.
 void STRINGS_OLD;
 
-// ── Seed replies (one per reply-key kind) ─────────────────────────────────
+// ── Seeded AI / teammate interactions ─────────────────────────────────────
 
-export const REPLIES_99: Record<string, Reply[]> = {
-  // Reply on a line-level AI note.
-  [lineNoteReplyKey("cs-99/web/src/utils/strings.ts#h2", 5)]: [
+const AUTH_H1 = "cs-99/lib/auth.php#h1";
+const STRINGS_H1 = "cs-99/web/src/utils/strings.ts#h1";
+const STRINGS_H2 = "cs-99/web/src/utils/strings.ts#h2";
+const FORMAT_H1 = "cs-99/web/legacy/format.js#h1";
+const PREVIEW_H1 = "cs-99/docs/preview-demo.md#h1";
+const INGEST_TS = "0001-01-01T00:00:00.000Z";
+
+export const INTERACTIONS_99: Record<string, Interaction[]> = {
+  // auth.php#h1
+  [hunkSummaryReplyKey(AUTH_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(AUTH_H1)}`,
+      threadKey: hunkSummaryReplyKey(AUTH_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "compare_tokens uses `==` — that's a timing-leak in any token-comparison context. issue_token uses uniqid which is time-based; fine for a correlation id, not for anything privileged.",
+      createdAt: INGEST_TS,
+    },
+    {
+      id: "r-99-summary",
+      threadKey: hunkSummaryReplyKey(AUTH_H1),
+      target: "reply-to-hunk-summary",
+      intent: "comment",
+      author: "ines",
+      authorRole: "user",
+      body:
+        "Both AI calls land. compare_tokens → hash_equals is non-negotiable for me; the issue_token question we can answer once we know if these tokens grant any capability.",
+      createdAt: "2026-05-04T10:22:00Z",
+    },
+  ],
+  [teammateReplyKey(AUTH_H1)]: [
+    {
+      id: `teammate:${teammateReplyKey(AUTH_H1)}`,
+      threadKey: teammateReplyKey(AUTH_H1),
+      target: "block",
+      intent: "comment",
+      author: "marco",
+      authorRole: "teammate",
+      body: "Approved everything except compare_tokens — please switch to hash_equals before this lands.",
+      createdAt: INGEST_TS,
+    },
+    {
+      id: "r-99-teammate",
+      threadKey: teammateReplyKey(AUTH_H1),
+      target: "reply-to-teammate",
+      intent: "comment",
+      author: "qa-bot",
+      authorRole: "user",
+      body: "Agree with marco — going to gate this on hash_equals before merging.",
+      createdAt: "2026-05-04T10:24:00Z",
+    },
+  ],
+  [lineNoteReplyKey(AUTH_H1, 3)]: [
+    {
+      id: `ai:${lineNoteReplyKey(AUTH_H1, 3)}`,
+      threadKey: lineNoteReplyKey(AUTH_H1, 3),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Non-constant-time comparison\n\n`==` short-circuits at the first mismatched byte, leaking length and prefix-match timing. Use `hash_equals` for any token comparison.",
+      createdAt: INGEST_TS,
+      runRecipe: {
+        source: [
+          "function compare_tokens($expected, $given) {",
+          "  return $expected == $given;",
+          "}",
+          "",
+          "echo compare_tokens($expected, $given) ? 'match' : 'no match';",
+        ].join("\n"),
+        inputs: { expected: "abc123", given: "abc124" },
+      },
+    },
+  ],
+  [lineNoteReplyKey(AUTH_H1, 7)]: [
+    {
+      id: `ai:${lineNoteReplyKey(AUTH_H1, 7)}`,
+      threadKey: lineNoteReplyKey(AUTH_H1, 7),
+      target: "line",
+      intent: "question",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Entropy source?\n\n`uniqid` is time-based and predictable. Worth confirming whether this token is privileged or just a correlation id.",
+      createdAt: INGEST_TS,
+    },
+  ],
+
+  // strings.ts#h1
+  [hunkSummaryReplyKey(STRINGS_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(STRINGS_H1)}`,
+      threadKey: hunkSummaryReplyKey(STRINGS_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Renaming pad → padRight clarifies direction. Default ch='' is unchanged. No callers outside this file (verified with grep).",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(STRINGS_H1, 0)]: [
+    {
+      id: `ai:${lineNoteReplyKey(STRINGS_H1, 0)}`,
+      threadKey: lineNoteReplyKey(STRINGS_H1, 0),
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Renamed to padRight\n\nThe old name was ambiguous about direction. No external callers, so this is a safe rename.",
+      createdAt: INGEST_TS,
+    },
+  ],
+
+  // strings.ts#h2
+  [hunkSummaryReplyKey(STRINGS_H2)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(STRINGS_H2)}`,
+      threadKey: hunkSummaryReplyKey(STRINGS_H2),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "slugify becomes Unicode-stricter (drops anything non-[a-z0-9]). Existing callers passing pre-cleaned ASCII keep working; emoji/CJK inputs that previously round-tripped will now collapse to '-'.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(STRINGS_H2, 5)]: [
+    {
+      id: `ai:${lineNoteReplyKey(STRINGS_H2, 5)}`,
+      threadKey: lineNoteReplyKey(STRINGS_H2, 5),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Locale-sensitive lower-case\n\n`toLowerCase` without a locale silently mangles Turkish dotted-i (`İ` → `i̇`). Try `slugify('İstanbul')` in the runner — output is `i-stanbul`, not `istanbul`.",
+      createdAt: INGEST_TS,
+      runRecipe: {
+        source: [
+          "function slugify(s) {",
+          "  return s",
+          "    .toLowerCase()",
+          "    .replace(/[^a-z0-9]+/g, '-')",
+          "    .replace(/(^-|-$)/g, '');",
+          "}",
+          "",
+          "console.log(slugify(input));",
+        ].join("\n"),
+        inputs: { input: "'İstanbul'" },
+      },
+    },
     {
       id: "r-99-line",
+      threadKey: lineNoteReplyKey(STRINGS_H2, 5),
+      target: "reply-to-ai-note",
+      intent: "comment",
       author: "qa-bot",
+      authorRole: "user",
       body:
         "Confirmed — the runner returns 'i-stanbul'. Filed a follow-up to use a locale-aware slugger; not blocking this PR since no current callers pass non-ASCII.",
       createdAt: "2026-05-04T10:15:00Z",
     },
   ],
 
-  // Reply attached to a hunk-level AI summary (no specific line).
-  [hunkSummaryReplyKey("cs-99/lib/auth.php#h1")]: [
-    {
-      id: "r-99-summary",
-      author: "ines",
-      body:
-        "Both AI calls land. compare_tokens → hash_equals is non-negotiable for me; the issue_token question we can answer once we know if these tokens grant any capability.",
-      createdAt: "2026-05-04T10:22:00Z",
-    },
-  ],
-
-  // Reply addressed to the teammate (marco) review.
-  [teammateReplyKey("cs-99/lib/auth.php#h1")]: [
-    {
-      id: "r-99-teammate",
-      author: "qa-bot",
-      body:
-        "Agree with marco — going to gate this on hash_equals before merging.",
-      createdAt: "2026-05-04T10:24:00Z",
-    },
-  ],
-
-  // Single-line user-started comment.
-  [userCommentKey("cs-99/web/src/utils/strings.ts#h1", 0)]: [
+  // Reviewer-started thread on strings.ts#h1 line 0 (no AI head).
+  [userCommentKey(STRINGS_H1, 0)]: [
     {
       id: "r-99-user",
+      threadKey: userCommentKey(STRINGS_H1, 0),
+      target: "line",
+      intent: "comment",
       author: "qa-bot",
+      authorRole: "user",
       body: "Quick rename — flagging just so reviewers double-check the call sites.",
       createdAt: "2026-05-04T10:30:00Z",
     },
   ],
 
-  // Multi-line block comment (lines 3..7 in format.js#h1).
-  [blockCommentKey("cs-99/web/legacy/format.js#h1", 3, 7)]: [
+  // Multi-line reviewer-started block thread on format.js#h1 lines 3..7.
+  [blockCommentKey(FORMAT_H1, 3, 7)]: [
     {
       id: "r-99-block",
+      threadKey: blockCommentKey(FORMAT_H1, 3, 7),
+      target: "block",
+      intent: "comment",
       author: "qa-bot",
+      authorRole: "user",
       body:
         "Range comment covering the formatCents fix and its caller — confirmed both halves with the runner.",
       createdAt: "2026-05-04T10:32:00Z",
     },
   ],
+
+  // format.js#h1
+  [hunkSummaryReplyKey(FORMAT_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(FORMAT_H1)}`,
+      threadKey: hunkSummaryReplyKey(FORMAT_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Two real fixes packed into one hunk: coerce string-cents callers (the runner shows the old version returns NaN for `formatCents('199')`), and rename `item.price` → `item.priceCents` to match the new cart shape.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(FORMAT_H1, 4)]: [
+    {
+      id: `ai:${lineNoteReplyKey(FORMAT_H1, 4)}`,
+      threadKey: lineNoteReplyKey(FORMAT_H1, 4),
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Coerce-then-divide handles string inputs\n\nCatches the `formatCents('199')` callers from the checkout form. The runner shows the old version produced `NaN` for them.",
+      createdAt: INGEST_TS,
+      runRecipe: {
+        source: [
+          "function formatCents(cents) {",
+          "  return '$' + (cents / 100).toFixed(2);",
+          "}",
+          "",
+          "console.log(formatCents(cents));",
+        ].join("\n"),
+        inputs: { cents: "'199'" },
+      },
+    },
+  ],
+
+  // preview-demo.md#h1
+  [hunkSummaryReplyKey(PREVIEW_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(PREVIEW_H1)}`,
+      threadKey: hunkSummaryReplyKey(PREVIEW_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "New documentation page; switch to Preview to confirm tables, alerts, code, and the inline SVG render before signing off.",
+      createdAt: INGEST_TS,
+    },
+  ],
 };
+

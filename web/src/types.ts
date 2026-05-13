@@ -5,28 +5,6 @@ export interface DiffLine {
   text: string;
   oldNo?: number;
   newNo?: number;
-  aiNote?: AiNote;
-}
-
-export type AiNoteSeverity = "info" | "question" | "warning";
-
-export interface AiNote {
-  severity: AiNoteSeverity;
-  summary: string;
-  detail?: string;
-  /**
-   * Optional one-click verifier for the claim above. When present, the
-   * inspector renders a `▷ verify` button on the note that opens the
-   * runner with `source` already loaded and the `inputs` slot map
-   * pre-filled. Lang is inferred from the enclosing file. The recipe
-   * needs to be self-contained — the runner sandbox can't see other
-   * files in the diff, so any helpers the snippet calls must live in
-   * the source string.
-   */
-  runRecipe?: {
-    source: string;
-    inputs: Record<string, string>;
-  };
 }
 
 export interface Hunk {
@@ -40,12 +18,6 @@ export interface Hunk {
   definesSymbols?: string[];
   referencesSymbols?: string[];
   aiReviewed?: boolean;
-  aiSummary?: string;
-  teammateReview?: {
-    user: string;
-    verdict: "approve" | "comment";
-    note?: string;
-  };
   /**
    * Ordered from nearest to farthest: the first element is the block
    * immediately enclosing the hunk; each subsequent element is one
@@ -236,74 +208,25 @@ export interface Cursor {
   lineIdx: number;
 }
 
+/**
+ * Legacy per-thread reply shape. The reducer now stores reviewer-authored
+ * threads as `Interaction[]` on `state.interactions`; this type stays as
+ * the wire shape for AgentReply nesting and the test/view bridge layer.
+ */
 export interface Reply {
   id: string;
   author: string;
   body: string;
   createdAt: string;
-  /**
-   * Server-assigned id once the reply has been enqueued for the agent. `null`
-   * after a failed enqueue (the parent surfaces a "Save again" affordance);
-   * absent on legacy fixture/persisted replies that pre-date the queue —
-   * those rehydrate to `null` via the persist-layer migration.
-   */
   enqueuedCommentId?: string | null;
-  /**
-   * `true` when the most recent enqueue attempt for this Reply errored. Drives
-   * the ⚠ errored pip + click-to-retry affordance in `ReplyThread`. Cleared
-   * on a successful retry. Absent / `false` means "no error, no retry needed".
-   * Always coexists with `enqueuedCommentId === null` — once an id lands the
-   * delivered pip wins regardless of any stale error flag.
-   */
   enqueueError?: boolean;
-  /**
-   * Agent replies threaded under this reviewer Reply. Match key is the
-   * server's wire `commentId` ↔ `enqueuedCommentId` here. Append-only on
-   * the server; idempotent reconcile on the client (existing ids update in
-   * place, new ids append, sorted by `postedAt` ascending). Optional
-   * because it's absent on legacy fixture/persisted replies that pre-date
-   * the field — those rehydrate to `[]` via the persist-layer migration.
-   */
   agentReplies?: AgentReply[];
-  /**
-   * Worktree HEAD at write time (or the loaded ChangeSet id for non-worktree
-   * loads). The Sidebar's "Detached" section displays the short prefix on a
-   * "view at <sha7>" affordance for committed entries.
-   */
   originSha?: string;
-  /**
-   * Whether this reply was authored against a committed view of the file or
-   * the working-tree state. Drives the caption shown on detached entries.
-   * Absent on legacy replies that pre-date anchored comments — they render
-   * as `committed` by default.
-   */
   originType?: "committed" | "dirty";
-  /** Repo-relative file path the reply was anchored to at write time. */
   anchorPath?: string;
-  /**
-   * Up to 10 lines centered on the anchor (5 above, anchor, 4 below). Wide
-   * enough to make the detached snippet self-explanatory; trimmed at the
-   * edges of the hunk. Display only — never used for matching.
-   */
   anchorContext?: DiffLine[];
-  /**
-   * Hash of the inner 5 lines (anchor ± 2). Used by the reload pass to find
-   * the same code in the new diff. See `anchor.ts`.
-   */
   anchorHash?: string;
-  /**
-   * 1-based line number in the file at `originSha` (or its parent, for `del`
-   * anchors), captured at write time. Drives the "view at <sha7>" panel's
-   * scroll-to-anchor behavior. Optional — legacy replies that pre-date the
-   * field render the historical file from the top.
-   */
   anchorLineNo?: number;
-  /**
-   * Marks a reply as sourced from an upstream system (today: GitHub PRs).
-   * Drives the small "open on GitHub" link in ReplyThread, suppresses the
-   * local enqueue / agent-reply affordances, and tells the persist layer
-   * to skip the entry on save (it re-arrives with the next pr/load).
-   */
   external?: { source: "pr"; htmlUrl: string };
 }
 
@@ -360,10 +283,21 @@ export type AgentComment =
     });
 
 /**
- * A reply whose anchor no longer matches anywhere in the new diff. Carries
- * its original key so the persisted shape round-trips cleanly; `reply` is
- * unchanged from when it was authored — the `anchorContext` snippet on it
- * is what the Sidebar renders.
+ * An interaction whose anchor no longer matches anywhere in the new diff.
+ * Carries its original key so the persisted shape round-trips cleanly; the
+ * interaction is unchanged from when it was authored — its `anchorContext`
+ * snippet is what the Sidebar renders.
+ */
+export interface DetachedInteraction {
+  interaction: Interaction;
+  /** The thread key (note:/user:/block:/etc.) the interaction was attached to. */
+  threadKey: string;
+}
+
+/**
+ * Legacy detached-reply shape. Used at boundaries that still consume
+ * `Reply` (persist, view-model builders). The reducer stores the unified
+ * `DetachedInteraction` shape; helpers in state.ts translate at the edge.
  */
 export interface DetachedReply {
   reply: Reply;
@@ -417,10 +351,8 @@ export interface ReviewState {
    */
   reviewedFiles: Set<string>;
   dismissedGuides: Set<string>;
-  /** keys are `${hunkId}:${lineIdx}` */
-  ackedNotes: Set<string>;
-  /** keys are reply-target keys; see replyKey helpers */
-  replies: Record<string, Reply[]>;
+  /** keys are thread-target keys; see thread-key helpers */
+  interactions: Record<string, Interaction[]>;
   /** Per-hunk count of blocks revealed above; 0 = nothing extra. */
   expandLevelAbove: Record<string, number>;
   expandLevelBelow: Record<string, number>;
@@ -433,12 +365,12 @@ export interface ReviewState {
   /** Active shift-extended selection; null when the cursor is a single line. */
   selection: LineSelection | null;
   /**
-   * Replies whose anchor didn't match anywhere in the latest reload of their
-   * changeset. Per `docs/plans/worktree-live-reload.md`, the Sidebar surfaces
-   * these in a "Detached" group so the thread is still visible even though
-   * the line it was attached to is gone.
+   * Interactions whose anchor didn't match anywhere in the latest reload of
+   * their changeset. Per `docs/plans/worktree-live-reload.md`, the Sidebar
+   * surfaces these in a "Detached" group so the thread is still visible even
+   * though the line it was attached to is gone.
    */
-  detachedReplies: DetachedReply[];
+  detachedInteractions: DetachedInteraction[];
   /**
    * Top-level (anchor-shaped) agent comments for the active worktree.
    * Populated by `MERGE_AGENT_COMMENTS` after a poll of `/api/agent/comments`.
@@ -642,6 +574,94 @@ export interface PrConversationItem {
   htmlUrl: string;
 }
 
+// ── Review interactions (unified primitive) ──────────────────────────────
+// See docs/plans/typed-review-interactions.md. One Interaction subsumes
+// Reply, AiNote, AgentReply, CommentKind. Five vocabularies → one.
+// Storage and ingest still ride the legacy shapes for now; the seam in
+// view.ts/selectInteractions projects them into this shape at read time
+// until the migration completes.
+
+/** What the interaction attaches to. Topology, not intent. */
+export type InteractionTarget =
+  | "line"
+  | "block"
+  | "reply-to-ai-note"
+  | "reply-to-hunk-summary"
+  | "reply-to-teammate"
+  | "reply-to-user"
+  | "reply-to-agent";
+
+/** Asks start a thread on code, or restate the thread's ask in a reply. */
+export type AskIntent = "comment" | "question" | "request" | "blocker";
+
+/**
+ * Responses are only valid as replies to other interactions; never start
+ * a fresh thread on a line of code.
+ */
+export type ResponseIntent = "ack" | "unack" | "accept" | "reject";
+
+export type InteractionIntent = AskIntent | ResponseIntent;
+
+export type InteractionAuthorRole = "user" | "ai" | "teammate" | "agent";
+
+/**
+ * The unified primitive. Replaces Reply + AiNote + AgentReply +
+ * teammateReview at the read layer. The author dimension is encoded in
+ * `authorRole`; the role determines persistence behaviour
+ * (`authorRole !== "user"` entries are stripped on persist and
+ * regenerated from ingest on reload).
+ */
+export interface Interaction {
+  id: string;
+  threadKey: string;
+  target: InteractionTarget;
+  intent: InteractionIntent;
+  author: string;
+  authorRole: InteractionAuthorRole;
+  body: string;
+  createdAt: string;
+
+  /** Anchoring — present on user-authored interactions. */
+  anchorPath?: string;
+  anchorHash?: string;
+  anchorContext?: DiffLine[];
+  anchorLineNo?: number;
+  originSha?: string;
+  originType?: "committed" | "dirty";
+
+  /** Provenance — present on PR-imported interactions. */
+  external?: { source: "pr"; htmlUrl: string };
+
+  /** Verifier hook — present on some AI-authored interactions. */
+  runRecipe?: { source: string; inputs: Record<string, string> };
+
+  /** Queue bookkeeping — once enqueued to the agent. */
+  enqueuedCommentId?: string | null;
+  enqueueError?: boolean;
+  enqueueOptIn?: boolean;
+}
+
+export function isAskIntent(i: InteractionIntent): i is AskIntent {
+  return i === "comment" || i === "question" || i === "request" || i === "blocker";
+}
+
+export function isResponseIntent(i: InteractionIntent): i is ResponseIntent {
+  return i === "ack" || i === "unack" || i === "accept" || i === "reject";
+}
+
+/**
+ * Validity rule: response intents only ever attach to other interactions
+ * (every `reply-to-*` target). Asks attach to code (`line`/`block`) or to
+ * other interactions.
+ */
+export function isValidInteractionPair(
+  target: InteractionTarget,
+  intent: InteractionIntent,
+): boolean {
+  if (target === "line" || target === "block") return isAskIntent(intent);
+  return true;
+}
+
 export function noteKey(hunkId: string, lineIdx: number): string {
   return `${hunkId}:${lineIdx}`;
 }
@@ -742,7 +762,7 @@ export function parseReplyKey(key: string): ParsedReplyKey | null {
   }
 }
 
-// ── Agent comment queue (mirror of server/src/agent-queue.ts) ────────────
+// ── Agent interaction queue wire (mirror of server/src/agent-queue.ts) ───
 // These shapes travel verbatim across the `/api/agent/*` endpoints. Keep in
 // sync with the server-side definitions; they're the wire format for the
 // pull channel described in docs/plans/share-review-comments.md.
@@ -755,16 +775,25 @@ export type CommentKind =
   | "reply-to-hunk-summary"
   | "reply-to-agent-comment";
 
-export interface Comment {
+/**
+ * Wire shape of a delivered interaction returned by GET /api/agent/delivered.
+ * Mirrors `DeliveredInteraction` in server/src/agent-queue.ts. The web only
+ * uses the `id` (to match against an Interaction's `enqueuedCommentId`) and
+ * `deliveredAt` (to render the ✓ delivered pip tooltip).
+ */
+export interface DeliveredInteraction {
   id: string;
-  kind: CommentKind;
+  target: InteractionTarget;
+  intent: InteractionIntent;
+  author: string;
+  authorRole: InteractionAuthorRole;
   /** Repo-relative path. */
   file: string;
   /** `"118"` or `"72-79"` — string so single lines and ranges both fit. */
   lines?: string;
   body: string;
   commitSha: string;
-  /** Prior comment id this entry replaces. `null` when not an edit. */
+  /** Prior interaction id this entry replaces. `null` when not an edit. */
   supersedes: string | null;
   /**
    * Id of the parent `AgentComment` this entry replies to. Required when
@@ -774,9 +803,8 @@ export interface Comment {
   parentAgentCommentId?: string;
   /** ISO timestamp stamped at enqueue. */
   enqueuedAt: string;
-}
-
-export interface DeliveredComment extends Comment {
-  /** ISO timestamp stamped when the comment was moved out of pending. */
+  /** ISO timestamp stamped when the entry was moved out of pending. */
   deliveredAt: string;
+  /** Optional provenance link back to GitHub for PR-imported interactions. */
+  htmlUrl?: string;
 }

@@ -11,42 +11,16 @@ import {
   POLL_INTERVAL_MS,
   useDeliveredPolling,
 } from "./useDeliveredPolling";
-import type { AgentComment, DeliveredComment } from "./types";
+import type { PolledAgentReply } from "./state";
+import type { DeliveredInteraction } from "./types";
 
-/** Build a reply-shaped AgentComment for the polled wire batch. */
-function replyEntry(
-  id: string,
-  commentId: string,
-  postedAt: string,
-  body: string = id,
-): AgentComment {
+function delivered(id: string, deliveredAt = "2026-05-06T12:00:00.000Z"): DeliveredInteraction {
   return {
     id,
-    body,
-    postedAt,
-    parent: { commentId, outcome: "addressed" },
-  };
-}
-
-/** Build a top-level (anchor-shaped) AgentComment for the polled wire batch. */
-function topLevelEntry(
-  id: string,
-  file: string,
-  lines: string,
-  postedAt: string,
-): AgentComment {
-  return {
-    id,
-    body: `top-${id}`,
-    postedAt,
-    anchor: { file, lines },
-  };
-}
-
-function delivered(id: string, deliveredAt = "2026-05-06T12:00:00.000Z"): DeliveredComment {
-  return {
-    id,
-    kind: "line",
+    target: "line",
+    intent: "comment",
+    author: "you",
+    authorRole: "user",
     file: "f.ts",
     lines: "1",
     body: "b",
@@ -80,7 +54,7 @@ afterEach(() => {
 
 describe("useDeliveredPolling — polling lifecycle", () => {
   it("does not poll when worktreePath is null", async () => {
-    const fetcher = vi.fn(async () => [] as DeliveredComment[]);
+    const fetcher = vi.fn(async () => [] as DeliveredInteraction[]);
     renderHook(() =>
       useDeliveredPolling({ worktreePath: null, fetcher }),
     );
@@ -145,10 +119,10 @@ describe("useDeliveredPolling — polling lifecycle", () => {
 
   it("freezes the delivered list and flags `error` on a failed fetch", async () => {
     const fetcher = vi
-      .fn<(p: string) => Promise<DeliveredComment[]>>()
+      .fn<(p: string) => Promise<DeliveredInteraction[]>>()
       .mockResolvedValueOnce([delivered("cmt_1")])
       .mockRejectedValue(new Error("ECONNREFUSED"));
-    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
+    const repliesFetcher = vi.fn<(p: string) => Promise<PolledAgentReply[]>>(
       async () => [],
     );
 
@@ -156,7 +130,7 @@ describe("useDeliveredPolling — polling lifecycle", () => {
       useDeliveredPolling({
         worktreePath: "/wt",
         fetcher,
-        commentsFetcher,
+        repliesFetcher,
       }),
     );
     await act(() => Promise.resolve());
@@ -172,28 +146,37 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     expect(r.result.current.delivered.map((d) => d.id)).toEqual(["cmt_1"]);
   });
 
-  it("Promise.allSettled keeps endpoints independent: delivered fails, comments succeeds → delivered frozen, agentReplies updated, error: true", async () => {
+  it("Promise.allSettled keeps endpoints independent: delivered fails, replies succeeds → delivered frozen, agentReplies updated, error: true", async () => {
     // The headline behaviour change in the polling rewrite: a failure in
     // one endpoint must not poison the other. Pre-commit, delivered
     // would freeze in last-known state when its fetcher errored, but
     // there was a single try/catch; under Promise.allSettled the two
     // sides freeze independently.
+    const ar = (id: string, postedAt: string): PolledAgentReply => ({
+      id,
+      parentId: "cmt_1",
+      body: id,
+      intent: "accept",
+      author: "agent",
+      authorRole: "agent",
+      target: "reply-to-user",
+      postedAt,
+    });
+
     const fetcher = vi
-      .fn<(p: string) => Promise<DeliveredComment[]>>()
+      .fn<(p: string) => Promise<DeliveredInteraction[]>>()
       .mockResolvedValueOnce([delivered("cmt_1")])
       .mockRejectedValue(new Error("ECONNREFUSED"));
-    const commentsFetcher = vi
-      .fn<(p: string) => Promise<AgentComment[]>>()
+    const repliesFetcher = vi
+      .fn<(p: string) => Promise<PolledAgentReply[]>>()
+      .mockResolvedValueOnce([ar("ar1", "2026-05-06T12:01:00.000Z")])
       .mockResolvedValueOnce([
-        replyEntry("ar1", "cmt_1", "2026-05-06T12:01:00.000Z"),
-      ])
-      .mockResolvedValueOnce([
-        replyEntry("ar1", "cmt_1", "2026-05-06T12:01:00.000Z"),
-        replyEntry("ar2", "cmt_1", "2026-05-06T12:02:00.000Z"),
+        ar("ar1", "2026-05-06T12:01:00.000Z"),
+        ar("ar2", "2026-05-06T12:02:00.000Z"),
       ]);
 
     const r = renderHook(() =>
-      useDeliveredPolling({ worktreePath: "/wt", fetcher, commentsFetcher }),
+      useDeliveredPolling({ worktreePath: "/wt", fetcher, repliesFetcher }),
     );
 
     // First tick: both succeed; both populated; no error.
@@ -217,21 +200,30 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     expect(r.result.current.error).toBe(true);
   });
 
-  it("Promise.allSettled keeps endpoints independent: comments fails, delivered succeeds → agentReplies frozen, delivered updated, error: true", async () => {
+  it("Promise.allSettled keeps endpoints independent: replies fails, delivered succeeds → agentReplies frozen, delivered updated, error: true", async () => {
     // Mirror of the above with the failure on the other side.
     const fetcher = vi
-      .fn<(p: string) => Promise<DeliveredComment[]>>()
+      .fn<(p: string) => Promise<DeliveredInteraction[]>>()
       .mockResolvedValueOnce([delivered("cmt_1")])
       .mockResolvedValueOnce([delivered("cmt_1"), delivered("cmt_2")]);
-    const commentsFetcher = vi
-      .fn<(p: string) => Promise<AgentComment[]>>()
+    const repliesFetcher = vi
+      .fn<(p: string) => Promise<PolledAgentReply[]>>()
       .mockResolvedValueOnce([
-        replyEntry("ar1", "cmt_1", "2026-05-06T12:01:00.000Z", "fixed"),
+        {
+          id: "ar1",
+          parentId: "cmt_1",
+          body: "fixed",
+          intent: "accept",
+          author: "agent",
+          authorRole: "agent",
+          target: "reply-to-user",
+          postedAt: "2026-05-06T12:01:00.000Z",
+        },
       ])
       .mockRejectedValue(new Error("ECONNREFUSED"));
 
     const r = renderHook(() =>
-      useDeliveredPolling({ worktreePath: "/wt", fetcher, commentsFetcher }),
+      useDeliveredPolling({ worktreePath: "/wt", fetcher, repliesFetcher }),
     );
     await act(() => Promise.resolve());
     expect(r.result.current.agentReplies.map((a) => a.id)).toEqual(["ar1"]);
@@ -249,118 +241,48 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     expect(r.result.current.error).toBe(true);
   });
 
-  it("polls agent comments in parallel and exposes both reply-shaped and top-level entries", async () => {
+  it("polls agent replies in parallel and exposes them on the result", async () => {
     const fetcher = vi.fn(async () => [delivered("cmt_1")]);
-    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
+    const repliesFetcher = vi.fn<(p: string) => Promise<PolledAgentReply[]>>(
       async () => [
-        replyEntry("ar1", "cmt_1", "2026-05-06T12:01:00.000Z", "fixed"),
-        topLevelEntry(
-          "tl1",
-          "src/foo.ts",
-          "42-58",
-          "2026-05-06T12:02:00.000Z",
-        ),
+        {
+          id: "ar1",
+          parentId: "cmt_1",
+          body: "fixed",
+          intent: "accept",
+          author: "agent",
+          authorRole: "agent",
+          target: "reply-to-user",
+          postedAt: "2026-05-06T12:01:00.000Z",
+        },
       ],
     );
     const r = renderHook(() =>
       useDeliveredPolling({
         worktreePath: "/wt",
         fetcher,
-        commentsFetcher,
+        repliesFetcher,
       }),
     );
     await act(() => Promise.resolve());
-    expect(commentsFetcher).toHaveBeenCalledWith("/wt");
-    // Reply-shaped entries are translated to the flat PolledAgentReply
-    // wire shape so the existing mergeAgentReplies reducer keeps working.
+    expect(repliesFetcher).toHaveBeenCalledWith("/wt");
     expect(r.result.current.agentReplies).toHaveLength(1);
-    expect(r.result.current.agentReplies[0].commentId).toBe("cmt_1");
-    expect(r.result.current.agentReplies[0].outcome).toBe("addressed");
-    // Top-level entries land in the separate agentComments slot.
-    expect(r.result.current.agentComments).toHaveLength(1);
-    expect(r.result.current.agentComments?.[0].id).toBe("tl1");
-    expect(r.result.current.agentComments?.[0].anchor?.file).toBe("src/foo.ts");
-  });
-
-  it("agentComments is null until the first successful poll lands (initial-mount no-clobber)", async () => {
-    // Regression: before this change the hook's initial state was `[]`, so
-    // the effect in ReviewWorkspace would fire on mount with an empty
-    // batch and clobber a persisted `state.agentComments` rehydrated from
-    // storage. Modelling the slot as `AgentComment[] | null` lets the
-    // caller distinguish "haven't polled yet" from "polled empty".
-    let resolveComments: ((value: AgentComment[]) => void) | null = null;
-    const fetcher = vi.fn<(p: string) => Promise<DeliveredComment[]>>(
-      async () => [],
-    );
-    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
-      () =>
-        new Promise<AgentComment[]>((resolve) => {
-          resolveComments = resolve;
-        }),
-    );
-
-    const r = renderHook(() =>
-      useDeliveredPolling({
-        worktreePath: "/wt",
-        fetcher,
-        commentsFetcher,
-      }),
-    );
-    // Before the in-flight fetch resolves, the slot must still be null.
-    expect(r.result.current.agentComments).toBeNull();
-
-    // Resolve the promise → first successful poll lands → slot becomes [].
-    await act(async () => {
-      resolveComments!([]);
-      await Promise.resolve();
-    });
-    expect(r.result.current.agentComments).toEqual([]);
-  });
-
-  it("worktreePath change resets agentComments to null so stale entries don't survive the transition", async () => {
-    // The reset is what lets the next poll's authoritative list win cleanly;
-    // it also keeps the caller's null-guard symmetric across mount and
-    // worktree switches.
-    const fetcher = vi.fn<(p: string) => Promise<DeliveredComment[]>>(
-      async () => [],
-    );
-    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
-      async (p) =>
-        p === "/wt1"
-          ? [topLevelEntry("tl1", "f.ts", "1-2", "2026-05-06T12:00:00.000Z")]
-          : [],
-    );
-
-    const r = renderHook(
-      ({ worktreePath }: { worktreePath: string }) =>
-        useDeliveredPolling({ worktreePath, fetcher, commentsFetcher }),
-      { initialProps: { worktreePath: "/wt1" } },
-    );
-    await act(() => Promise.resolve());
-    expect(r.result.current.agentComments?.map((c) => c.id)).toEqual(["tl1"]);
-
-    // Synchronous reset on worktree change.
-    r.rerender({ worktreePath: "/wt2" });
-    expect(r.result.current.agentComments).toBeNull();
-
-    // Next poll's result lands and replaces.
-    await act(() => Promise.resolve());
-    expect(r.result.current.agentComments).toEqual([]);
+    expect(r.result.current.agentReplies[0].parentId).toBe("cmt_1");
   });
 
   it("resets state when worktreePath changes", async () => {
     const wt1Delivered = [delivered("cmt_a")];
     const wt2Delivered = [delivered("cmt_b")];
-    const fetcher = vi.fn<(p: string) => Promise<DeliveredComment[]>>(
+    const fetcher = vi.fn<(p: string) => Promise<DeliveredInteraction[]>>(
       async (p) => (p === "/wt1" ? wt1Delivered : wt2Delivered),
     );
-    const commentsFetcher = vi.fn<(p: string) => Promise<AgentComment[]>>(
+    const repliesFetcher = vi.fn<(p: string) => Promise<PolledAgentReply[]>>(
       async () => [],
     );
 
     const r = renderHook(
       ({ worktreePath }: { worktreePath: string }) =>
-        useDeliveredPolling({ worktreePath, fetcher, commentsFetcher }),
+        useDeliveredPolling({ worktreePath, fetcher, repliesFetcher }),
       { initialProps: { worktreePath: "/wt1" } },
     );
     await act(() => Promise.resolve());

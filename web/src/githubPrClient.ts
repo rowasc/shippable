@@ -5,14 +5,14 @@
 // callers can branch on `discriminator` without parsing raw status codes.
 
 import { apiUrl } from "./apiUrl";
-import type { ChangeSet, DetachedReply, Reply } from "./types";
+import type { ChangeSet, DetachedInteraction, Interaction } from "./types";
 
 export interface PrLoadResult {
   changeSet: ChangeSet;
-  /** PR review comments anchored in the current diff, bucketed by reply key. */
-  prReplies: Record<string, Reply[]>;
+  /** PR review comments anchored in the current diff, bucketed by thread key. */
+  prInteractions: Record<string, Interaction[]>;
   /** PR review comments that no longer anchor (outdated, or off the patch view). */
-  prDetached: DetachedReply[];
+  prDetached: DetachedInteraction[];
 }
 
 /** Friendly user-facing messages for non-auth GitHub error discriminators. */
@@ -102,8 +102,8 @@ export async function loadGithubPr(prUrl: string): Promise<PrLoadResult> {
 
   return {
     changeSet: json.changeSet as ChangeSet,
-    prReplies: (json.prReplies ?? {}) as Record<string, Reply[]>,
-    prDetached: (json.prDetached ?? []) as DetachedReply[],
+    prInteractions: (json.prInteractions ?? {}) as Record<string, Interaction[]>,
+    prDetached: (json.prDetached ?? []) as DetachedInteraction[],
   };
 }
 

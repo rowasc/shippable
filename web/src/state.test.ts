@@ -2,26 +2,70 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildCommentStops,
   changesetCoverage,
+  detachedInteractionsToDetachedReplies,
+  detachedRepliesToDetachedInteractions,
   fileCoverage,
   hunkCoverage,
   initialState,
+  interactionsToRepliesForView,
+  mergeInteractionMaps,
   reducer,
+  repliesToInteractions,
   reviewedFilesCount,
+  selectAckedNotes,
+  userReplyToInteraction,
 } from "./state";
+import type { Action } from "./state";
+
+// ── Test-local migration adapters ────────────────────────────────────────
+// state.test.ts pre-dated the unified Interaction store; these helpers
+// keep the assertions readable in the legacy Reply/DetachedReply/Set<string>
+// terms by projecting the new store back at the assertion boundary. They
+// also bridge ADD_REPLY-shape dispatches onto the new ADD_INTERACTION
+// action.
+function viewReplies(s: ReviewState): Record<string, Reply[]> {
+  return interactionsToRepliesForView(s.interactions);
+}
+function viewDetached(s: ReviewState): DetachedReply[] {
+  return detachedInteractionsToDetachedReplies(s.detachedInteractions);
+}
+function ackedSet(s: ReviewState): Set<string> {
+  return selectAckedNotes(s);
+}
+function addReplyAction(
+  s: ReviewState,
+  targetKey: string,
+  reply: Reply,
+): Action {
+  const isFirst = (s.interactions[targetKey]?.length ?? 0) === 0;
+  return {
+    type: "ADD_INTERACTION",
+    targetKey,
+    interaction: userReplyToInteraction(reply, targetKey, isFirst),
+  };
+}
 import { captureAnchorContext } from "./anchor";
 import type {
+  DetachedReplyShape as DetachedReply,
+  ReplyShape as Reply,
+} from "./state";
+import type {
   ChangeSet,
-  DetachedReply,
   DiffFile,
   DiffLine,
   Hunk,
+  Interaction,
   PrConversationItem,
   PrSource,
-  Reply,
   ReviewState,
   WorktreeSource,
 } from "./types";
-import { blockCommentKey, noteKey, userCommentKey } from "./types";
+import {
+  blockCommentKey,
+  lineNoteReplyKey,
+  noteKey,
+  userCommentKey,
+} from "./types";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 // Tiny hand-built ChangeSets keep these tests isolated from the gallery
@@ -98,7 +142,7 @@ describe("initialState", () => {
   it("starts with empty review-tracking sets and zero expand levels", () => {
     expect(s0.reviewedFiles).toEqual(new Set());
     expect(s0.dismissedGuides).toEqual(new Set());
-    expect(s0.ackedNotes).toEqual(new Set());
+    expect(ackedSet(s0)).toEqual(new Set());
     expect(s0.fullExpandedFiles).toEqual(new Set());
     expect(s0.previewedFiles).toEqual(new Set());
     expect(s0.expandLevelAbove).toEqual({});
@@ -248,19 +292,9 @@ describe("MOVE_FILE", () => {
 // reply. Hand-built fixtures keep the assertions readable; the helper itself
 // is also covered directly via buildCommentStops.
 
-function makeAiNoteLine(text: string): DiffLine {
-  return {
-    kind: "context",
-    text,
-    oldNo: 1,
-    newNo: 1,
-    aiNote: { severity: "info", summary: "n" },
-  };
-}
-
 function csWithComments(): {
   cs: ChangeSet;
-  replies: Record<string, Reply[]>;
+  interactions: Record<string, Interaction[]>;
 } {
   // f1#h1 lines: [ctx, AI@1, ctx], f1#h2 lines: [ctx, ctx, ctx]
   // f2#h1 lines: [ctx, ctx]; user comment at f2#h1:0; block at f1#h2:1-2.
@@ -268,7 +302,7 @@ function csWithComments(): {
     ...makeHunk("cs1/f1#h1", 3),
     lines: [
       { kind: "context", text: "a", oldNo: 1, newNo: 1 },
-      makeAiNoteLine("b"),
+      { kind: "context", text: "b", oldNo: 2, newNo: 2 },
       { kind: "context", text: "c", oldNo: 3, newNo: 3 },
     ],
   };
@@ -282,19 +316,37 @@ function csWithComments(): {
     body: "x",
     createdAt: "2026-04-30T00:00:00.000Z",
   });
-  const replies: Record<string, Reply[]> = {
-    [userCommentKey("cs1/f2#h1", 0)]: [dummyReply("r1")],
-    [blockCommentKey("cs1/f1#h2", 1, 2)]: [dummyReply("r2")],
-    // Empty array — should be ignored (no actual comment).
-    [userCommentKey("cs1/f1#h1", 2)]: [],
-  };
-  return { cs, replies };
+  // Seed an AI note on f1#h1 line 1; user/block comments come via replies.
+  const aiNoteKey = lineNoteReplyKey("cs1/f1#h1", 1);
+  const interactions = mergeInteractionMaps(
+    {
+      [aiNoteKey]: [
+        {
+          id: `ai:${aiNoteKey}`,
+          threadKey: aiNoteKey,
+          target: "line",
+          intent: "comment",
+          author: "ai",
+          authorRole: "ai",
+          body: "n",
+          createdAt: "0001-01-01T00:00:00.000Z",
+        },
+      ],
+    },
+    repliesToInteractions({
+      [userCommentKey("cs1/f2#h1", 0)]: [dummyReply("r1")],
+      [blockCommentKey("cs1/f1#h2", 1, 2)]: [dummyReply("r2")],
+      // Empty array — should be ignored (no actual comment).
+      [userCommentKey("cs1/f1#h1", 2)]: [],
+    }),
+  );
+  return { cs, interactions };
 }
 
 describe("buildCommentStops", () => {
   it("orders stops by file → hunk → lineIdx and merges AI + user sources", () => {
-    const { cs, replies } = csWithComments();
-    expect(buildCommentStops(cs, replies)).toEqual([
+    const { cs, interactions } = csWithComments();
+    expect(buildCommentStops(cs, interactions)).toEqual([
       { fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 1 }, // AI note
       { fileId: "cs1/f1", hunkId: "cs1/f1#h2", lineIdx: 1 }, // block start
       { fileId: "cs1/f2", hunkId: "cs1/f2#h1", lineIdx: 0 }, // user comment
@@ -302,8 +354,8 @@ describe("buildCommentStops", () => {
   });
 
   it("ignores reply keys whose array is empty", () => {
-    const { cs, replies } = csWithComments();
-    const stops = buildCommentStops(cs, replies);
+    const { cs, interactions } = csWithComments();
+    const stops = buildCommentStops(cs, interactions);
     // The empty user:cs1/f1#h1:2 must NOT appear.
     expect(stops.some((s) => s.hunkId === "cs1/f1#h1" && s.lineIdx === 2)).toBe(false);
   });
@@ -311,10 +363,10 @@ describe("buildCommentStops", () => {
 
 describe("MOVE_TO_COMMENT", () => {
   it("jumps from initial cursor to the first comment", () => {
-    const { cs, replies } = csWithComments();
+    const { cs, interactions } = csWithComments();
     const seeded: ReviewState = {
       ...initialState([cs]),
-      replies,
+      interactions,
     };
     const s = reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 });
     expect(s.cursor).toEqual({
@@ -326,8 +378,8 @@ describe("MOVE_TO_COMMENT", () => {
   });
 
   it("walks across files in order", () => {
-    const { cs, replies } = csWithComments();
-    const seeded: ReviewState = { ...initialState([cs]), replies };
+    const { cs, interactions } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), interactions };
     const a = reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 });
     const b = reducer(a, { type: "MOVE_TO_COMMENT", delta: 1 });
     const c = reducer(b, { type: "MOVE_TO_COMMENT", delta: 1 });
@@ -338,8 +390,8 @@ describe("MOVE_TO_COMMENT", () => {
   });
 
   it("clamps at the last comment (no further next)", () => {
-    const { cs, replies } = csWithComments();
-    const seeded: ReviewState = { ...initialState([cs]), replies };
+    const { cs, interactions } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), interactions };
     let s = seeded;
     for (let i = 0; i < 5; i++) s = reducer(s, { type: "MOVE_TO_COMMENT", delta: 1 });
     const stuck = reducer(s, { type: "MOVE_TO_COMMENT", delta: 1 });
@@ -347,8 +399,8 @@ describe("MOVE_TO_COMMENT", () => {
   });
 
   it("walks backwards", () => {
-    const { cs, replies } = csWithComments();
-    const seeded: ReviewState = { ...initialState([cs]), replies };
+    const { cs, interactions } = csWithComments();
+    const seeded: ReviewState = { ...initialState([cs]), interactions };
     const last = reducer(
       reducer(reducer(seeded, { type: "MOVE_TO_COMMENT", delta: 1 }), {
         type: "MOVE_TO_COMMENT",
@@ -561,10 +613,9 @@ describe("RELOAD_CHANGESET", () => {
     let s = initialState([cs]);
     const key = `user:${hunkId}:${lineIdx}`;
     const cap = captureAnchorContext(file.hunks[0].lines, lineIdx);
-    s = reducer(s, {
-      type: "ADD_REPLY",
-      targetKey: key,
-      reply: {
+    s = reducer(
+      s,
+      addReplyAction(s, key, {
         id: "r1",
         author: "you",
         body: "yo",
@@ -574,8 +625,8 @@ describe("RELOAD_CHANGESET", () => {
         anchorHash: cap.hash,
         originSha: csId,
         originType: "committed",
-      },
-    });
+      }),
+    );
     return { state: s, key };
   }
 
@@ -598,9 +649,9 @@ describe("RELOAD_CHANGESET", () => {
       prevChangesetId: "cs-old",
       changeset: reloaded,
     });
-    expect(Object.keys(s.replies)).toEqual([`user:f1-new#h1:2`]);
-    expect(s.replies[`user:f1-new#h1:2`]).toHaveLength(1);
-    expect(s.detachedReplies).toEqual([]);
+    expect(Object.keys(viewReplies(s))).toEqual([`user:f1-new#h1:2`]);
+    expect(viewReplies(s)[`user:f1-new#h1:2`]).toHaveLength(1);
+    expect(viewDetached(s)).toEqual([]);
     // Cursor moved to the new changeset (file 0 since the file path matched).
     expect(s.cursor.changesetId).toBe("cs-new");
     expect(s.cursor.fileId).toBe("f1-new");
@@ -624,8 +675,8 @@ describe("RELOAD_CHANGESET", () => {
       prevChangesetId: "cs-old",
       changeset: reloaded,
     });
-    expect(Object.keys(s.replies)).toEqual([`user:f1-new#h1:4`]);
-    expect(s.detachedReplies).toEqual([]);
+    expect(Object.keys(viewReplies(s))).toEqual([`user:f1-new#h1:4`]);
+    expect(viewDetached(s)).toEqual([]);
   });
 
   it("detaches the reply when its anchor is rewritten beyond recognition", () => {
@@ -646,10 +697,10 @@ describe("RELOAD_CHANGESET", () => {
       prevChangesetId: "cs-old",
       changeset: reloaded,
     });
-    expect(s.replies).toEqual({});
-    expect(s.detachedReplies).toHaveLength(1);
-    expect(s.detachedReplies[0].reply.id).toBe("r1");
-    expect(s.detachedReplies[0].threadKey).toBe(`user:f1#h1:2`);
+    expect(viewReplies(s)).toEqual({});
+    expect(viewDetached(s)).toHaveLength(1);
+    expect(viewDetached(s)[0].reply.id).toBe("r1");
+    expect(viewDetached(s)[0].threadKey).toBe(`user:f1#h1:2`);
   });
 
   it("detaches when the file the reply was anchored to no longer exists", () => {
@@ -668,8 +719,8 @@ describe("RELOAD_CHANGESET", () => {
       prevChangesetId: "cs-old",
       changeset: reloaded,
     });
-    expect(s.replies).toEqual({});
-    expect(s.detachedReplies).toHaveLength(1);
+    expect(viewReplies(s)).toEqual({});
+    expect(viewDetached(s)).toHaveLength(1);
   });
 
   it("falls back to file 0 when the cursor's previous file is gone", () => {
@@ -701,6 +752,45 @@ describe("RELOAD_CHANGESET", () => {
     });
     expect(s).toBe(s0);
   });
+
+  // PR-imported replies (external.source === "pr") are not special-cased: they
+  // ride the same anchor pass as locally-authored replies. A future change
+  // that exempted them ("PR threads have GitHub-side identity, skip
+  // anchoring") would silently break this contract.
+  it("re-routes PR-sourced replies through the same anchor pass as local replies", () => {
+    const oldFile = makeReloadFile("f1", "f1.ts", "f1#h1", [
+      "a", "b", "anchor", "c", "d",
+    ]);
+    const oldCs = makeChangeset("cs-old", [oldFile]);
+    const key = `user:f1#h1:2`;
+    const prReply: Reply = {
+      id: "pr-comment:42",
+      author: "external-reviewer",
+      body: "from the PR",
+      createdAt: "2026-05-06T00:00:00.000Z",
+      external: {
+        source: "pr",
+        htmlUrl: "https://github.com/x/y/pull/1#42",
+      },
+    };
+    const seeded = {
+      ...initialState([oldCs]),
+      interactions: repliesToInteractions({ [key]: [prReply] }),
+    };
+    // Same content, fresh hunk id (typical "new fetch of the same commit").
+    const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", [
+      "a", "b", "anchor", "c", "d",
+    ]);
+    const reloaded = makeChangeset("cs-new", [reloadFile]);
+    const s = reducer(seeded, {
+      type: "RELOAD_CHANGESET",
+      prevChangesetId: "cs-old",
+      changeset: reloaded,
+    });
+    expect(Object.keys(viewReplies(s))).toEqual([`user:f1-new#h1:2`]);
+    expect(viewReplies(s)[`user:f1-new#h1:2`]).toEqual([prReply]);
+    expect(viewDetached(s)).toEqual([]);
+  });
 });
 
 // ── DISMISS_GUIDE ──────────────────────────────────────────────────────────
@@ -723,13 +813,13 @@ describe("DISMISS_GUIDE", () => {
 describe("TOGGLE_ACK", () => {
   it("adds the noteKey when not already acked", () => {
     const s = reducer(s0, { type: "TOGGLE_ACK", hunkId: "cs1/f1#h1", lineIdx: 2 });
-    expect(s.ackedNotes.has(noteKey("cs1/f1#h1", 2))).toBe(true);
+    expect(ackedSet(s).has(noteKey("cs1/f1#h1", 2))).toBe(true);
   });
 
   it("removes the noteKey on second toggle", () => {
     const s1 = reducer(s0, { type: "TOGGLE_ACK", hunkId: "cs1/f1#h1", lineIdx: 2 });
     const s2 = reducer(s1, { type: "TOGGLE_ACK", hunkId: "cs1/f1#h1", lineIdx: 2 });
-    expect(s2.ackedNotes.has(noteKey("cs1/f1#h1", 2))).toBe(false);
+    expect(ackedSet(s2).has(noteKey("cs1/f1#h1", 2))).toBe(false);
   });
 });
 
@@ -738,16 +828,16 @@ describe("TOGGLE_ACK", () => {
 describe("ADD_REPLY", () => {
   it("creates a fresh thread for an unseen targetKey", () => {
     const reply = { id: "r1", author: "a", body: "hi", createdAt: "now" };
-    const s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
-    expect(s.replies["k"]).toEqual([reply]);
+    const s = reducer(s0, addReplyAction(s0, "k", reply));
+    expect(viewReplies(s)["k"]).toEqual([reply]);
   });
 
   it("appends to an existing thread", () => {
     const r1 = { id: "r1", author: "a", body: "hi", createdAt: "t1" };
     const r2 = { id: "r2", author: "b", body: "yo", createdAt: "t2" };
-    let s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
-    s = reducer(s, { type: "ADD_REPLY", targetKey: "k", reply: r2 });
-    expect(s.replies["k"]).toEqual([r1, r2]);
+    let s = reducer(s0, addReplyAction(s0, "k", r1));
+    s = reducer(s, addReplyAction(s, "k", r2));
+    expect(viewReplies(s)["k"]).toEqual([r1, r2]);
   });
 
   it("preserves a Reply's enqueuedCommentId on add (defaults to null)", () => {
@@ -761,8 +851,8 @@ describe("ADD_REPLY", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
-    expect(s.replies["k"][0].enqueuedCommentId).toBeNull();
+    const s = reducer(s0, addReplyAction(s0, "k", reply));
+    expect(viewReplies(s)["k"][0].enqueuedCommentId).toBeNull();
   });
 });
 
@@ -777,21 +867,21 @@ describe("PATCH_REPLY_ENQUEUED_ID", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "PATCH_REPLY_ENQUEUED_ID",
+      type: "PATCH_INTERACTION_ENQUEUED_ID",
       targetKey: "k",
-      replyId: "r1",
+      interactionId: "r1",
       enqueuedCommentId: "cmt_42",
     });
-    expect(s2.replies["k"][0].enqueuedCommentId).toBe("cmt_42");
+    expect(viewReplies(s2)["k"][0].enqueuedCommentId).toBe("cmt_42");
   });
 
   it("is a no-op when the targetKey is unknown", () => {
     const s = reducer(s0, {
-      type: "PATCH_REPLY_ENQUEUED_ID",
+      type: "PATCH_INTERACTION_ENQUEUED_ID",
       targetKey: "missing",
-      replyId: "r1",
+      interactionId: "r1",
       enqueuedCommentId: "cmt_42",
     });
     expect(s).toBe(s0);
@@ -805,11 +895,11 @@ describe("PATCH_REPLY_ENQUEUED_ID", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "PATCH_REPLY_ENQUEUED_ID",
+      type: "PATCH_INTERACTION_ENQUEUED_ID",
       targetKey: "k",
-      replyId: "nope",
+      interactionId: "nope",
       enqueuedCommentId: "cmt_42",
     });
     expect(s2).toBe(s1);
@@ -830,16 +920,16 @@ describe("PATCH_REPLY_ENQUEUED_ID", () => {
       createdAt: "t2",
       enqueuedCommentId: null,
     };
-    let s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
-    s = reducer(s, { type: "ADD_REPLY", targetKey: "k", reply: r2 });
+    let s = reducer(s0, addReplyAction(s0, "k", r1));
+    s = reducer(s, addReplyAction(s, "k", r2));
     s = reducer(s, {
-      type: "PATCH_REPLY_ENQUEUED_ID",
+      type: "PATCH_INTERACTION_ENQUEUED_ID",
       targetKey: "k",
-      replyId: "r2",
+      interactionId: "r2",
       enqueuedCommentId: "cmt_99",
     });
-    expect(s.replies["k"][0].enqueuedCommentId).toBeNull();
-    expect(s.replies["k"][1].enqueuedCommentId).toBe("cmt_99");
+    expect(viewReplies(s)["k"][0].enqueuedCommentId).toBeNull();
+    expect(viewReplies(s)["k"][1].enqueuedCommentId).toBe("cmt_99");
   });
 });
 
@@ -854,14 +944,14 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "SET_REPLY_ENQUEUE_ERROR",
+      type: "SET_INTERACTION_ENQUEUE_ERROR",
       targetKey: "k",
-      replyId: "r1",
+      interactionId: "r1",
       error: true,
     });
-    expect(s2.replies["k"][0].enqueueError).toBe(true);
+    expect(viewReplies(s2)["k"][0].enqueueError).toBe(true);
   });
 
   it("clears enqueueError back to false on success", () => {
@@ -873,21 +963,21 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       enqueuedCommentId: null,
       enqueueError: true,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "SET_REPLY_ENQUEUE_ERROR",
+      type: "SET_INTERACTION_ENQUEUE_ERROR",
       targetKey: "k",
-      replyId: "r1",
+      interactionId: "r1",
       error: false,
     });
-    expect(s2.replies["k"][0].enqueueError).toBe(false);
+    expect(viewReplies(s2)["k"][0].enqueueError).toBe(false);
   });
 
   it("is a no-op when the targetKey is unknown", () => {
     const s = reducer(s0, {
-      type: "SET_REPLY_ENQUEUE_ERROR",
+      type: "SET_INTERACTION_ENQUEUE_ERROR",
       targetKey: "missing",
-      replyId: "r1",
+      interactionId: "r1",
       error: true,
     });
     expect(s).toBe(s0);
@@ -901,11 +991,11 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "SET_REPLY_ENQUEUE_ERROR",
+      type: "SET_INTERACTION_ENQUEUE_ERROR",
       targetKey: "k",
-      replyId: "nope",
+      interactionId: "nope",
       error: true,
     });
     expect(s2).toBe(s1);
@@ -922,11 +1012,11 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       createdAt: "now",
       enqueuedCommentId: null,
     };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply });
+    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
-      type: "SET_REPLY_ENQUEUE_ERROR",
+      type: "SET_INTERACTION_ENQUEUE_ERROR",
       targetKey: "k",
-      replyId: "r1",
+      interactionId: "r1",
       error: false,
     });
     expect(s2).toBe(s1);
@@ -937,28 +1027,28 @@ describe("DELETE_REPLY", () => {
   it("removes a reply by id from the thread", () => {
     const r1 = { id: "r1", author: "a", body: "hi", createdAt: "t1" };
     const r2 = { id: "r2", author: "b", body: "yo", createdAt: "t2" };
-    let s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
-    s = reducer(s, { type: "ADD_REPLY", targetKey: "k", reply: r2 });
-    s = reducer(s, { type: "DELETE_REPLY", targetKey: "k", replyId: "r1" });
-    expect(s.replies["k"]).toEqual([r2]);
+    let s = reducer(s0, addReplyAction(s0, "k", r1));
+    s = reducer(s, addReplyAction(s, "k", r2));
+    s = reducer(s, { type: "DELETE_INTERACTION", targetKey: "k", interactionId: "r1" });
+    expect(viewReplies(s)["k"]).toEqual([r2]);
   });
 
   it("drops the targetKey entirely when the last reply is removed", () => {
     const r1 = { id: "r1", author: "a", body: "hi", createdAt: "t1" };
-    let s = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
-    s = reducer(s, { type: "DELETE_REPLY", targetKey: "k", replyId: "r1" });
-    expect(Object.prototype.hasOwnProperty.call(s.replies, "k")).toBe(false);
+    let s = reducer(s0, addReplyAction(s0, "k", r1));
+    s = reducer(s, { type: "DELETE_INTERACTION", targetKey: "k", interactionId: "r1" });
+    expect(Object.prototype.hasOwnProperty.call(viewReplies(s), "k")).toBe(false);
   });
 
   it("returns the same state when the targetKey is unknown", () => {
-    const s = reducer(s0, { type: "DELETE_REPLY", targetKey: "missing", replyId: "x" });
+    const s = reducer(s0, { type: "DELETE_INTERACTION", targetKey: "missing", interactionId: "x" });
     expect(s).toBe(s0);
   });
 
   it("returns the same state when the replyId does not match", () => {
     const r1 = { id: "r1", author: "a", body: "hi", createdAt: "t1" };
-    const s1 = reducer(s0, { type: "ADD_REPLY", targetKey: "k", reply: r1 });
-    const s2 = reducer(s1, { type: "DELETE_REPLY", targetKey: "k", replyId: "nope" });
+    const s1 = reducer(s0, addReplyAction(s0, "k", r1));
+    const s2 = reducer(s1, { type: "DELETE_INTERACTION", targetKey: "k", interactionId: "nope" });
     expect(s2).toBe(s1);
   });
 });
@@ -972,18 +1062,46 @@ describe("MERGE_AGENT_REPLIES", () => {
     enqueuedCommentId: string | null,
     replyId = "r1",
   ): ReviewState {
-    return reducer(state, {
-      type: "ADD_REPLY",
-      targetKey,
-      reply: {
+    return reducer(
+      state,
+      addReplyAction(state, targetKey, {
         id: replyId,
         author: "you",
         body: "x",
         createdAt: "2026-04-30T00:00:00Z",
         enqueuedCommentId,
         agentReplies: [],
-      },
-    });
+      }),
+    );
+  }
+
+  // Builds an Interaction-shaped polled-reply entry from the legacy
+  // (commentId, outcome) inputs the tests author. Maps outcome → intent
+  // (addressed → accept, declined → reject, noted → ack) and fills in the
+  // wire fields the new shape requires.
+  function polled(args: {
+    id: string;
+    commentId: string;
+    body: string;
+    outcome: "addressed" | "declined" | "noted";
+    postedAt: string;
+  }): import("./state").PolledAgentReply {
+    const intent: "ack" | "accept" | "reject" =
+      args.outcome === "addressed"
+        ? "accept"
+        : args.outcome === "declined"
+          ? "reject"
+          : "ack";
+    return {
+      id: args.id,
+      parentId: args.commentId,
+      body: args.body,
+      intent,
+      author: "agent",
+      authorRole: "agent",
+      target: "reply-to-user",
+      postedAt: args.postedAt,
+    };
   }
 
   it("attaches a polled agent reply to the matching reviewer Reply by enqueuedCommentId", () => {
@@ -991,16 +1109,16 @@ describe("MERGE_AGENT_REPLIES", () => {
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "ar1",
           commentId: "cmt_1",
           body: "fixed",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
-    expect(s2.replies["k"][0].agentReplies).toEqual([
+    expect(viewReplies(s2)["k"][0].agentReplies).toEqual([
       {
         id: "ar1",
         body: "fixed",
@@ -1015,23 +1133,23 @@ describe("MERGE_AGENT_REPLIES", () => {
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "b",
           commentId: "cmt_1",
           body: "B",
           outcome: "addressed",
           postedAt: "2026-04-30T00:02:00Z",
-        },
-        {
+        }),
+        polled({
           id: "a",
           commentId: "cmt_1",
           body: "A",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
-    expect(s2.replies["k"][0].agentReplies!.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(viewReplies(s2)["k"][0].agentReplies!.map((r) => r.id)).toEqual(["a", "b"]);
   });
 
   it("updates existing entries in place (matched by id) and appends new ones", () => {
@@ -1039,36 +1157,36 @@ describe("MERGE_AGENT_REPLIES", () => {
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "ar1",
           commentId: "cmt_1",
           body: "first",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
     const s3 = reducer(s2, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         // Same id with updated body should overwrite.
-        {
+        polled({
           id: "ar1",
           commentId: "cmt_1",
           body: "first (edited)",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",
-        },
-        {
+        }),
+        polled({
           id: "ar2",
           commentId: "cmt_1",
           body: "second",
           outcome: "addressed",
           postedAt: "2026-04-30T00:02:00Z",
-        },
+        }),
       ],
     });
-    const replies = s3.replies["k"][0].agentReplies!;
+    const replies = viewReplies(s3)["k"][0].agentReplies!;
     expect(replies).toHaveLength(2);
     expect(replies[0].body).toBe("first (edited)");
     expect(replies[0].outcome).toBe("addressed");
@@ -1080,13 +1198,13 @@ describe("MERGE_AGENT_REPLIES", () => {
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "ar1",
           commentId: "cmt_other",
           body: "orphan",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
     expect(s2).toBe(s1);
@@ -1097,13 +1215,13 @@ describe("MERGE_AGENT_REPLIES", () => {
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "ar1",
           commentId: "cmt_1",
           body: "x",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
     expect(s2).toBe(s1);
@@ -1111,17 +1229,17 @@ describe("MERGE_AGENT_REPLIES", () => {
 
   it("is idempotent — repeated merges of the same data leave state unchanged", () => {
     const s1 = withReply(s0, "k", "cmt_1");
-    const polled = [
-      {
+    const batch = [
+      polled({
         id: "ar1",
         commentId: "cmt_1",
         body: "x",
-        outcome: "addressed" as const,
+        outcome: "addressed",
         postedAt: "2026-04-30T00:01:00Z",
-      },
+      }),
     ];
-    const s2 = reducer(s1, { type: "MERGE_AGENT_REPLIES", polled });
-    const s3 = reducer(s2, { type: "MERGE_AGENT_REPLIES", polled });
+    const s2 = reducer(s1, { type: "MERGE_AGENT_REPLIES", polled: batch });
+    const s3 = reducer(s2, { type: "MERGE_AGENT_REPLIES", polled: batch });
     expect(s3).toBe(s2);
   });
 
@@ -1131,26 +1249,26 @@ describe("MERGE_AGENT_REPLIES", () => {
     const merged = reducer(s, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
-        {
+        polled({
           id: "ar_a",
           commentId: "cmt_1",
           body: "a",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
-        },
-        {
+        }),
+        polled({
           id: "ar_b",
           commentId: "cmt_2",
           body: "b",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",
-        },
+        }),
       ],
     });
-    expect(merged.replies["k1"][0].agentReplies!.map((r) => r.id)).toEqual([
+    expect(viewReplies(merged)["k1"][0].agentReplies!.map((r) => r.id)).toEqual([
       "ar_a",
     ]);
-    expect(merged.replies["k2"][0].agentReplies!.map((r) => r.id)).toEqual([
+    expect(viewReplies(merged)["k2"][0].agentReplies!.map((r) => r.id)).toEqual([
       "ar_b",
     ]);
   });
@@ -1717,13 +1835,13 @@ describe("MERGE_PR_REPLIES", () => {
     const state = initialState([defaultChangeset()]);
     const key = userCommentKey("cs1/f1#h1", 0);
     const next = reducer(state, {
-      type: "MERGE_PR_REPLIES",
+      type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prReplies: { [key]: [makePrReply("pr-comment:1")] },
+      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:1")] }),
       prDetached: [],
     });
-    expect(next.replies[key]).toHaveLength(1);
-    expect(next.replies[key][0].id).toBe("pr-comment:1");
+    expect(viewReplies(next)[key]).toHaveLength(1);
+    expect(viewReplies(next)[key][0].id).toBe("pr-comment:1");
   });
 
   it("preserves user replies on the same key", () => {
@@ -1735,30 +1853,36 @@ describe("MERGE_PR_REPLIES", () => {
       body: "mine",
       createdAt: "2026-05-06T00:00:00.000Z",
     };
-    const state = { ...initialState([cs]), replies: { [key]: [userReply] } };
+    const state = {
+      ...initialState([cs]),
+      interactions: repliesToInteractions({ [key]: [userReply] }),
+    };
     const next = reducer(state, {
-      type: "MERGE_PR_REPLIES",
+      type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prReplies: { [key]: [makePrReply("pr-comment:1")] },
+      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:1")] }),
       prDetached: [],
     });
-    expect(next.replies[key]).toHaveLength(2);
-    expect(next.replies[key].map((r) => r.id)).toEqual(["u1", "pr-comment:1"]);
+    expect(viewReplies(next)[key]).toHaveLength(2);
+    expect(viewReplies(next)[key].map((r) => r.id)).toEqual(["u1", "pr-comment:1"]);
   });
 
   it("removes prior PR-sourced replies before installing new ones (refresh idempotent)", () => {
     const cs = defaultChangeset();
     const key = userCommentKey("cs1/f1#h1", 0);
     const stale = makePrReply("pr-comment:OLD", "stale upstream comment");
-    const state = { ...initialState([cs]), replies: { [key]: [stale] } };
+    const state = {
+      ...initialState([cs]),
+      interactions: repliesToInteractions({ [key]: [stale] }),
+    };
     const next = reducer(state, {
-      type: "MERGE_PR_REPLIES",
+      type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prReplies: { [key]: [makePrReply("pr-comment:NEW")] },
+      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:NEW")] }),
       prDetached: [],
     });
-    expect(next.replies[key]).toHaveLength(1);
-    expect(next.replies[key][0].id).toBe("pr-comment:NEW");
+    expect(viewReplies(next)[key]).toHaveLength(1);
+    expect(viewReplies(next)[key][0].id).toBe("pr-comment:NEW");
   });
 
   it("merges in detached replies and strips prior PR-sourced detached entries", () => {
@@ -1778,7 +1902,10 @@ describe("MERGE_PR_REPLIES", () => {
     };
     const state = {
       ...initialState([cs]),
-      detachedReplies: [stalePrDetached, userDetached],
+      detachedInteractions: detachedRepliesToDetachedInteractions([
+        stalePrDetached,
+        userDetached,
+      ]),
     };
     const newPrDetached: DetachedReply = {
       reply: {
@@ -1791,14 +1918,14 @@ describe("MERGE_PR_REPLIES", () => {
       threadKey: "pr-detached:NEW",
     };
     const next = reducer(state, {
-      type: "MERGE_PR_REPLIES",
+      type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prReplies: {},
-      prDetached: [newPrDetached],
+      prInteractions: {},
+      prDetached: detachedRepliesToDetachedInteractions([newPrDetached]),
     });
     // User detached preserved, stale PR-detached removed, new PR-detached installed.
-    expect(next.detachedReplies).toHaveLength(2);
-    const ids = next.detachedReplies.map((d) => d.reply.id);
+    expect(viewDetached(next)).toHaveLength(2);
+    const ids = viewDetached(next).map((d) => d.reply.id);
     expect(ids).toContain("u-d");
     expect(ids).toContain("pr-comment:NEW");
     expect(ids).not.toContain("pr-comment:STALE");

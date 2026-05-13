@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import "./App.css";
 import { findStub } from "./fixtures";
-import { initialState, reducer } from "./state";
+import { initialState, mergeInteractionMaps, reducer } from "./state";
 import { Welcome } from "./components/Welcome";
 import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
@@ -9,8 +9,8 @@ import { FindBar } from "./components/FindBar";
 import { useTauriMenu } from "./useTauriMenu";
 import type {
   ChangeSet,
-  DetachedReply,
-  Reply,
+  DetachedInteraction,
+  Interaction,
   WorktreeProvenance,
   WorktreeState,
 } from "./types";
@@ -36,7 +36,8 @@ import { fetchDiffCodeGraph } from "./codeGraphClient";
 
 interface BootSeed {
   changesets: ChangeSet[];
-  replies: Record<string, Reply[]>;
+  /** Pre-seeded Interactions for this changeset (stub fixtures or recents). */
+  interactions: Record<string, Interaction[]>;
   /** Whether to overlay the persisted snapshot onto initialState. */
   applyPersisted: boolean;
   /** What put us here — used to upsert into recents on boot. Null = welcome. */
@@ -56,7 +57,7 @@ function resolveBoot(): BootSeed {
     if (stub) {
       return {
         changesets: [stub.changeset],
-        replies: { ...stub.replies },
+        interactions: { ...stub.interactions },
         applyPersisted: false,
         source: { kind: "stub", code: stub.code },
       };
@@ -70,7 +71,7 @@ function resolveBoot(): BootSeed {
     if (recent) {
       return {
         changesets: [recent.changeset],
-        replies: { ...recent.replies },
+        interactions: { ...recent.interactions },
         applyPersisted: true,
         source: recent.source,
       };
@@ -79,14 +80,19 @@ function resolveBoot(): BootSeed {
     if (stub) {
       return {
         changesets: [stub.changeset],
-        replies: { ...stub.replies },
+        interactions: { ...stub.interactions },
         applyPersisted: true,
         source: { kind: "stub", code: stub.code },
       };
     }
   }
 
-  return { changesets: [], replies: {}, applyPersisted: false, source: null };
+  return {
+    changesets: [],
+    interactions: {},
+    applyPersisted: false,
+    source: null,
+  };
 }
 
 export default function App() {
@@ -99,18 +105,24 @@ export default function App() {
       : { state: null, drafts: {} as Record<string, string> },
   );
   const [state, dispatch] = useReducer(reducer, boot, (b) => {
-    const initial = initialState(b.changesets, b.replies);
+    const initial = initialState(b.changesets, b.interactions);
     const persisted = hydrated.state;
     if (!persisted) return initial;
+    // Persisted Interactions land on top of ingest-derived ones (AI /
+    // teammate) so the round-trip ends with user-authored entries appended
+    // to each thread, after the ingest head.
+    const mergedInteractions = mergeInteractionMaps(
+      initial.interactions,
+      persisted.interactions,
+    );
     return {
       ...initial,
       cursor: persisted.cursor,
       readLines: persisted.readLines,
       reviewedFiles: persisted.reviewedFiles,
       dismissedGuides: persisted.dismissedGuides,
-      ackedNotes: persisted.ackedNotes,
-      replies: { ...initial.replies, ...persisted.replies },
-      detachedReplies: persisted.detachedReplies,
+      interactions: mergedInteractions,
+      detachedInteractions: persisted.detachedInteractions,
     };
   });
   const [recents, setRecents] = useState<RecentEntry[]>(() => {
@@ -118,7 +130,7 @@ export default function App() {
     // next welcome shows it at the top. For the welcome boot (no source)
     // just return the persisted list as-is.
     if (boot.source && boot.changesets.length > 0) {
-      return pushRecent(boot.changesets[0], boot.replies, boot.source);
+      return pushRecent(boot.changesets[0], boot.interactions, boot.source);
     }
     return loadRecents();
   });
@@ -138,21 +150,31 @@ export default function App() {
 
   function handleLoadChangeset(
     cs: ChangeSet,
-    replies: Record<string, Reply[]>,
+    interactions: Record<string, Interaction[]>,
     source: RecentSource,
-    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
+    prData?: {
+      prInteractions: Record<string, Interaction[]>;
+      prDetached: DetachedInteraction[];
+    },
   ) {
-    dispatch({ type: "LOAD_CHANGESET", changeset: cs, replies });
+    // Loads coming through this path (paste, URL, PR, worktree) carry no
+    // ingest-derived AI annotations today — `interactions` is whatever
+    // user-authored / stub-seeded state the caller threads in.
+    dispatch({
+      type: "LOAD_CHANGESET",
+      changeset: cs,
+      interactions,
+    });
     if (prData) {
       dispatch({
-        type: "MERGE_PR_REPLIES",
+        type: "MERGE_PR_INTERACTIONS",
         changesetId: cs.id,
-        prReplies: prData.prReplies,
+        prInteractions: prData.prInteractions,
         prDetached: prData.prDetached,
       });
     }
     setCurrentSource(source);
-    setRecents(pushRecent(cs, replies, source));
+    setRecents(pushRecent(cs, interactions, source));
   }
 
   // ── Live reload ───────────────────────────────────────────────────────

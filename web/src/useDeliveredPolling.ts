@@ -18,33 +18,21 @@
 //   - Tests can inject `fetcher` and a fake `setInterval`/clock.
 
 import { useEffect, useRef, useState } from "react";
-import { fetchAgentComments, fetchDelivered } from "./agentContextClient";
+import { fetchAgentReplies, fetchDelivered } from "./agentContextClient";
 import type { PolledAgentReply } from "./state";
-import type { AgentComment, DeliveredComment } from "./types";
+import type { DeliveredInteraction } from "./types";
 
 /** Match the existing AgentContextSection cadence. */
 export const POLL_INTERVAL_MS = 2000;
 
 export interface DeliveredPollingResult {
-  delivered: DeliveredComment[];
+  delivered: DeliveredInteraction[];
   /**
    * Polled agent replies (flat list with `commentId` on each entry). The
    * caller dispatches `MERGE_AGENT_REPLIES` with this on change so the
    * reducer reconciles into the matching reviewer Reply's `agentReplies`.
-   * Derived from the `parent`-shaped entries in the polled `AgentComment[]`.
    */
   agentReplies: PolledAgentReply[];
-  /**
-   * Top-level agent comments (anchor-shaped). The caller dispatches
-   * `MERGE_AGENT_COMMENTS` to fold them into `state.agentComments`.
-   * Derived from the `anchor`-shaped entries in the polled `AgentComment[]`.
-   *
-   * `null` means "haven't polled yet" — distinct from "polled and got an
-   * empty list". The caller MUST skip the dispatch on `null` so an initial
-   * mount doesn't clobber a persisted `state.agentComments` rehydrated from
-   * storage before the first successful poll lands.
-   */
-  agentComments: AgentComment[] | null;
   /** ISO of the last successful fetch; null until the first one lands. */
   lastSuccessfulPollAt: string | null;
   /** True iff the most recent fetch errored. */
@@ -61,66 +49,21 @@ export interface UseDeliveredPollingArgs {
    * Override the delivered-comments fetcher. Defaults to the real
    * `fetchDelivered` from `agentContextClient`.
    */
-  fetcher?: (worktreePath: string) => Promise<DeliveredComment[]>;
+  fetcher?: (worktreePath: string) => Promise<DeliveredInteraction[]>;
   /**
-   * Override the agent-comments fetcher. Defaults to the real
-   * `fetchAgentComments` from `agentContextClient`. Returns the mixed
-   * `AgentComment[]` wire shape; the hook splits by discriminator.
+   * Override the agent-replies fetcher. Defaults to the real
+   * `fetchAgentReplies` from `agentContextClient`.
    */
-  commentsFetcher?: (worktreePath: string) => Promise<AgentComment[]>;
-}
-
-/**
- * Split a polled `AgentComment[]` into (a) reply-shaped entries translated
- * to the flat `PolledAgentReply` wire shape consumed by `mergeAgentReplies`,
- * and (b) anchor-shaped entries kept as-is for `mergeAgentComments`.
- */
-function splitAgentComments(
-  comments: AgentComment[],
-): { replies: PolledAgentReply[]; topLevel: AgentComment[] } {
-  const replies: PolledAgentReply[] = [];
-  const topLevel: AgentComment[] = [];
-  for (const c of comments) {
-    if (c.parent !== undefined) {
-      const polled: PolledAgentReply = {
-        id: c.id,
-        body: c.body,
-        outcome: c.parent.outcome,
-        postedAt: c.postedAt,
-        commentId: c.parent.commentId,
-      };
-      if (c.agentLabel !== undefined) polled.agentLabel = c.agentLabel;
-      replies.push(polled);
-    } else if (c.anchor !== undefined) {
-      topLevel.push(c);
-    } else {
-      // The server type guarantees exactly one of `parent` / `anchor` is
-      // set, so TS narrows `c` to `never` here. A wire entry with neither
-      // means a server bug or a version skew (older web app talking to a
-      // newer server with a third shape); surface it loudly rather than
-      // silently dropping. The cast pulls `id` back into scope for the log.
-      console.warn(
-        "[shippable] polled AgentComment has neither `parent` nor `anchor`; dropping",
-        (c as { id?: unknown }).id,
-      );
-    }
-  }
-  return { replies, topLevel };
+  repliesFetcher?: (worktreePath: string) => Promise<PolledAgentReply[]>;
 }
 
 export function useDeliveredPolling({
   worktreePath,
   fetcher = fetchDelivered,
-  commentsFetcher = fetchAgentComments,
+  repliesFetcher = fetchAgentReplies,
 }: UseDeliveredPollingArgs): DeliveredPollingResult {
-  const [delivered, setDelivered] = useState<DeliveredComment[]>([]);
+  const [delivered, setDelivered] = useState<DeliveredInteraction[]>([]);
   const [agentReplies, setAgentReplies] = useState<PolledAgentReply[]>([]);
-  // `null` until the first successful poll lands. Lets the caller skip the
-  // initial-mount dispatch and avoid clobbering persisted state.agentComments
-  // before any network response arrives.
-  const [agentComments, setAgentComments] = useState<AgentComment[] | null>(
-    null,
-  );
   const [lastSuccessfulPollAt, setLastSuccessfulPollAt] = useState<
     string | null
   >(null);
@@ -137,10 +80,6 @@ export function useDeliveredPolling({
     setLastResetWorktree(worktreePath);
     setDelivered([]);
     setAgentReplies([]);
-    // Back to `null` so the caller skips dispatching until the new
-    // worktree's first poll lands; the dispatched batch (often empty)
-    // then clears any stale comments from the previous worktree.
-    setAgentComments(null);
     setLastSuccessfulPollAt(null);
     setError(false);
   }
@@ -149,11 +88,11 @@ export function useDeliveredPolling({
   // a new fetcher reference is passed (parents commonly do this from a
   // closure).
   const fetcherRef = useRef(fetcher);
-  const commentsFetcherRef = useRef(commentsFetcher);
+  const repliesFetcherRef = useRef(repliesFetcher);
   useEffect(() => {
     fetcherRef.current = fetcher;
-    commentsFetcherRef.current = commentsFetcher;
-  }, [fetcher, commentsFetcher]);
+    repliesFetcherRef.current = repliesFetcher;
+  }, [fetcher, repliesFetcher]);
 
   useEffect(() => {
     if (!worktreePath) return;
@@ -164,11 +103,11 @@ export function useDeliveredPolling({
     const tick = async () => {
       if (cancelled) return;
       // Run both endpoints in parallel but handle outcomes independently:
-      // a failed agent-comments fetch shouldn't wipe a successful delivered
+      // a failed agent-replies fetch shouldn't wipe a successful delivered
       // poll, and vice versa.
-      const [deliveredResult, commentsResult] = await Promise.allSettled([
+      const [deliveredResult, repliesResult] = await Promise.allSettled([
         fetcherRef.current(worktreePath),
-        commentsFetcherRef.current(worktreePath),
+        repliesFetcherRef.current(worktreePath),
       ]);
       if (cancelled) return;
       let anyOk = false;
@@ -176,19 +115,14 @@ export function useDeliveredPolling({
         setDelivered(deliveredResult.value);
         anyOk = true;
       }
-      if (commentsResult.status === "fulfilled") {
-        // Split the polled batch by discriminator: reply-shaped entries
-        // merge under reviewer Replies via mergeAgentReplies; top-level
-        // entries land in state.agentComments via mergeAgentComments.
-        const { replies, topLevel } = splitAgentComments(commentsResult.value);
-        setAgentReplies(replies);
-        setAgentComments(topLevel);
+      if (repliesResult.status === "fulfilled") {
+        setAgentReplies(repliesResult.value);
         anyOk = true;
       }
       if (anyOk) setLastSuccessfulPollAt(new Date().toISOString());
       setError(
         deliveredResult.status === "rejected" ||
-          commentsResult.status === "rejected",
+          repliesResult.status === "rejected",
       );
     };
 
@@ -225,11 +159,5 @@ export function useDeliveredPolling({
     };
   }, [worktreePath]);
 
-  return {
-    delivered,
-    agentReplies,
-    agentComments,
-    lastSuccessfulPollAt,
-    error,
-  };
+  return { delivered, agentReplies, lastSuccessfulPollAt, error };
 }

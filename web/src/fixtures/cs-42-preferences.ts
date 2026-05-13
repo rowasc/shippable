@@ -1,5 +1,6 @@
-import type { ChangeSet, Reply } from "../types";
+import type { ChangeSet, Interaction } from "../types";
 import {
+  hunkSummaryReplyKey,
   lineNoteReplyKey,
   teammateReplyKey,
   userCommentKey,
@@ -114,8 +115,6 @@ export const CS_42: ChangeSet = {
           newCount: 24,
           definesSymbols: ["loadPrefs", "savePrefs"],
           aiReviewed: true,
-          aiSummary:
-            "Straightforward localStorage wrapper. Two worth-a-look items: the try/catch in loadPrefs swallows parse errors silently, and savePrefs has no quota-exceeded handling.",
           expandAbove: [
             // block 1 (nearest): remaining body of saveUser above the hunk
             [{ kind: "context", text: "  u = normalize(u);", oldNo: 19, newNo: 21 }],
@@ -143,45 +142,15 @@ export const CS_42: ChangeSet = {
             { kind: "add", text: "export function loadPrefs(): Preferences | null {", newNo: 25 },
             { kind: "add", text: "  const raw = localStorage.getItem(PREFS_KEY);", newNo: 26 },
             { kind: "add", text: "  if (!raw) return null;", newNo: 27 },
-            {
-              kind: "add",
-              text: "  try {",
-              newNo: 28,
-              aiNote: {
-                severity: "warning",
-                summary: "Silent swallow on parse failure",
-                detail:
-                  "If the stored JSON is corrupt, loadPrefs returns null and the app silently resets to defaults — the user loses their settings with no warning. Consider logging, or clearing the corrupted key so a subsequent load doesn't retry parsing the same garbage.",
-              },
-            },
+            { kind: "add", text: "  try {", newNo: 28 },
             { kind: "add", text: "    return JSON.parse(raw) as Preferences;", newNo: 29 },
-            {
-              kind: "add",
-              text: "  } catch {",
-              newNo: 30,
-              aiNote: {
-                severity: "question",
-                summary: "Cast is unchecked",
-                detail:
-                  "`as Preferences` trusts whatever was in storage. A stale older-schema value will type-check at parse but blow up when a new field is read. If schema changes, consider a validator (zod / manual shape check).",
-              },
-            },
+            { kind: "add", text: "  } catch {", newNo: 30 },
             { kind: "add", text: "    return null;", newNo: 31 },
             { kind: "add", text: "  }", newNo: 32 },
             { kind: "add", text: "}", newNo: 33 },
             { kind: "add", text: "", newNo: 34 },
             { kind: "add", text: "export function savePrefs(p: Preferences): void {", newNo: 35 },
-            {
-              kind: "add",
-              text: "  localStorage.setItem(PREFS_KEY, JSON.stringify(p));",
-              newNo: 36,
-              aiNote: {
-                severity: "warning",
-                summary: "No quota-exceeded handling",
-                detail:
-                  "localStorage.setItem throws DOMException('QuotaExceededError') on some browsers/private modes. This will bubble up through the React handler and likely crash the form. Wrap in try/catch or feature-detect.",
-              },
-            },
+            { kind: "add", text: "  localStorage.setItem(PREFS_KEY, JSON.stringify(p));", newNo: 36 },
             { kind: "add", text: "}", newNo: 37 },
             { kind: "context", text: "", oldNo: 23, newNo: 38 },
           ],
@@ -202,13 +171,6 @@ export const CS_42: ChangeSet = {
           newStart: 1,
           newCount: 36,
           referencesSymbols: ["loadPrefs", "savePrefs"],
-          aiSummary:
-            "Small component, reasonable shape. Two gaps worth flagging: only `theme` is actually rendered (compactMode / notifyOnMention are declared but never surfaced), and `update` writes synchronously on every keystroke.",
-          teammateReview: {
-            user: "dan",
-            verdict: "comment",
-            note: "a11y labels on the toggles look good to me",
-          },
           lines: [
             { kind: "add", text: "import { useEffect, useState } from \"react\";", newNo: 1 },
             { kind: "add", text: "import { loadPrefs, savePrefs } from \"../utils/storage\";", newNo: 2 },
@@ -224,49 +186,19 @@ export const CS_42: ChangeSet = {
             { kind: "add", text: "  const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);", newNo: 12 },
             { kind: "add", text: "", newNo: 13 },
             { kind: "add", text: "  useEffect(() => {", newNo: 14 },
-            {
-              kind: "add",
-              text: "    const stored = loadPrefs();",
-              newNo: 15,
-              aiNote: {
-                severity: "info",
-                summary: "Reads from storage on mount",
-                detail:
-                  "Call site for loadPrefs. If you haven't already, review the definition in src/utils/storage.ts — its parse error handling is the main thing that governs what you get back here.",
-              },
-            },
+            { kind: "add", text: "    const stored = loadPrefs();", newNo: 15 },
             { kind: "add", text: "    if (stored) setPrefs(stored);", newNo: 16 },
             { kind: "add", text: "  }, []);", newNo: 17 },
             { kind: "add", text: "", newNo: 18 },
             { kind: "add", text: "  function update<K extends keyof Preferences>(k: K, v: Preferences[K]) {", newNo: 19 },
             { kind: "add", text: "    const next = { ...prefs, [k]: v };", newNo: 20 },
             { kind: "add", text: "    setPrefs(next);", newNo: 21 },
-            {
-              kind: "add",
-              text: "    savePrefs(next);",
-              newNo: 22,
-              aiNote: {
-                severity: "question",
-                summary: "Synchronous write on every keystroke",
-                detail:
-                  "For the current fields (select + booleans) this is fine — one write per user action. If text inputs are added later, you'll want to debounce. Not blocking for this PR.",
-              },
-            },
+            { kind: "add", text: "    savePrefs(next);", newNo: 22 },
             { kind: "add", text: "  }", newNo: 23 },
             { kind: "add", text: "", newNo: 24 },
             { kind: "add", text: "  return (", newNo: 25 },
             { kind: "add", text: "    <form aria-label=\"Preferences\">", newNo: 26 },
-            {
-              kind: "add",
-              text: "      <label>Theme",
-              newNo: 27,
-              aiNote: {
-                severity: "warning",
-                summary: "Only `theme` is rendered",
-                detail:
-                  "DEFAULTS declares `compactMode` and `notifyOnMention`, but the returned JSX only exposes the theme selector. Either add controls for the other two or trim DEFAULTS to match what's shipped.",
-              },
-            },
+            { kind: "add", text: "      <label>Theme", newNo: 27 },
             { kind: "add", text: "        <select value={prefs.theme} onChange={e => update(\"theme\", e.target.value as Preferences[\"theme\"])}>", newNo: 28 },
             { kind: "add", text: "          <option value=\"system\">System</option>", newNo: 29 },
             { kind: "add", text: "          <option value=\"light\">Light</option>", newNo: 30 },
@@ -312,17 +244,7 @@ export const CS_42: ChangeSet = {
             { kind: "add", text: "  });", newNo: 15 },
             { kind: "add", text: "});", newNo: 16 },
             { kind: "add", text: "", newNo: 17 },
-            {
-              kind: "add",
-              text: "// TODO: add a test for dark-mode toggle",
-              newNo: 18,
-              aiNote: {
-                severity: "question",
-                summary: "Unaddressed TODO in a test file",
-                detail:
-                  "Tracking TODOs in tests tends to rot. If this is acceptable to merge, consider filing an issue with the TODO number instead.",
-              },
-            },
+            { kind: "add", text: "// TODO: add a test for dark-mode toggle", newNo: 18 },
           ],
         },
       ],
@@ -330,38 +252,184 @@ export const CS_42: ChangeSet = {
   ],
 };
 
-export const REPLIES_42: Record<string, Reply[]> = {
-  // thread on the "silent swallow" warning at storage.ts:28
-  [lineNoteReplyKey("cs-42/src/utils/storage.ts#h2", 6)]: [
+const STORAGE_H2 = "cs-42/src/utils/storage.ts#h2";
+const PANEL_H1 = "cs-42/src/components/PreferencesPanel.tsx#h1";
+const TEST_H1 = "cs-42/src/components/__tests__/PreferencesPanel.test.tsx#h1";
+const INGEST_TS = "0001-01-01T00:00:00.000Z";
+
+export const INTERACTIONS_42: Record<string, Interaction[]> = {
+  [hunkSummaryReplyKey(STORAGE_H2)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(STORAGE_H2)}`,
+      threadKey: hunkSummaryReplyKey(STORAGE_H2),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Straightforward localStorage wrapper. Two worth-a-look items: the try/catch in loadPrefs swallows parse errors silently, and savePrefs has no quota-exceeded handling.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(STORAGE_H2, 6)]: [
+    {
+      id: `ai:${lineNoteReplyKey(STORAGE_H2, 6)}`,
+      threadKey: lineNoteReplyKey(STORAGE_H2, 6),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Silent swallow on parse failure\n\nIf the stored JSON is corrupt, loadPrefs returns null and the app silently resets to defaults — the user loses their settings with no warning. Consider logging, or clearing the corrupted key so a subsequent load doesn't retry parsing the same garbage.",
+      createdAt: INGEST_TS,
+    },
     {
       id: "r1",
+      threadKey: lineNoteReplyKey(STORAGE_H2, 6),
+      target: "reply-to-ai-note",
+      intent: "comment",
       author: "dan",
-      body: "Agree. Clearing the key on parse failure is probably safer — a stale v1 blob would otherwise keep re-crashing every mount.",
+      authorRole: "user",
+      body:
+        "Agree. Clearing the key on parse failure is probably safer — a stale v1 blob would otherwise keep re-crashing every mount.",
       createdAt: "2026-04-22T10:14:00Z",
     },
   ],
-  // thread on the teammate note in PreferencesPanel.tsx
-  [teammateReplyKey("cs-42/src/components/PreferencesPanel.tsx#h1")]: [
+  [lineNoteReplyKey(STORAGE_H2, 8)]: [
+    {
+      id: `ai:${lineNoteReplyKey(STORAGE_H2, 8)}`,
+      threadKey: lineNoteReplyKey(STORAGE_H2, 8),
+      target: "line",
+      intent: "question",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Cast is unchecked\n\n`as Preferences` trusts whatever was in storage. A stale older-schema value will type-check at parse but blow up when a new field is read. If schema changes, consider a validator (zod / manual shape check).",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(STORAGE_H2, 14)]: [
+    {
+      id: `ai:${lineNoteReplyKey(STORAGE_H2, 14)}`,
+      threadKey: lineNoteReplyKey(STORAGE_H2, 14),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "No quota-exceeded handling\n\nlocalStorage.setItem throws DOMException('QuotaExceededError') on some browsers/private modes. This will bubble up through the React handler and likely crash the form. Wrap in try/catch or feature-detect.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [hunkSummaryReplyKey(PANEL_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(PANEL_H1)}`,
+      threadKey: hunkSummaryReplyKey(PANEL_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Small component, reasonable shape. Two gaps worth flagging: only `theme` is actually rendered (compactMode / notifyOnMention are declared but never surfaced), and `update` writes synchronously on every keystroke.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [teammateReplyKey(PANEL_H1)]: [
+    {
+      id: `teammate:${teammateReplyKey(PANEL_H1)}`,
+      threadKey: teammateReplyKey(PANEL_H1),
+      target: "block",
+      intent: "comment",
+      author: "dan",
+      authorRole: "teammate",
+      body: "a11y labels on the toggles look good to me",
+      createdAt: INGEST_TS,
+    },
     {
       id: "r2",
+      threadKey: teammateReplyKey(PANEL_H1),
+      target: "reply-to-teammate",
+      intent: "comment",
       author: "romina",
+      authorRole: "user",
       body: "Thanks for checking! Still need to wire the other two fields, noted.",
       createdAt: "2026-04-22T10:30:00Z",
     },
   ],
-  // reviewer-started comment on notifyOnMention default (no AI note here)
-  [userCommentKey("cs-42/src/components/PreferencesPanel.tsx#h1", 7)]: [
+  // Reviewer-started thread on the notifyOnMention default (no AI head).
+  [userCommentKey(PANEL_H1, 7)]: [
     {
       id: "u1",
+      threadKey: userCommentKey(PANEL_H1, 7),
+      target: "line",
+      intent: "comment",
       author: "dan",
+      authorRole: "user",
       body: "Is `true` really the right default here? Some users find mention pings noisy out-of-the-box.",
       createdAt: "2026-04-22T11:05:00Z",
     },
     {
       id: "u2",
+      threadKey: userCommentKey(PANEL_H1, 7),
+      target: "reply-to-user",
+      intent: "comment",
       author: "romina",
+      authorRole: "user",
       body: "Fair — happy to flip it to false. @product said either way is fine.",
       createdAt: "2026-04-22T11:20:00Z",
     },
   ],
+  [lineNoteReplyKey(PANEL_H1, 14)]: [
+    {
+      id: `ai:${lineNoteReplyKey(PANEL_H1, 14)}`,
+      threadKey: lineNoteReplyKey(PANEL_H1, 14),
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Reads from storage on mount\n\nCall site for loadPrefs. If you haven't already, review the definition in src/utils/storage.ts — its parse error handling is the main thing that governs what you get back here.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(PANEL_H1, 21)]: [
+    {
+      id: `ai:${lineNoteReplyKey(PANEL_H1, 21)}`,
+      threadKey: lineNoteReplyKey(PANEL_H1, 21),
+      target: "line",
+      intent: "question",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Synchronous write on every keystroke\n\nFor the current fields (select + booleans) this is fine — one write per user action. If text inputs are added later, you'll want to debounce. Not blocking for this PR.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(PANEL_H1, 26)]: [
+    {
+      id: `ai:${lineNoteReplyKey(PANEL_H1, 26)}`,
+      threadKey: lineNoteReplyKey(PANEL_H1, 26),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Only `theme` is rendered\n\nDEFAULTS declares `compactMode` and `notifyOnMention`, but the returned JSX only exposes the theme selector. Either add controls for the other two or trim DEFAULTS to match what's shipped.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(TEST_H1, 17)]: [
+    {
+      id: `ai:${lineNoteReplyKey(TEST_H1, 17)}`,
+      threadKey: lineNoteReplyKey(TEST_H1, 17),
+      target: "line",
+      intent: "question",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Unaddressed TODO in a test file\n\nTracking TODOs in tests tends to rot. If this is acceptable to merge, consider filing an issue with the TODO number instead.",
+      createdAt: INGEST_TS,
+    },
+  ],
 };
+

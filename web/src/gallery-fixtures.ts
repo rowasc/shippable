@@ -1,8 +1,17 @@
-import type { AiNote, DiffLine, ReviewPlan, ReviewState } from "./types";
-import { blockCommentKey, noteKey, lineNoteReplyKey, teammateReplyKey } from "./types";
-import { CS_42, REPLIES_42 } from "./fixtures/cs-42-preferences";
-import { CS_57 } from "./fixtures/cs-57-session-race";
-import { initialState } from "./state";
+import type { Interaction, ReviewPlan, ReviewState } from "./types";
+import {
+  blockCommentKey,
+  noteKey,
+  lineNoteReplyKey,
+  teammateReplyKey,
+} from "./types";
+import { CS_42, INTERACTIONS_42 } from "./fixtures/cs-42-preferences";
+import { CS_57, INTERACTIONS_57 } from "./fixtures/cs-57-session-race";
+import {
+  ackedNotesToInteractions,
+  initialState,
+  mergeInteractionMaps,
+} from "./state";
 import { planReview } from "./plan";
 
 export interface DiffGalleryFixture {
@@ -53,6 +62,26 @@ function markLines(
   return { ...base, [hunkId]: set };
 }
 
+const INGEST_TS = "0001-01-01T00:00:00.000Z";
+
+function aiInteraction(
+  threadKey: string,
+  intent: "comment" | "question" | "request",
+  summary: string,
+  detail?: string,
+): Interaction {
+  return {
+    id: `ai:${threadKey}`,
+    threadKey,
+    target: "line",
+    intent,
+    author: "ai",
+    authorRole: "ai",
+    body: detail ? `${summary}\n\n${detail}` : summary,
+    createdAt: INGEST_TS,
+  };
+}
+
 // ── 1. empty ───────────────────────────────────────────────────────────────
 // The raw initialState for cs-42, cursor at hunk 1 line 0.
 // Shows a fresh review with no lines marked, no notes acked.
@@ -67,7 +96,7 @@ export const fixtureEmpty: GalleryFixture = {
   state: {
     ...emptyState,
     readLines: {},
-    replies: {},
+    interactions: INTERACTIONS_42,
   },
   fileId: cs42.files[0].id,
   hunkId: cs42.files[0].hunks[0].id,
@@ -102,70 +131,66 @@ export const fixtureMidReview: GalleryFixture = {
       lineIdx: 6,
     },
     readLines: midReadLines,
-    ackedNotes: new Set([noteKey(storageH2.id, 6)]),
-    replies: { ...REPLIES_42 },
+    interactions: ackedNotesToInteractions(
+      new Set([noteKey(storageH2.id, 6)]),
+      INTERACTIONS_42,
+    ),
   },
   fileId: storageFile.id,
   hunkId: storageH2.id,
   cursorLineIdx: 6,
 };
 
-// Extra AI notes layered onto PreferencesPanel.tsx for the ai-saturated fixture.
-// Existing notes in the source fixture live at lineIdx 14, 21, 26 — we don't
-// override those.
-const EXTRA_NOTES_BY_LINE_IDX: Record<number, AiNote> = {
-  4: {
-    severity: "info",
-    summary: "Defaults declared inline",
-    detail:
-      "If SSR ever needs these values, consider lifting DEFAULTS to a config module shared between client and server.",
-  },
-  11: {
-    severity: "warning",
-    summary: "First paint uses DEFAULTS before stored prefs arrive",
-    detail:
-      "The useEffect runs after mount, so there is a brief flash of the default theme before loadPrefs() resolves. For theme specifically this is visible as a light/dark flicker.",
-  },
-  19: {
-    severity: "question",
-    summary: "update recreated every render",
-    detail:
-      "Fine if nothing downstream depends on referential identity. If a memoised child starts passing update through, you'll want useCallback.",
-  },
-  24: {
-    severity: "warning",
-    summary: "Form has no onSubmit handler",
-    detail:
-      "Hitting Enter inside the select triggers a full-page form submission. Either wire onSubmit={e => e.preventDefault()} or drop the <form> element entirely.",
-  },
-  27: {
-    severity: "info",
-    summary: "Controlled <select> trusts stored theme",
-    detail:
-      "If loadPrefs returns an unexpected theme string (e.g. schema drift), the select renders with value that doesn't match any option. Worth validating against the known enum before calling setPrefs.",
-  },
-};
-
-// ── 3. ai-saturated ────────────────────────────────────────────────────────
-// Synthetic variant of cs-42's PreferencesPanel hunk with extra aiNotes layered
-// on, to stress-test how DiffView + Inspector handle a densely-annotated hunk.
-// Gallery-local: does not mutate the shared CS_42 fixture.
-
+// Extra AI Interactions layered onto PreferencesPanel.tsx for the ai-saturated
+// fixture. Existing notes in the source fixture live at lineIdx 14, 21, 26 —
+// we don't override those.
 const prefFile = cs42.files[2]; // src/components/PreferencesPanel.tsx
 const prefH1 = prefFile.hunks[0];
 
-const prefH1SaturatedLines: DiffLine[] = prefH1.lines.map((line, i) => {
-  const extra = EXTRA_NOTES_BY_LINE_IDX[i];
-  return extra ? { ...line, aiNote: extra } : line;
-});
-const prefH1Saturated = { ...prefH1, lines: prefH1SaturatedLines };
-const prefFileSaturated = { ...prefFile, hunks: [prefH1Saturated] };
-const cs42Saturated = {
-  ...cs42,
-  files: [cs42.files[0], cs42.files[1], prefFileSaturated, ...cs42.files.slice(3)],
+const SATURATED_EXTRA_NOTES: Record<number, Interaction> = {
+  4: aiInteraction(
+    lineNoteReplyKey(prefH1.id, 4),
+    "comment",
+    "Defaults declared inline",
+    "If SSR ever needs these values, consider lifting DEFAULTS to a config module shared between client and server.",
+  ),
+  11: aiInteraction(
+    lineNoteReplyKey(prefH1.id, 11),
+    "request",
+    "First paint uses DEFAULTS before stored prefs arrive",
+    "The useEffect runs after mount, so there is a brief flash of the default theme before loadPrefs() resolves. For theme specifically this is visible as a light/dark flicker.",
+  ),
+  19: aiInteraction(
+    lineNoteReplyKey(prefH1.id, 19),
+    "question",
+    "update recreated every render",
+    "Fine if nothing downstream depends on referential identity. If a memoised child starts passing update through, you'll want useCallback.",
+  ),
+  24: aiInteraction(
+    lineNoteReplyKey(prefH1.id, 24),
+    "request",
+    "Form has no onSubmit handler",
+    "Hitting Enter inside the select triggers a full-page form submission. Either wire onSubmit={e => e.preventDefault()} or drop the <form> element entirely.",
+  ),
+  27: aiInteraction(
+    lineNoteReplyKey(prefH1.id, 27),
+    "comment",
+    "Controlled <select> trusts stored theme",
+    "If loadPrefs returns an unexpected theme string (e.g. schema drift), the select renders with value that doesn't match any option. Worth validating against the known enum before calling setPrefs.",
+  ),
 };
 
-const saturatedBase = initialState([cs42Saturated]);
+// ── 3. ai-saturated ────────────────────────────────────────────────────────
+// Synthetic variant of cs-42's PreferencesPanel hunk with extra AI Interactions
+// layered on, to stress-test how DiffView + Inspector handle a densely-annotated
+// hunk. Gallery-local: does not mutate the shared CS_42 fixture.
+
+const saturatedExtrasMap: Record<string, Interaction[]> = {};
+for (const ix of Object.values(SATURATED_EXTRA_NOTES)) {
+  saturatedExtrasMap[ix.threadKey] = [ix];
+}
+
+const saturatedBase = initialState([cs42]);
 
 export const fixtureAiSaturated: GalleryFixture = {
   kind: "diff",
@@ -175,37 +200,46 @@ export const fixtureAiSaturated: GalleryFixture = {
   state: {
     ...saturatedBase,
     cursor: {
-      changesetId: cs42Saturated.id,
-      fileId: prefFileSaturated.id,
-      hunkId: prefH1Saturated.id,
+      changesetId: cs42.id,
+      fileId: prefFile.id,
+      hunkId: prefH1.id,
       lineIdx: 26,
     },
-    readLines: markLines({}, prefH1Saturated.id, [0, 1, 2, 3, 10, 11, 12, 13, 14]),
-    ackedNotes: new Set([
-      noteKey(prefH1Saturated.id, 4), // info — acked
-      noteKey(prefH1Saturated.id, 14), // info — acked
-      noteKey(prefH1Saturated.id, 21), // question — acked
-    ]),
-    replies: {
-      [lineNoteReplyKey(prefH1Saturated.id, 26)]: [
+    readLines: markLines({}, prefH1.id, [0, 1, 2, 3, 10, 11, 12, 13, 14]),
+    interactions: ackedNotesToInteractions(
+      new Set([
+        noteKey(prefH1.id, 4), // info — acked
+        noteKey(prefH1.id, 14), // info — acked
+        noteKey(prefH1.id, 21), // question — acked
+      ]),
+      mergeInteractionMaps(
+        mergeInteractionMaps(INTERACTIONS_42, saturatedExtrasMap),
         {
-          id: "g-r1",
-          author: "romina",
-          body:
-            "Fix will probably look like this once I validate the payload:\n\n```ts\nconst next = sanitizePrefs(loadPrefs());\nsetPrefs(next);\n```",
-          createdAt: "2026-04-22T12:00:00Z",
+          [lineNoteReplyKey(prefH1.id, 26)]: [
+            {
+              id: "g-r1",
+              threadKey: lineNoteReplyKey(prefH1.id, 26),
+              target: "reply-to-ai-note",
+              intent: "comment",
+              author: "romina",
+              authorRole: "user",
+              body:
+                "Fix will probably look like this once I validate the payload:\n\n```ts\nconst next = sanitizePrefs(loadPrefs());\nsetPrefs(next);\n```",
+              createdAt: "2026-04-22T12:00:00Z",
+            },
+          ],
         },
-      ],
-    },
+      ),
+    ),
   },
-  fileId: prefFileSaturated.id,
-  hunkId: prefH1Saturated.id,
+  fileId: prefFile.id,
+  hunkId: prefH1.id,
   cursorLineIdx: 26,
 };
 
 // ── 4. teammate-endorsed ───────────────────────────────────────────────────
 // cs-57 auth middleware hunk — has a teammate "approve" badge from @mina plus
-// an aiNote call-site annotation. Shows teammate badge + AI badge together.
+// an AI call-site note. Shows teammate badge + AI badge together.
 //
 // Note: the fixture data has two hunks with teammateReview on cs-57. We pick
 // auth.ts#h2 (verdict: "approve") for the most visually interesting state.
@@ -230,16 +264,20 @@ export const fixtureTeammateEndorsed: GalleryFixture = {
       lineIdx: 1,
     },
     readLines: markLines({}, authH2.id, [0, 1, 2, 3]),
-    replies: {
+    interactions: mergeInteractionMaps(INTERACTIONS_57, {
       [teammateReplyKey(authH2.id)]: [
         {
           id: "te-r1",
+          threadKey: teammateReplyKey(authH2.id),
+          target: "reply-to-teammate",
+          intent: "comment",
           author: "dan",
+          authorRole: "user",
           body: "Agreed — SLO gives us headroom here.",
           createdAt: "2026-04-22T10:00:00Z",
         },
       ],
-    },
+    }),
   },
   fileId: authFile.id,
   hunkId: authH2.id,
@@ -266,16 +304,20 @@ export const fixtureBlockSelection: ReviewState = {
     lineIdx: BLOCK_HI,
   },
   selection: { hunkId: blockHunkId, anchor: BLOCK_LO, head: BLOCK_HI },
-  replies: {
+  interactions: mergeInteractionMaps(INTERACTIONS_42, {
     [blockKey]: [
       {
         id: "b-r1",
+        threadKey: blockKey,
+        target: "block",
+        intent: "comment",
         author: "dan",
+        authorRole: "user",
         body: "The whole try/catch would be cleaner as a single parse-and-validate helper.",
         createdAt: "2026-04-23T10:00:00Z",
       },
     ],
-  },
+  }),
 };
 
 export const fixtureBlockSelectionGallery: GalleryFixture = {
@@ -321,7 +363,7 @@ export const fixtureFileReviewed: GalleryFixture = {
     },
     readLines: reviewedAllReadLines,
     reviewedFiles: new Set([storageFile.id]),
-    replies: { ...REPLIES_42 },
+    interactions: INTERACTIONS_42,
   },
   fileId: storageFile.id,
   hunkId: storageH1.id,

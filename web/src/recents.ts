@@ -11,7 +11,7 @@
  * a nice-to-have, never load-bearing.
  */
 
-import type { ChangeSet, Reply } from "./types";
+import type { ChangeSet, Interaction } from "./types";
 
 const STORAGE_KEY = "shippable:recents:v1";
 const MAX_RECENTS = 5;
@@ -32,7 +32,7 @@ export interface RecentEntry {
   addedAt: number;
   source: RecentSource;
   changeset: ChangeSet;
-  replies: Record<string, Reply[]>;
+  interactions: Record<string, Interaction[]>;
 }
 
 interface PersistedRecents {
@@ -60,7 +60,7 @@ export function loadRecents(): RecentEntry[] {
 
 export function pushRecent(
   changeset: ChangeSet,
-  replies: Record<string, Reply[]>,
+  interactions: Record<string, Interaction[]>,
   source: RecentSource,
 ): RecentEntry[] {
   const existing = loadRecents().filter((r) => r.id !== changeset.id);
@@ -70,7 +70,7 @@ export function pushRecent(
     addedAt: Date.now(),
     source,
     changeset,
-    replies,
+    interactions,
   };
   const next = [entry, ...existing].slice(0, MAX_RECENTS);
   save(next);

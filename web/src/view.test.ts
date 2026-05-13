@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildSidebarViewModel } from "./view";
-import type { Reply } from "./types";
+import type { Interaction } from "./types";
 import {
   blockCommentKey,
   hunkSummaryReplyKey,
@@ -9,8 +9,17 @@ import {
   userCommentKey,
 } from "./types";
 
-function reply(id: string): Reply {
-  return { id, author: "me", body: "x", createdAt: "2026-05-11T00:00:00Z" };
+function reply(id: string): Interaction {
+  return {
+    id,
+    threadKey: "user:cs1/web/src/state.ts#h1:0",
+    target: "line",
+    intent: "comment",
+    author: "me",
+    authorRole: "user",
+    body: "x",
+    createdAt: "2026-05-11T00:00:00Z",
+  };
 }
 
 // Two files: one with a "normal" csId, one with a PR csId that contains
@@ -34,15 +43,15 @@ const files = [
 ];
 
 function commentCountByFileId(
-  replies: Record<string, Reply[]>,
+  interactions: Record<string, Interaction[]>,
 ): Map<string, number> {
   const vm = buildSidebarViewModel({
     files,
     currentFileId: "f-normal",
     readLines: {},
     reviewedFiles: new Set(),
-    replies,
-    detachedReplies: [],
+    interactions,
+    detachedInteractions: [],
   });
   return new Map(vm.files.map((f) => [f.fileId, f.commentCount]));
 }

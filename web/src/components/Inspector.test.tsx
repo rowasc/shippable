@@ -326,7 +326,7 @@ describe("Inspector — PR pill", () => {
     };
     (mockLoad as ReturnType<typeof vi.fn>).mockResolvedValue({
       changeSet: fakePrCs,
-      prReplies: {},
+      prInteractions: {},
       prDetached: [],
     });
 

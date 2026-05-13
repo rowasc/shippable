@@ -95,7 +95,7 @@ describe("POST /api/agent/enqueue", () => {
   it("rejects when worktreePath is missing", async () => {
     const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       commitSha: "abc",
-      comment: { kind: "block", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
     });
     expect(r.status).toBe(400);
   });
@@ -104,7 +104,7 @@ describe("POST /api/agent/enqueue", () => {
     const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath: "/tmp/this-does-not-exist-xyz-123",
       commitSha: "abc",
-      comment: { kind: "block", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
     });
     expect(r.status).toBe(400);
   });
@@ -113,8 +113,11 @@ describe("POST /api/agent/enqueue", () => {
     const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc123",
-      comment: {
-        kind: "block",
+      interaction: {
+        target: "block",
+        intent: "comment",
+        author: "you",
+        authorRole: "user",
         file: "src/foo.ts",
         lines: "10-12",
         body: "hello",
@@ -125,135 +128,22 @@ describe("POST /api/agent/enqueue", () => {
     expect(r.body.id.length).toBeGreaterThan(0);
   });
 
-  it("rejects when comment.kind is missing", async () => {
+  it("rejects when interaction.target is missing", async () => {
     const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { body: "x" },
+      interaction: { body: "x" },
     });
     expect(r.status).toBe(400);
   });
 
-  it("rejects when comment.kind is an unrecognised string", async () => {
+  it("rejects when interaction.target is an unrecognised string", async () => {
     const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "not-a-real-kind", body: "x" },
+      interaction: { target: "not-a-real-target", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
     });
     expect(r.status).toBe(400);
-  });
-
-  it("accepts kind 'reply-to-agent-comment' and persists parentAgentCommentId", async () => {
-    // First, post a top-level agent comment to mint an id we can reference.
-    const ac = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      anchor: { file: "src/foo.ts", lines: "42-58" },
-      body: "I notice this block lacks tests",
-    });
-    const agentCommentId = ac.body.id as string;
-
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc123",
-      comment: {
-        kind: "reply-to-agent-comment",
-        file: "src/foo.ts",
-        lines: "42-58",
-        body: "good catch, will add",
-        parentAgentCommentId: agentCommentId,
-      },
-    });
-    expect(enq.status).toBe(200);
-    expect(typeof enq.body.id).toBe("string");
-
-    // Pull and inspect the envelope to confirm the field round-tripped: the
-    // pulled comment carries parent-id and the parent body is inlined.
-    const pulled = await postJson(`${baseUrl}/api/agent/pull`, {
-      worktreePath,
-    });
-    expect(pulled.body.payload).toContain('kind="reply-to-agent-comment"');
-    expect(pulled.body.payload).toContain(`parent-id="${agentCommentId}"`);
-    expect(pulled.body.payload).toContain("I notice this block lacks tests");
-  });
-
-  it("rejects 'reply-to-agent-comment' without parentAgentCommentId", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      comment: {
-        kind: "reply-to-agent-comment",
-        file: "src/foo.ts",
-        lines: "1",
-        body: "x",
-      },
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/parentAgentCommentId/);
-  });
-
-  it("rejects 'reply-to-agent-comment' with an unknown parentAgentCommentId", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      comment: {
-        kind: "reply-to-agent-comment",
-        file: "src/foo.ts",
-        lines: "1",
-        body: "x",
-        parentAgentCommentId: "no-such-agent-comment",
-      },
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/is not an agent comment/);
-  });
-
-  it("rejects 'reply-to-agent-comment' whose parentAgentCommentId points at a reply-shaped agent entry", async () => {
-    // The agent first posts a reply (parent shape) under some delivered
-    // reviewer comment, then a reviewer somehow tries to enqueue a
-    // reply-to-agent-comment pointing at that reply's id. Only top-level
-    // (anchor-shaped) entries can legitimately parent a reviewer reply.
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "deadbeef",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
-    });
-    const realCommentId = enq.body.id as string;
-    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
-    const replyShaped = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      parent: { commentId: realCommentId, outcome: "addressed" },
-      body: "fixed",
-    });
-    const replyShapedId = replyShaped.body.id as string;
-
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      comment: {
-        kind: "reply-to-agent-comment",
-        file: "a.ts",
-        lines: "1",
-        body: "x",
-        parentAgentCommentId: replyShapedId,
-      },
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/is not an agent comment/);
-  });
-
-  it("rejects malformed comment.lines on enqueue", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      comment: {
-        kind: "block",
-        file: "a.ts",
-        lines: "abc",
-        body: "x",
-      },
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/lines/);
   });
 });
 
@@ -262,8 +152,11 @@ describe("POST /api/agent/pull", () => {
     await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "deadbeef",
-      comment: {
-        kind: "block",
+      interaction: {
+        target: "block",
+        intent: "comment",
+        author: "you",
+        authorRole: "user",
         file: "src/foo.ts",
         lines: "10",
         body: "hello",
@@ -284,7 +177,7 @@ describe("POST /api/agent/pull", () => {
     await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
     });
     const [r1, r2] = await Promise.all([
       postJson(`${baseUrl}/api/agent/pull`, { worktreePath }),
@@ -308,13 +201,13 @@ describe("GET /api/agent/delivered", () => {
     await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "first" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "first" },
     });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
     await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "second" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "second" },
     });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
@@ -336,7 +229,7 @@ describe("GET /api/agent/delivered", () => {
       const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
         worktreePath: spacedPath,
         commitSha: "abc",
-        comment: { kind: "block", file: "a.ts", lines: "1", body: "spaced" },
+        interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "spaced" },
       });
       expect(enq.status).toBe(200);
       await postJson(`${baseUrl}/api/agent/pull`, { worktreePath: spacedPath });
@@ -401,16 +294,17 @@ describe("GET /api/worktrees/mcp-status (slice 5)", () => {
 describe("request body size cap", () => {
   it("rejects an oversized body with HTTP 413 and a useful error", async () => {
     // ~2 MiB of JSON-safe filler. Any endpoint that consumes a body will
-    // trip the cap; pick the comments POST since it's the most recently
-    // touched one.
+    // trip the cap; pick the replies POST since it's the most recently
+    // added one and the security review flagged it specifically.
     const huge = "x".repeat(2 * 1024 * 1024);
-    const res = await fetch(`${baseUrl}/api/agent/comments`, {
+    const res = await fetch(`${baseUrl}/api/agent/replies`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         worktreePath,
-        anchor: { file: "a.ts", lines: "1" },
+        parentId: "anything",
         body: huge,
+        intent: "ack",
       }),
     });
     expect(res.status).toBe(413);
@@ -419,9 +313,9 @@ describe("request body size cap", () => {
   });
 });
 
-describe("POST /api/agent/comments — reply shape", () => {
+describe("POST /api/agent/replies", () => {
   it("rejects an invalid JSON body", async () => {
-    const res = await fetch(`${baseUrl}/api/agent/comments`, {
+    const res = await fetch(`${baseUrl}/api/agent/replies`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "not json",
@@ -430,262 +324,169 @@ describe("POST /api/agent/comments — reply shape", () => {
   });
 
   it("rejects when worktreePath is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      parent: { commentId: "c1", outcome: "addressed" },
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
+      parentId: "c1",
       body: "x",
+      intent: "accept",
     });
     expect(r.status).toBe(400);
   });
 
   it("rejects when worktreePath is not a git dir", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath: "/tmp/this-does-not-exist-xyz-456",
-      parent: { commentId: "c1", outcome: "addressed" },
+      parentId: "c1",
       body: "x",
+      intent: "accept",
     });
     expect(r.status).toBe(400);
   });
 
-  it("rejects an invalid outcome", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+  it("rejects an invalid intent", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: "c1", outcome: "made-up" },
+      parentId: "c1",
       body: "x",
+      intent: "made-up",
     });
     expect(r.status).toBe(400);
   });
 
   it("rejects an empty body", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: "c1", outcome: "addressed" },
+      parentId: "c1",
       body: "",
+      intent: "accept",
     });
     expect(r.status).toBe(400);
   });
 
-  it("rejects an unknown commentId (not in delivered set for this worktree)", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+  it("rejects an unknown parentId (not in delivered set for this worktree)", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: "no-such-id", outcome: "noted" },
+      parentId: "no-such-id",
       body: "x",
+      intent: "ack",
     });
     expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/not a delivered comment/);
+    expect(String(r.body.error)).toMatch(/not a delivered interaction/);
   });
 
   it("returns { id } on success and persists via GET", async () => {
-    // Enqueue + pull to mint a real delivered commentId — the comments
-    // endpoint validates that parent.commentId belongs to the worktree's
+    // Enqueue + pull to mint a real delivered parentId — the post-reply
+    // endpoint validates that parentId belongs to the worktree's
     // delivered set (defensive per spec § Data Flow).
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "deadbeef",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
     });
     const realCommentId = enq.body.id as string;
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
+    const r = await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: realCommentId, outcome: "addressed" },
+      parentId: realCommentId,
       body: "fixed it",
+      intent: "accept",
     });
     expect(r.status).toBe(200);
     expect(typeof r.body.id).toBe("string");
     expect(r.body.id.length).toBeGreaterThan(0);
 
     const list = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
     );
     expect(list.status).toBe(200);
-    expect(list.body.comments).toHaveLength(1);
-    expect(list.body.comments[0].id).toBe(r.body.id);
-    expect(list.body.comments[0].parent.outcome).toBe("addressed");
-    expect(list.body.comments[0].parent.commentId).toBe(realCommentId);
-    expect(list.body.comments[0].body).toBe("fixed it");
+    expect(list.body.replies).toHaveLength(1);
+    expect(list.body.replies[0].id).toBe(r.body.id);
+    expect(list.body.replies[0].intent).toBe("accept");
+    expect(list.body.replies[0].parentId).toBe(realCommentId);
+    expect(list.body.replies[0].body).toBe("fixed it");
   });
 
-  it("appends multiple replies to the same commentId", async () => {
+  it("appends multiple replies to the same parentId", async () => {
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "deadbeef",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
     });
     const realCommentId = enq.body.id as string;
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
-    await postJson(`${baseUrl}/api/agent/comments`, {
+    await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: realCommentId, outcome: "noted" },
+      parentId: realCommentId,
       body: "first",
+      intent: "ack",
     });
-    await postJson(`${baseUrl}/api/agent/comments`, {
+    await postJson(`${baseUrl}/api/agent/replies`, {
       worktreePath,
-      parent: { commentId: realCommentId, outcome: "addressed" },
+      parentId: realCommentId,
       body: "second",
+      intent: "accept",
     });
     const list = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
     );
-    expect(list.body.comments).toHaveLength(2);
-    expect(list.body.comments.map((c: { body: string }) => c.body)).toEqual([
+    expect(list.body.replies).toHaveLength(2);
+    expect(list.body.replies.map((r: { body: string }) => r.body)).toEqual([
       "first",
       "second",
     ]);
   });
 
-  it("caps the per-worktree agent-comment list at AGENT_COMMENT_HISTORY_CAP", async () => {
+  it("caps the per-worktree reply list at REPLY_HISTORY_CAP", async () => {
     // Mirror the delivered-history-cap regression test: post past the cap
     // and confirm the oldest entries are dropped.
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "deadbeef",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "hi" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
     });
     const realCommentId = enq.body.id as string;
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
     // Cap is 200; post 205 to spill 5.
     for (let i = 0; i < 205; i++) {
-      await postJson(`${baseUrl}/api/agent/comments`, {
+      await postJson(`${baseUrl}/api/agent/replies`, {
         worktreePath,
-        parent: { commentId: realCommentId, outcome: "noted" },
+        parentId: realCommentId,
         body: `reply-${i}`,
+        intent: "ack",
       });
     }
     const list = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
     );
-    expect(list.body.comments).toHaveLength(200);
+    expect(list.body.replies).toHaveLength(200);
     // Oldest retained should be reply-5; reply-0..4 dropped. Newest is
     // reply-204.
-    expect(list.body.comments[0].body).toBe("reply-5");
-    expect(list.body.comments[199].body).toBe("reply-204");
+    expect(list.body.replies[0].body).toBe("reply-5");
+    expect(list.body.replies[199].body).toBe("reply-204");
   });
 });
 
-describe("POST /api/agent/comments — top-level (anchor) shape", () => {
-  it("returns { id } on success and persists via GET", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      anchor: { file: "src/foo.ts", lines: "42-58" },
-      body: "I notice this block lacks tests",
-    });
-    expect(r.status).toBe(200);
-    expect(typeof r.body.id).toBe("string");
-
-    const list = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
-    );
-    expect(list.status).toBe(200);
-    expect(list.body.comments).toHaveLength(1);
-    expect(list.body.comments[0].anchor.file).toBe("src/foo.ts");
-    expect(list.body.comments[0].anchor.lines).toBe("42-58");
-    expect(list.body.comments[0].parent).toBeUndefined();
-  });
-
-  it("rejects when anchor.file is missing or empty", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      anchor: { file: "", lines: "1" },
-      body: "x",
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("rejects when anchor.lines is missing or empty (file-level disallowed in v0)", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      anchor: { file: "src/foo.ts" },
-      body: "x",
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/anchor\.lines/);
-  });
-
-  it("rejects malformed anchor.lines (not a single number or simple range)", async () => {
-    const cases = ["abc", "1,2", "10..20", "10-", "-10", "10 to 20", "10\n11"];
-    for (const lines of cases) {
-      const r = await postJson(`${baseUrl}/api/agent/comments`, {
-        worktreePath,
-        anchor: { file: "src/foo.ts", lines },
-        body: "x",
-      });
-      expect(r.status).toBe(400);
-      expect(String(r.body.error)).toMatch(/lines/);
-    }
-  });
-
-  it("rejects agentLabel longer than 64 chars", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      anchor: { file: "src/foo.ts", lines: "1" },
-      body: "x",
-      agentLabel: "x".repeat(65),
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/agentLabel/);
-  });
-});
-
-describe("POST /api/agent/comments — shape discrimination", () => {
-  it("rejects when both parent and anchor are set", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      parent: { commentId: "c1", outcome: "noted" },
-      anchor: { file: "src/foo.ts", lines: "1" },
-      body: "x",
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/exactly one of/);
-  });
-
-  it("rejects when neither parent nor anchor is set", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/comments`, {
-      worktreePath,
-      body: "x",
-    });
-    expect(r.status).toBe(400);
-    expect(String(r.body.error)).toMatch(/exactly one of/);
-  });
-});
-
-describe("legacy /api/agent/replies routes are gone", () => {
-  it("returns 404 for POST /api/agent/replies", async () => {
-    const res = await fetch(`${baseUrl}/api/agent/replies`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    expect(res.status).toBe(404);
-  });
-
-  it("returns 404 for GET /api/agent/replies", async () => {
-    const res = await fetch(`${baseUrl}/api/agent/replies`);
-    expect(res.status).toBe(404);
-  });
-});
-
-describe("GET /api/agent/comments", () => {
+describe("GET /api/agent/replies", () => {
   it("rejects requests without ?worktreePath=", async () => {
-    const r = await getJson(`${baseUrl}/api/agent/comments`);
+    const r = await getJson(`${baseUrl}/api/agent/replies`);
     expect(r.status).toBe(400);
   });
 
   it("rejects when worktreePath is not a git dir", async () => {
     const r = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent("/tmp/nope-xyz")}`,
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent("/tmp/nope-xyz")}`,
     );
     expect(r.status).toBe(400);
   });
 
-  it("returns { comments: [] } for a worktree with none", async () => {
+  it("returns { replies: [] } for a worktree with none", async () => {
     const r = await getJson(
-      `${baseUrl}/api/agent/comments?worktreePath=${encodeURIComponent(worktreePath)}`,
+      `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
     );
     expect(r.status).toBe(200);
-    expect(r.body.comments).toEqual([]);
+    expect(r.body.replies).toEqual([]);
   });
 });
 
@@ -694,7 +495,7 @@ describe("POST /api/agent/unenqueue", () => {
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
     });
     const id = enq.body.id;
     const un = await postJson(`${baseUrl}/api/agent/unenqueue`, {
@@ -711,7 +512,7 @@ describe("POST /api/agent/unenqueue", () => {
     const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      comment: { kind: "block", file: "a.ts", lines: "1", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
     });
     const id = enq.body.id;
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
@@ -1254,7 +1055,7 @@ describe("POST /api/github/pr/load", () => {
     expect(r.body.changeSet.prSource.state).toBe("open");
     expect(r.body.changeSet.files).toHaveLength(1);
     expect(r.body.changeSet.prConversation).toEqual([]);
-    expect(r.body.prReplies).toEqual({});
+    expect(r.body.prInteractions).toEqual({});
     expect(r.body.prDetached).toEqual([]);
   });
 

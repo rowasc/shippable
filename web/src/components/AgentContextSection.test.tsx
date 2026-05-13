@@ -5,21 +5,23 @@
 // - failure-mode banner (slice 4)
 // - MCP install affordance + dismiss flag (slice 5)
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/react";
 import { AgentContextSection } from "./AgentContextSection";
-import type { AgentComment, DeliveredComment, Reply } from "../types";
-import { agentCommentReplyKey } from "../types";
+import type { DeliveredInteraction } from "../types";
 
 const empty = new Map<string, never>();
 const noop = () => {};
 
 const MCP_DISMISS_KEY = "shippable.mcpInstallDismissed";
 
-function delivered(over: Partial<DeliveredComment> = {}): DeliveredComment {
+function delivered(over: Partial<DeliveredInteraction> = {}): DeliveredInteraction {
   return {
     id: "cmt_1",
-    kind: "line",
+    target: "line",
+    intent: "comment",
+    author: "you",
+    authorRole: "user",
     file: "server/src/index.ts",
     lines: "118",
     body: "the body of the comment",
@@ -32,16 +34,10 @@ function delivered(over: Partial<DeliveredComment> = {}): DeliveredComment {
 }
 
 interface RenderOpts {
-  delivered?: DeliveredComment[];
+  delivered?: DeliveredInteraction[];
   deliveredError?: boolean;
   lastSuccessfulPollAt?: string | null;
   mcpStatus?: { installed: boolean; installCommand: string } | null;
-  agentComments?: AgentComment[];
-  replies?: Record<string, Reply[]>;
-  draftingKey?: string | null;
-  draftFor?: (key: string) => string;
-  onStartDraft?: (key: string) => void;
-  onSubmitReply?: (key: string, body: string) => void;
 }
 
 const DEFAULT_INSTALL_LINE =
@@ -67,17 +63,6 @@ function renderPanel(opts: RenderOpts = {}) {
       deliveredError={opts.deliveredError ?? false}
       onPickSession={noop}
       onRefresh={noop}
-      agentComments={opts.agentComments ?? []}
-      replies={opts.replies ?? {}}
-      draftingKey={opts.draftingKey ?? null}
-      draftFor={opts.draftFor ?? (() => "")}
-      deliveredById={{}}
-      onStartDraft={opts.onStartDraft ?? noop}
-      onCloseDraft={noop}
-      onChangeDraft={noop}
-      onSubmitReply={opts.onSubmitReply ?? noop}
-      onDeleteReply={noop}
-      onRetryReply={noop}
     />,
   );
 }
@@ -145,7 +130,7 @@ describe("AgentContextSection — Delivered (N) block", () => {
   });
 
   it("shows '(showing last 200)' when the cap is hit", () => {
-    const list: DeliveredComment[] = [];
+    const list: DeliveredInteraction[] = [];
     for (let i = 0; i < 200; i++) {
       list.push(
         delivered({ id: `cmt_${i}`, deliveredAt: `2026-05-06T12:00:${String(i % 60).padStart(2, "0")}.000Z` }),
@@ -276,98 +261,3 @@ describe("AgentContextSection — MCP install affordance (slice 5)", () => {
     expect(c2.querySelector(".ac__mcp-dismiss")).toBeNull();
   });
 });
-
-describe("AgentContextSection — agent comments block", () => {
-  // Helper restricted to the anchor-shaped variant — the agent-comments
-  // block only renders top-level entries. The TS discriminated union makes
-  // `Partial<AgentComment>` awkward to spread, so we type the override
-  // narrowly here.
-  const ac = (
-    over: Partial<{
-      id: string;
-      body: string;
-      postedAt: string;
-      agentLabel?: string;
-      anchor: { file: string; lines: string };
-    }> = {},
-  ): AgentComment => ({
-    id: over.id ?? "ac-1",
-    body: over.body ?? "I notice this block lacks tests",
-    postedAt: over.postedAt ?? "2026-05-06T12:01:00.000Z",
-    anchor: over.anchor ?? { file: "src/foo.ts", lines: "42-58" },
-    ...(over.agentLabel !== undefined ? { agentLabel: over.agentLabel } : {}),
-  });
-
-  it("hides the block when there are no agent comments", () => {
-    const { container } = renderPanel({ agentComments: [] });
-    expect(container.querySelector(".ac__agent-comments")).toBeNull();
-  });
-
-  it("renders one root per AgentComment with anchor + body + agent label", () => {
-    const { container } = renderPanel({
-      agentComments: [
-        ac({ id: "ac-1", body: "body one", anchor: { file: "a.ts", lines: "1" } }),
-        ac({ id: "ac-2", body: "body two", anchor: { file: "b.ts", lines: "2-3" } }),
-      ],
-    });
-    const items = container.querySelectorAll(".ac__agent-comment");
-    expect(items.length).toBe(2);
-    const labels = container.querySelectorAll(".ac__agent-comment-label");
-    expect(Array.from(labels).every((l) => l.textContent === "agent")).toBe(
-      true,
-    );
-    const locs = container.querySelectorAll(".ac__agent-comment-loc");
-    expect(Array.from(locs).map((l) => l.textContent)).toEqual([
-      "a.ts:1",
-      "b.ts:2-3",
-    ]);
-    const bodies = container.querySelectorAll(".ac__agent-comment-body");
-    expect(Array.from(bodies).map((b) => b.textContent)).toEqual([
-      "body one",
-      "body two",
-    ]);
-  });
-
-  it("uses agentLabel when present, falls back to 'agent' otherwise", () => {
-    const { container } = renderPanel({
-      agentComments: [ac({ agentLabel: "claude-code" })],
-    });
-    const label = container.querySelector(".ac__agent-comment-label");
-    expect(label?.textContent).toBe("claude-code");
-  });
-
-  it("mounts a ReplyThread under each agent comment that wires submit to the parent handler", () => {
-    const onSubmitReply = vi.fn();
-    const onStartDraft = vi.fn();
-    const replyKey = agentCommentReplyKey("ac-1");
-    const { container } = renderPanel({
-      agentComments: [ac({ id: "ac-1" })],
-      onSubmitReply,
-      onStartDraft,
-    });
-    const startBtn = container.querySelector(
-      ".ac__agent-comment .thread__start",
-    ) as HTMLButtonElement | null;
-    expect(startBtn).not.toBeNull();
-    fireEvent.click(startBtn!);
-    expect(onStartDraft).toHaveBeenCalledWith(replyKey);
-  });
-
-  it("renders existing replies threaded under the matching agent comment", () => {
-    const replyKey = agentCommentReplyKey("ac-1");
-    const reply: Reply = {
-      id: "r1",
-      author: "you",
-      body: "agreed, will add",
-      createdAt: "2026-05-06T12:02:00.000Z",
-    };
-    const { container } = renderPanel({
-      agentComments: [ac({ id: "ac-1" })],
-      replies: { [replyKey]: [reply] },
-    });
-    const bodies = container.querySelectorAll(".reply__body");
-    expect(bodies.length).toBe(1);
-    expect(bodies[0].textContent).toContain("agreed, will add");
-  });
-});
-

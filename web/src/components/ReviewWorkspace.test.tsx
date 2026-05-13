@@ -351,7 +351,11 @@ describe("ReviewWorkspace — PR topbar", () => {
 
   it("dispatches LOAD_CHANGESET when refresh is clicked", async () => {
     const newCs = { ...fixturePrChangeset(), title: "Updated PR" };
-    loadGithubPrMock.mockResolvedValue(newCs);
+    loadGithubPrMock.mockResolvedValue({
+      changeSet: newCs,
+      prInteractions: {},
+      prDetached: [],
+    });
     const dispatch = vi.fn();
 
     renderPrWorkspace({ dispatch });
@@ -455,7 +459,11 @@ describe("ReviewWorkspace — PR auth-rejected banner", () => {
       .mockRejectedValueOnce(
         new GithubFetchError("github_token_required", "github_token_required", "github.com"),
       )
-      .mockResolvedValueOnce(newCs);
+      .mockResolvedValueOnce({
+        changeSet: newCs,
+        prInteractions: {},
+        prDetached: [],
+      });
     isTauriMock.mockReturnValue(true);
     keychainGetMock.mockResolvedValue("ghp_cached_token");
     const dispatch = vi.fn();

@@ -32,10 +32,172 @@ One pattern serves the Anthropic API key and per-host GitHub PATs:
 
 ## Core data model (`web/src/types.ts`)
 
-- `ChangeSet` → `DiffFile[]` → `Hunk[]` → `DiffLine[]`. Hunks carry symbol metadata, expand-above/below context, AI notes, and an optional teammate review.
+- `ChangeSet` → `DiffFile[]` → `Hunk[]` → `DiffLine[]`. Hunks carry symbol metadata and expand-above/below context. AI annotations and teammate reviews used to ride inline on `DiffLine`/`Hunk`; under the typed-review-interactions migration they ship as `Interaction[]` instead (see § Review interactions).
 - `ReviewPlan` = `headline` + `intent: Claim[]` + `StructureMap` + `entryPoints` (max 3). Every claim carries `EvidenceRef[]`. The UI refuses to render a claim with no evidence.
-- `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, acked notes, replies, expand levels, line selection.
+- `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, expand levels, line selection, plus `interactions` and `detachedInteractions` (see § Review interactions).
 - Persistence: localStorage.
+
+## Review interactions
+
+One primitive — `Interaction` — replaces every prior per-author shape (`Reply`, `AiNote`, `AgentReply`, `teammateReview`, `ackedNotes`). Every author (user, AI, teammate, agent) emits Interactions; they live in one store, are read through one seam, and travel over one wire envelope. The full design is in `docs/plans/typed-review-interactions.md`; this section is the architectural map.
+
+### Data flow
+
+```mermaid
+%%{init: {'theme':'neutral'}}%%
+graph TB
+    classDef ingest fill:#fef3c7,stroke:#b45309,color:#1f2937
+    classDef store fill:#dbeafe,stroke:#1d4ed8,color:#1f2937
+    classDef seam fill:#fce7f3,stroke:#be185d,color:#1f2937
+    classDef consumer fill:#dcfce7,stroke:#15803d,color:#1f2937
+    classDef wire fill:#ede9fe,stroke:#6d28d9,color:#1f2937
+
+    subgraph PRODUCERS["Producers — emit Interactions"]
+        UI["User composer<br/><i>c · r · a · Cmd+Enter</i><br/>authorRole: user"]:::ingest
+        AI["AI annotation pipeline<br/><i>per-line + per-hunk, at ingest</i><br/>authorRole: ai"]:::ingest
+        TM["Teammate-review ingest<br/>authorRole: teammate"]:::ingest
+        AG["Agent poll<br/><i>/api/agent/replies</i><br/>authorRole: agent"]:::ingest
+        PR["GitHub PR ingest<br/><i>pr-load.ts</i><br/>authorRole: user<br/>external.source: pr"]:::ingest
+        GHIN["GitHub re-pull<br/><i>sentinel-tagged inbound</i>"]:::wire
+    end
+
+    Store["<b>state.interactions</b><br/>Record&lt;threadKey, Interaction[]&gt;<br/><br/>+ detachedInteractions<br/>+ interactionsRevision (monotonic counter)"]:::store
+
+    Seam["<b>selectInteractions(state)</b><br/>—— the only read seam ——<br/><br/>{ all, byIntent, byThreadKey, threads }<br/>thread.{ currentAsk, originalAsk, currentResponse }<br/><br/><i>memo: (changesetId, interactionsRevision)</i>"]:::seam
+
+    subgraph CONSUMERS["Consumers — read through the seam"]
+        DV["DiffView<br/><i>per-line glyph via byThreadKey</i>"]:::consumer
+        IN["Inspector<br/><i>thread cards via byThreadKey</i>"]:::consumer
+        SB["Sidebar<br/><i>aggregate / per-intent counts</i>"]:::consumer
+        WALK["n / N walk<br/><i>threads in file order</i>"]:::consumer
+        INBOX["Inbox view<br/><i>byIntent.request &middot; byIntent.blocker</i>"]:::consumer
+        AGOUT["Agent push<br/><i>&lt;interaction&gt; envelope</i>"]:::wire
+        GHOUT["GitHub push<br/><i>visible glyph + HTML sentinel footer</i>"]:::wire
+        VRDCT["PR-level verdict<br/><i>open blocker → REQUEST_CHANGES</i>"]:::wire
+    end
+
+    UI --> Store
+    AI --> Store
+    TM --> Store
+    AG --> Store
+    PR --> Store
+    GHIN --> Store
+    Store --> Seam
+    Seam --> DV
+    Seam --> IN
+    Seam --> SB
+    Seam --> WALK
+    Seam --> INBOX
+    Seam --> AGOUT
+    Seam --> GHOUT
+    Seam --> VRDCT
+
+    style PRODUCERS fill:#fffbeb
+    style CONSUMERS fill:#f0fdf4
+```
+
+Key invariants:
+- **One store.** `state.interactions: Record<threadKey, Interaction[]>` is canonical. `DiffLine`/`Hunk` carry no annotation fields; ingest pipelines emit Interactions at load time.
+- **Persistence asymmetry.** User-authored entries persist verbatim. Ingest-sourced entries (`authorRole !== "user"`) are stripped on save and regenerated on reload, so the persisted shape never duplicates ingest data.
+- **One seam.** Every consumer — diff glyphs, sidebar count, inbox, agent wire, GitHub push — reads through `selectInteractions`. There is no second read path.
+- **Memo invalidation.** `interactionsRevision` increments on every reducer write to `state.interactions`. The seam memoises on `(changesetId, interactionsRevision)`.
+
+### Interaction structure
+
+```mermaid
+%%{init: {'theme':'neutral'}}%%
+graph LR
+    classDef header fill:#1f2937,stroke:#1f2937,color:#f9fafb
+    classDef ask fill:#ddd6fe,stroke:#6d28d9,color:#1f2937
+    classDef resp fill:#bbf7d0,stroke:#15803d,color:#1f2937
+    classDef role fill:#fef08a,stroke:#a16207,color:#1f2937
+    classDef target fill:#fed7aa,stroke:#c2410c,color:#1f2937
+
+    IX["<b>Interaction</b><br/>id · threadKey · target · intent<br/>author · authorRole · body · createdAt<br/>(anchor* · external? · runRecipe? · enqueue*)"]:::header
+
+    subgraph ASKS["AskIntent — heads of threads + ask restates"]
+        A1["comment"]:::ask
+        A2["question"]:::ask
+        A3["request"]:::ask
+        A4["blocker"]:::ask
+    end
+
+    subgraph RESPS["ResponseIntent — replies only, never on code"]
+        R1["ack"]:::resp
+        R2["unack"]:::resp
+        R3["accept"]:::resp
+        R4["reject"]:::resp
+    end
+
+    subgraph ROLES["authorRole"]
+        RL1["user"]:::role
+        RL2["ai"]:::role
+        RL3["teammate"]:::role
+        RL4["agent"]:::role
+    end
+
+    subgraph TARGETS["target — what the interaction attaches to"]
+        T1["line"]:::target
+        T2["block"]:::target
+        T3["reply-to-ai-note"]:::target
+        T4["reply-to-hunk-summary"]:::target
+        T5["reply-to-teammate"]:::target
+        T6["reply-to-user"]:::target
+        T7["reply-to-agent"]:::target
+    end
+
+    IX -.->|intent| ASKS
+    IX -.->|intent| RESPS
+    IX -.->|authorRole| ROLES
+    IX -.->|target| TARGETS
+
+    style ASKS fill:#f5f3ff
+    style RESPS fill:#f0fdf4
+    style ROLES fill:#fefce8
+    style TARGETS fill:#fff7ed
+```
+
+**Validity rule.** `target ∈ {line, block}` allows asks only — response intents on code are a category error (nothing to respond to). Every `reply-to-*` target allows any intent. Validation lives in three seams: the composer hides invalid combinations, the `ADD_INTERACTION` reducer rejects them, and `server/src/index.ts` rejects malformed wire payloads.
+
+### Thread derivations
+
+Every thread has three derived states the seam computes on read:
+
+- **`originalAsk`** = `thread[0].intent` (always an ask; responses can't start threads).
+- **`currentAsk`** = intent of the latest ask-intent entry. Diverges from `originalAsk` when the thread evolves (e.g. `comment` → `request` via a body-less restate).
+- **`currentResponse`** = thread-level rollup of the latest non-cancelled response per author. `unack` cancels that author's prior `ack` and drops them out of the rollup; the surviving latest across all authors wins.
+
+Together these answer "is this thread resolved?" without the consumer needing to walk the history.
+
+### Thread-key conventions
+
+Thread keys carry topology (where in the diff) but **not** intent or authorRole — those are per-Interaction fields. Same conventions as today:
+
+- `note:<hunkId>:<lineIdx>` — AI per-line annotation thread.
+- `hunkSummary:<hunkId>` — AI per-hunk synthesis thread.
+- `teammate:<hunkId>` — teammate review thread.
+- `user:<hunkId>:<lineIdx>` — fresh user-started line thread.
+- `block:<hunkId>:<lo>-<hi>` — user-started block thread.
+- `reply-to-agent` target uses the parent's threadKey (agent responses share their parent's thread).
+
+### Wire envelope (agent ↔ shippable)
+
+```xml
+<interaction id="cmt_3f7a91" target="block" intent="request"
+             author="@romina" authorRole="user"
+             file="server/src/queue.ts" lines="72-79"
+             htmlUrl="..."?>
+  <!-- body -->
+</interaction>
+```
+
+`target` carries topology; `intent` carries the typed signal. The agent reads structured intent — no prose parsing.
+
+### GitHub round-trip
+
+- **Push:** visible glyph (`🚧 🔧 ❓ ✓ ✗`) when intent ≠ comment, plus a mandatory HTML-comment sentinel footer (`<!-- sp:v1 intent=… id=… -->`). Sentinel is the parser source-of-truth.
+- **Pull:** sentinel present → use the tagged intent; absent → `intent: comment`, body verbatim. No heuristic guessing.
+- **PR-level verdict:** ≥1 open thread with `currentAsk: blocker` and no `accept` response → `REQUEST_CHANGES`; otherwise `COMMENT`. `APPROVE` is reserved for an explicit reviewer action.
 
 ## Ingest paths
 

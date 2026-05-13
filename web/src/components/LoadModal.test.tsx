@@ -103,7 +103,7 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
     };
     loadGithubPrMock.mockResolvedValue({
       changeSet: fakeCs,
-      prReplies: {},
+      prInteractions: {},
       prDetached: [],
     });
     const onLoad = vi.fn();
@@ -129,7 +129,7 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         expect.objectContaining({ kind: "pr" }),
-        { prReplies: {}, prDetached: [] },
+        { prInteractions: {}, prDetached: [] },
       ),
     );
   });
@@ -166,7 +166,7 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
       )
       .mockResolvedValueOnce({
         changeSet: fakeCs,
-        prReplies: {},
+        prInteractions: {},
         prDetached: [],
       });
     isTauriMock.mockReturnValue(true);
@@ -184,7 +184,7 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
       expect(onLoad).toHaveBeenCalledWith(
         fakeCs,
         expect.objectContaining({ kind: "pr" }),
-        { prReplies: {}, prDetached: [] },
+        { prInteractions: {}, prDetached: [] },
       ),
     );
     expect(screen.queryByText(/needs a GitHub Personal Access Token/i)).toBeNull();

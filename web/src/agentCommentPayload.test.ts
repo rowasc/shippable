@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { deriveCommentPayload } from "./agentCommentPayload";
-import type { AgentComment, ChangeSet, DiffFile, DiffLine, Hunk } from "./types";
+import type { ChangeSet, DiffFile, DiffLine, Hunk } from "./types";
 import {
-  agentCommentReplyKey,
   blockCommentKey,
   hunkSummaryReplyKey,
   lineNoteReplyKey,
@@ -52,7 +51,7 @@ describe("deriveCommentPayload", () => {
   it("note: → reply-to-ai-note + file:line", () => {
     const out = deriveCommentPayload(lineNoteReplyKey(HUNK_ID, 2), cs);
     expect(out).toEqual({
-      kind: "reply-to-ai-note",
+      target: "reply-to-ai-note",
       file: FILE_PATH,
       lines: "102",
     });
@@ -60,13 +59,13 @@ describe("deriveCommentPayload", () => {
 
   it("user: → line + file:line", () => {
     const out = deriveCommentPayload(userCommentKey(HUNK_ID, 0), cs);
-    expect(out).toEqual({ kind: "line", file: FILE_PATH, lines: "100" });
+    expect(out).toEqual({ target: "line", file: FILE_PATH, lines: "100" });
   });
 
   it("block: → block + file:lo-hi (file line numbers, not indices)", () => {
     const out = deriveCommentPayload(blockCommentKey(HUNK_ID, 1, 3), cs);
     expect(out).toEqual({
-      kind: "block",
+      target: "block",
       file: FILE_PATH,
       lines: "101-103",
     });
@@ -74,13 +73,13 @@ describe("deriveCommentPayload", () => {
 
   it("block: collapses lo===hi to a single line number", () => {
     const out = deriveCommentPayload(blockCommentKey(HUNK_ID, 2, 2), cs);
-    expect(out).toEqual({ kind: "block", file: FILE_PATH, lines: "102" });
+    expect(out).toEqual({ target: "block", file: FILE_PATH, lines: "102" });
   });
 
   it("hunkSummary: → reply-to-hunk-summary, no lines", () => {
     const out = deriveCommentPayload(hunkSummaryReplyKey(HUNK_ID), cs);
     expect(out).toEqual({
-      kind: "reply-to-hunk-summary",
+      target: "reply-to-hunk-summary",
       file: FILE_PATH,
     });
     expect(out?.lines).toBeUndefined();
@@ -88,7 +87,7 @@ describe("deriveCommentPayload", () => {
 
   it("teammate: → reply-to-teammate, no lines", () => {
     const out = deriveCommentPayload(teammateReplyKey(HUNK_ID), cs);
-    expect(out).toEqual({ kind: "reply-to-teammate", file: FILE_PATH });
+    expect(out).toEqual({ target: "reply-to-teammate", file: FILE_PATH });
     expect(out?.lines).toBeUndefined();
   });
 
@@ -103,38 +102,22 @@ describe("deriveCommentPayload", () => {
     expect(deriveCommentPayload("user:", cs)).toBeNull();
   });
 
-  describe("agentComment: prefix", () => {
-    const agentComment: AgentComment = {
-      id: "ac-1",
-      body: "I notice this block lacks tests",
-      postedAt: "2026-04-30T00:01:00Z",
-      anchor: { file: "src/foo.ts", lines: "42-58" },
-    };
-
-    it("returns reply-to-agent-comment with the parent's anchor", () => {
-      const out = deriveCommentPayload(agentCommentReplyKey("ac-1"), cs, [
-        agentComment,
-      ]);
-      expect(out).toEqual({
-        kind: "reply-to-agent-comment",
-        file: "src/foo.ts",
-        lines: "42-58",
-        parentAgentCommentId: "ac-1",
-      });
+  // Out-of-bounds lineIdx is an unresolvable key, same as a stale hunk: the
+  // function's contract is to return null so the caller skips enqueueing a
+  // wire-malformed (lines-less) payload. Guards against a regression where a
+  // line index that points past the hunk silently produced a partial payload.
+  describe("out-of-bounds line indices", () => {
+    it("note: returns null when lineIdx exceeds hunk length", () => {
+      expect(deriveCommentPayload(lineNoteReplyKey(HUNK_ID, 99), cs)).toBeNull();
     });
 
-    it("returns null when the agent comment isn't in the slot", () => {
-      expect(
-        deriveCommentPayload(agentCommentReplyKey("missing"), cs, [
-          agentComment,
-        ]),
-      ).toBeNull();
+    it("user: returns null when lineIdx is negative", () => {
+      expect(deriveCommentPayload(userCommentKey(HUNK_ID, -1), cs)).toBeNull();
     });
 
-    it("returns null when the agentComments slot is omitted", () => {
-      expect(
-        deriveCommentPayload(agentCommentReplyKey("ac-1"), cs),
-      ).toBeNull();
+    it("block: returns null when either endpoint is out of bounds", () => {
+      expect(deriveCommentPayload(blockCommentKey(HUNK_ID, 0, 99), cs)).toBeNull();
+      expect(deriveCommentPayload(blockCommentKey(HUNK_ID, -1, 2), cs)).toBeNull();
     });
   });
 });
