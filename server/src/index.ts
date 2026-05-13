@@ -1535,9 +1535,11 @@ async function handleAgentUnenqueue(
 
 // Cap the bytes any single request body can grow to. Local server, but we
 // share the box with anything else on 127.0.0.1, and an agent / browser tab
-// spamming multi-MB POSTs would trivially OOM us otherwise. 1 MiB is a
-// loose upper bound on legitimate review-comment / reply prose.
-const MAX_REQUEST_BODY_BYTES = 1 * 1024 * 1024;
+// spamming multi-MB POSTs would trivially OOM us otherwise. 2 MiB fits the
+// largest endpoint (the /api/plan changeset body for real-world PRs after
+// lockfile elision), with headroom; review-comment / reply prose lives well
+// under this.
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 
 class RequestBodyTooLargeError extends Error {
   constructor(limit: number) {
