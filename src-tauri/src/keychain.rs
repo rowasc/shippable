@@ -33,14 +33,21 @@ fn validate_account(account: &str) -> Result<(), String> {
     Err(format!("account name '{account}' is not allowed"))
 }
 
+// Account-name format check — bridge hardening, not credential policy. The
+// server-side blocklist in server/src/auth/store.ts is the canonical
+// authority on which github hosts are allowed; useCredentials.set() calls
+// the server before the Keychain, so a blocked host surfaces the API error
+// in the UI instead of the raw "account name … is not allowed" string this
+// validator used to throw. The only goal here is to keep the Tauri bridge
+// from writing arbitrary keys into the user's Keychain bucket (e.g., paths,
+// userinfo segments, or other apps' service namespaces).
 fn is_allowed_github_host(host: &str) -> bool {
     if host.is_empty() || host.len() > 253 {
         return false;
     }
 
     let host = host.to_ascii_lowercase();
-    if host == "localhost"
-        || host.contains(':')
+    if host.contains(':')
         || host.contains('/')
         || host.contains('\\')
         || host.contains('@')
@@ -50,11 +57,11 @@ fn is_allowed_github_host(host: &str) -> bool {
         return false;
     }
 
+    // Numeric-looking strings must still be valid IPv4 form so a typo like
+    // "999.999.999.999" doesn't sneak through. The server enforces which
+    // numeric ranges are *allowed*; we just enforce shape.
     if host.chars().all(|c| c.is_ascii_digit() || c == '.') {
-        let Some(octets) = parse_ipv4(&host) else {
-            return false;
-        };
-        return !is_blocked_ipv4(octets);
+        return parse_ipv4(&host).is_some();
     }
 
     host.split('.').all(|label| {
@@ -76,18 +83,6 @@ fn parse_ipv4(host: &str) -> Option<[u8; 4]> {
         return None;
     }
     Some([octets[0], octets[1], octets[2], octets[3]])
-}
-
-fn is_blocked_ipv4(octets: [u8; 4]) -> bool {
-    let [a, b, _, _] = octets;
-    a == 10
-        || a == 0
-        || a == 127
-        || (a == 169 && b == 254)
-        || (a == 172 && (16..=31).contains(&b))
-        || (a == 192 && b == 168)
-        || (a == 100 && (64..=127).contains(&b))
-        || a >= 224
 }
 
 fn entry(account: &str) -> Result<Entry, String> {
@@ -162,23 +157,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_local_or_private_hosts() {
+    fn rejects_hosts_with_separator_characters() {
+        // IPv6 addresses contain ':' which we can't safely embed in the
+        // account-name namespace; ditto path / userinfo separators. The
+        // server's blocklist (server/src/auth/store.ts) is what decides
+        // which *allowed*-format hosts are still off-limits as credential
+        // targets — this is purely about account-name shape.
+        for host in ["::1", "host:1234", "host/path", "user@host", "host\\path"] {
+            assert!(validate_account(&format!("GITHUB_TOKEN:{host}")).is_err());
+        }
+    }
+
+    #[test]
+    fn allows_well_formed_hosts_regardless_of_address_family() {
+        // Local/private/loopback hosts pass the bridge — they get rejected
+        // by the server's blocklist on the way to /api/auth/set. That's the
+        // single source of truth for credential-policy decisions.
         for host in [
-            "localhost",
             "127.0.0.1",
             "10.0.0.1",
-            "172.16.0.1",
-            "172.31.255.255",
-            "192.168.1.1",
+            "localhost",
             "169.254.169.254",
-            "100.64.0.1",
-            "100.127.255.255",
-            "0.0.0.0",
-            "224.0.0.1",
-            "::1",
-            "fd00::1",
+            "example.com",
         ] {
-            assert!(validate_account(&format!("GITHUB_TOKEN:{host}")).is_err());
+            assert!(
+                validate_account(&format!("GITHUB_TOKEN:{host}")).is_ok(),
+                "expected {host} to pass the bridge format check",
+            );
         }
     }
 

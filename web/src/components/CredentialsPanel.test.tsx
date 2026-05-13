@@ -5,11 +5,17 @@ import type { ReactNode } from "react";
 import { CredentialsPanel } from "./CredentialsPanel";
 import { CredentialsProvider } from "../auth/useCredentials";
 
-vi.mock("../auth/client", () => ({
-  authList: vi.fn(),
-  authSet: vi.fn(),
-  authClear: vi.fn(),
-}));
+vi.mock("../auth/client", async () => {
+  const actual = await vi.importActual<typeof import("../auth/client")>(
+    "../auth/client",
+  );
+  return {
+    ...actual,
+    authList: vi.fn(),
+    authSet: vi.fn(),
+    authClear: vi.fn(),
+  };
+});
 vi.mock("../keychain", () => ({
   isTauri: vi.fn(() => false),
   keychainGet: vi.fn().mockResolvedValue(null),
@@ -178,5 +184,36 @@ describe("CredentialsPanel mode=settings", () => {
     expect(screen.getByText(/i trust ghe\.example\.com/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /i trust/i }));
     expect(hostTrust.trustGithubHost).toHaveBeenCalledWith("ghe.example.com");
+  });
+
+  it("surfaces a friendly error when the server rejects a blocked GHE host", async () => {
+    // Pre-trust the host so we can drive the flow straight to the token
+    // stage where the actual /auth/set call happens.
+    vi.mocked(hostTrust.readTrustedGithubHosts).mockReturnValue([
+      "ghe.internal.local",
+    ]);
+    vi.mocked(client.authSet).mockRejectedValueOnce(
+      new client.AuthClientError("host_blocked"),
+    );
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    fireEvent.click(
+      screen.getByRole("button", { name: /add github host/i }),
+    );
+    fireEvent.change(screen.getByPlaceholderText(/host/i), {
+      target: { value: "ghe.internal.local" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    fireEvent.change(screen.getByPlaceholderText(/ghp_/), {
+      target: { value: "ghp_x" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() =>
+      expect(screen.getByText(/local-network blocklist/i)).toBeTruthy(),
+    );
   });
 });

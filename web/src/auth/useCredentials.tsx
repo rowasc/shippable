@@ -109,10 +109,15 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
 
   const set = useCallback(
     async (credential: Credential, value: string) => {
+      // Server first: it carries the canonical validation (host blocklist
+      // for github, format checks). If it rejects, we never touch Keychain
+      // — that's what surfaces the API error in the UI instead of the raw
+      // Tauri "account name not allowed" string, and prevents a blocked
+      // host from leaving a stale Keychain entry behind.
+      await authSet(credential, value);
       if (isTauri()) {
         await keychainSet(keychainAccountFor(credential), value);
       }
-      await authSet(credential, value);
       if (credential.kind === "anthropic") {
         writeSkip(false);
         if (mounted.current) setAnthropicSkipped(false);
@@ -124,10 +129,12 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
 
   const clear = useCallback(
     async (credential: Credential) => {
+      // Same ordering as `set`: server is authoritative. If authClear
+      // fails we leave Keychain alone so retry behaves predictably.
+      await authClear(credential);
       if (isTauri()) {
         await keychainRemove(keychainAccountFor(credential));
       }
-      await authClear(credential);
       await refresh();
     },
     [refresh],

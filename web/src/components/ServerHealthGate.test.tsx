@@ -128,4 +128,32 @@ describe("ServerHealthGate", () => {
     );
     await waitFor(() => expect(waitForSidecarReadyMock).toHaveBeenCalled());
   });
+
+  it("does not re-show the boot panel if the anthropic credential is cleared mid-session", async () => {
+    // First render: anthropic present → gate renders children.
+    stubFetch(200, { ok: true });
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+
+    function Harness() {
+      return (
+        <CredentialsProvider>
+          <ServerHealthGate>
+            <span data-testid="content">app</span>
+          </ServerHealthGate>
+        </CredentialsProvider>
+      );
+    }
+    const { rerender } = render(<Harness />);
+    await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+
+    // Now mock authList returning an empty list (simulating a clear) and
+    // force a re-render with that fresh state. The gate should stay on
+    // children — Settings is the right surface for credential management
+    // once we've passed the initial onboarding.
+    vi.mocked(client.authList).mockResolvedValue([]);
+    rerender(<Harness />);
+    // Children stay mounted; no boot panel.
+    expect(screen.getByTestId("content")).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/sk-ant-/i)).toBeNull();
+  });
 });

@@ -45,7 +45,7 @@ describe("GitHubTokenModal", () => {
     expect(screen.getByText(/needs a GitHub Personal Access Token/i)).toBeTruthy();
   });
 
-  it("renders the rejection copy when reason is rejected", () => {
+  it("renders the rejection copy with the error class when reason is rejected", () => {
     render(
       <GitHubTokenModal
         host="github.com"
@@ -55,7 +55,10 @@ describe("GitHubTokenModal", () => {
       />,
     );
 
-    expect(screen.getByText(/was rejected/i)).toBeTruthy();
+    const msg = screen.getByText(/rejected the saved token/i);
+    expect(msg).toBeTruthy();
+    // Prominent error styling — not the subtle hint style.
+    expect(msg.className).toContain("modal__hint--error");
   });
 
   it("shows the error inline and keeps the modal mounted when onSubmit rejects", async () => {

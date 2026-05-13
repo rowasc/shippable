@@ -4,6 +4,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import "./LoadModal.css";
+import "./CredentialsPanel.css";
 import { CredentialsPanel } from "./CredentialsPanel";
 
 interface Props {
@@ -26,7 +27,7 @@ export function SettingsModal({ onClose }: Props) {
       onClick={onClose}
     >
       <div
-        className="modal__box"
+        className="modal__box modal__box--wide"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

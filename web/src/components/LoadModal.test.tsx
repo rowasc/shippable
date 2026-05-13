@@ -231,7 +231,7 @@ describe("LoadModal — unified URL field (PR + diff URL)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^load$/i }));
 
     await waitFor(() =>
-      expect(screen.getByText(/was rejected/i)).toBeTruthy(),
+      expect(screen.getByText(/rejected the saved token/i)).toBeTruthy(),
     );
   });
 

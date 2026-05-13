@@ -26,6 +26,12 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
   const [trackedAttempt, setTrackedAttempt] = useState(attempt);
+  // Once the gate has fallen through to `children` once, never re-show the
+  // boot panel: in-session credential changes (clearing or rotating from
+  // Settings) would otherwise unmount the workspace and lose its state.
+  // Settings is the right place to manage credentials post-onboarding; the
+  // gate is a first-launch concern only.
+  const [bootResolved, setBootResolved] = useState(false);
 
   if (attempt !== trackedAttempt) {
     setTrackedAttempt(attempt);
@@ -70,23 +76,31 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
   // refresh, which flips status to "ready" or "error") before deciding which
   // branch to render. Without this gate the boot panel can flash for a frame
   // on Tauri cold start while Keychain reads are still in flight.
-  if (state === "ready" && credentials.status !== "loading") {
-    const hasAnthropic = credentials.list.some((c) => c.kind === "anthropic");
-    if (!hasAnthropic && !credentials.anthropicSkipped) {
-      return (
-        <div className="boot-gate">
-          <div
-            className="boot-gate__box"
-            role="dialog"
-            aria-modal="true"
-            aria-label="set up Anthropic API key"
-          >
-            <CredentialsPanel mode="boot" />
-          </div>
+  const hasAnthropic = credentials.list.some((c) => c.kind === "anthropic");
+  const gateReady = state === "ready" && credentials.status !== "loading";
+  const passingThrough =
+    gateReady && (bootResolved || hasAnthropic || credentials.anthropicSkipped);
+  // Latch the resolved flag the first time we'd fall through to children, so
+  // subsequent in-session credential changes don't re-trigger the boot panel.
+  // Guarded with !bootResolved to avoid infinite re-render loops.
+  if (passingThrough && !bootResolved) {
+    setBootResolved(true);
+  }
+
+  if (gateReady) {
+    if (passingThrough) return <>{children}</>;
+    return (
+      <div className="boot-gate">
+        <div
+          className="boot-gate__box"
+          role="dialog"
+          aria-modal="true"
+          aria-label="set up Anthropic API key"
+        >
+          <CredentialsPanel mode="boot" />
         </div>
-      );
-    }
-    return <>{children}</>;
+      </div>
+    );
   }
 
   return (

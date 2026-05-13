@@ -87,13 +87,45 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
   }
 
   /** Caller hands this to GitHubTokenModal's onSubmit. Pushes the token to
-   *  Keychain (Tauri) and the server through `useCredentials().set`, closes
-   *  the modal, and retries. */
+   *  Keychain (Tauri) and the server through `useCredentials().set`, then
+   *  retries the pending PR load. Throws on auth-failed so the modal's own
+   *  catch surfaces the rejection inline — closing the modal and reopening
+   *  it via `loadPr` (the previous behaviour) hid the cause behind a flicker. */
   async function submitToken(host: string, token: string): Promise<void> {
     await credentials.set({ kind: "github", host }, token);
-    const pendingUrl = tokenModal?.pendingPrUrl ?? "";
-    setTokenModal(null);
-    if (pendingUrl) await loadPr(pendingUrl);
+    const pendingUrl = tokenModal?.pendingPrUrl;
+    if (!pendingUrl) {
+      setTokenModal(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await loadGithubPr(pendingUrl);
+      onResult(result, pendingUrl);
+      setTokenModal(null);
+    } catch (err) {
+      if (
+        err instanceof GithubFetchError &&
+        err.discriminator === "github_auth_failed"
+      ) {
+        // Re-throw — the modal's handleSubmit catches and renders this
+        // inline, keeping the password input in place for another try.
+        throw new Error(
+          `Token rejected by ${err.host ?? host}. Check the PAT scopes (repo + read:org for private repos) and try again.`,
+          { cause: err },
+        );
+      }
+      if (err instanceof GithubFetchError) {
+        setTokenModal(null);
+        setError(GH_ERROR_MESSAGES[err.discriminator] ?? err.discriminator);
+        return;
+      }
+      setTokenModal(null);
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function dismissTokenModal(): void {

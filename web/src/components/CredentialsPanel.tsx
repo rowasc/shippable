@@ -10,6 +10,7 @@
 import { useState } from "react";
 import "./CredentialsPanel.css";
 import { useCredentials } from "../auth/useCredentials";
+import { AuthClientError } from "../auth/client";
 import {
   githubApiBaseForHost,
   isGithubDotCom,
@@ -228,17 +229,24 @@ function CredentialRow({
 
   return (
     <div className="creds__row">
-      <span className="creds__row-label">{label}</span>
+      <span className="creds__row-label" title={label}>
+        {label}
+      </span>
       <span className="creds__row-state">{present ? "set" : "not set"}</span>
-      <button className="creds__btn" onClick={onStartEdit}>
-        {present ? `rotate ${label}` : `set ${label}`}
+      <button
+        className="creds__btn"
+        onClick={onStartEdit}
+        aria-label={`${present ? "rotate" : "set"} ${label}`}
+      >
+        {present ? "rotate" : "set"}
       </button>
       {onClear && (
         <button
           className="creds__btn creds__btn--danger"
           onClick={() => void onClear()}
+          aria-label={`clear ${label}`}
         >
-          clear {label}
+          clear
         </button>
       )}
     </div>
@@ -261,6 +269,7 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
   );
   const [stage, setStage] = useState<"host" | "trust" | "token">("host");
   const [busy, setBusy] = useState(false);
+  const [submitErr, setSubmitErr] = useState<string | null>(null);
 
   if (!open) {
     return (
@@ -292,11 +301,23 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
   async function submit() {
     if (!normalised || !token.trim()) return;
     setBusy(true);
+    setSubmitErr(null);
     try {
       await onSubmit(normalised, token.trim());
       setHost("");
       setToken("");
       setStage("host");
+    } catch (e) {
+      // host_blocked is the common case (private/loopback IPs, GHE on a
+      // local network) — give the user a concrete reason. Anything else
+      // surfaces with the raw message.
+      if (e instanceof AuthClientError && e.discriminator === "host_blocked") {
+        setSubmitErr(
+          `${normalised} is on the local-network blocklist — Shippable refuses to send tokens to private, loopback, or link-local hosts.`,
+        );
+      } else {
+        setSubmitErr(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -353,6 +374,7 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
             cancel
           </button>
         </div>
+        {submitErr && <p className="creds__error">{submitErr}</p>}
       </div>
     );
   }

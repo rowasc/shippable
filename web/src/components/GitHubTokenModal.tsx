@@ -93,11 +93,23 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
             </>
           ) : (
             <>
-              <p className="modal__hint">
-                {reason === "first-time"
-                  ? `Shippable needs a GitHub Personal Access Token to load ${host} PRs. Tokens are stored in macOS Keychain (or in server memory in dev mode).`
-                  : `The token for ${host} was rejected. Re-enter it to retry.`}
-              </p>
+              {reason === "rejected" ? (
+                // Render the rejection prominently so the user can't miss it
+                // — this same modal is the destination for *both* the
+                // first-time prompt and a wrong-PAT retry, and a subtle
+                // .modal__hint got mistaken for fresh-prompt copy.
+                <p className="modal__hint modal__hint--error">
+                  GitHub rejected the saved token for {host}. Re-enter the
+                  PAT (or generate a new one with `repo` + `read:org` scopes
+                  for private repos).
+                </p>
+              ) : (
+                <p className="modal__hint">
+                  Shippable needs a GitHub Personal Access Token to load
+                  {" "}{host} PRs. Tokens are stored in macOS Keychain (or in
+                  server memory in dev mode).
+                </p>
+              )}
               {needsHostTrust && (
                 <p className="modal__hint">
                   Token destination: <code>{apiBase}</code>
