@@ -8,7 +8,11 @@ import { getDispatcher } from "../proxy.ts";
 
 export type GithubError =
   | { kind: "github_token_required"; host: string }
-  | { kind: "github_auth_failed"; host: string; hint: "rate-limit" | "scope" }
+  | {
+      kind: "github_auth_failed";
+      host: string;
+      hint: "rate-limit" | "scope" | "invalid-token";
+    }
   | { kind: "github_pr_not_found" }
   | { kind: "github_upstream"; status: number; message: string };
 
@@ -39,8 +43,20 @@ function throwNormalizedError(
   body: any,
   host: string,
 ): never {
+  // 401 from GitHub means the token we sent was rejected. `githubFetch`
+  // always supplies a token (callers must construct with a non-empty
+  // value); the "no token at all" path is handled upstream in the route
+  // handler before this is reached. Surface as `github_auth_failed` with
+  // the `invalid-token` hint so the client opens the modal in the
+  // rejection state — mapping this to `github_token_required` (its old
+  // behavior) caused the Tauri cache-hit retry in useGithubPrLoad to
+  // re-push the same rejected token and recurse indefinitely.
   if (status === 401) {
-    throw new GithubApiError({ kind: "github_token_required", host });
+    throw new GithubApiError({
+      kind: "github_auth_failed",
+      host,
+      hint: "invalid-token",
+    });
   }
   if (status === 403) {
     const remaining = headers.get("X-RateLimit-Remaining");

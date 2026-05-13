@@ -129,13 +129,25 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
 
   const clear = useCallback(
     async (credential: Credential) => {
-      // Same ordering as `set`: server is authoritative. If authClear
-      // fails we leave Keychain alone so retry behaves predictably.
+      // Same ordering as `set`: server is authoritative — if authClear
+      // throws we leave Keychain alone, the row stays visible, the caller
+      // surfaces the error. If authClear succeeds we always refresh,
+      // even when the Tauri keychain delete fails (most commonly because
+      // the user dismissed the macOS Keychain prompt). The server state
+      // is what the UI shows, so dropping the row immediately matches
+      // intent; re-throw the Keychain error so the caller can surface a
+      // "stored in Keychain — re-launch will resurrect" warning.
       await authClear(credential);
+      let keychainErr: Error | null = null;
       if (isTauri()) {
-        await keychainRemove(keychainAccountFor(credential));
+        try {
+          await keychainRemove(keychainAccountFor(credential));
+        } catch (e) {
+          keychainErr = e instanceof Error ? e : new Error(String(e));
+        }
       }
       await refresh();
+      if (keychainErr) throw keychainErr;
     },
     [refresh],
   );

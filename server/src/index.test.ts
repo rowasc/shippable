@@ -1197,6 +1197,36 @@ describe("POST /api/github/pr/load", () => {
     expect(r.body.host).toBe("github.com");
   });
 
+  it("returns 403 github_auth_failed (invalid-token) when GitHub rejects the stored PAT", async () => {
+    // A token IS in the store; GitHub responds 401. The api-client maps
+    // that to github_auth_failed with the invalid-token hint so the client
+    // opens the modal in the rejection state instead of falling into the
+    // first-time-prompt → cache-hit retry loop that caused the modal not
+    // to display for users with a wrong saved PAT.
+    await postJson(`${baseUrl}/api/auth/set`, {
+      credential: { kind: "github", host: "github.com" },
+      value: "ghp_bad",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      makeSelectiveFetch(() => ({
+        ok: false,
+        status: 401,
+        headers: new Headers(),
+        json: () => Promise.resolve({ message: "Bad credentials" }),
+      } as unknown as Response)),
+    );
+
+    const r = await postJson(`${baseUrl}/api/github/pr/load`, {
+      prUrl: "https://github.com/owner/repo/pull/1",
+    });
+    expect(r.status).toBe(403);
+    expect(r.body.error).toBe("github_auth_failed");
+    expect(r.body.hint).toBe("invalid-token");
+    expect(r.body.host).toBe("github.com");
+  });
+
   it("returns { changeSet } on success", async () => {
     await postJson(`${baseUrl}/api/auth/set`, {
       credential: { kind: "github", host: "github.com" },

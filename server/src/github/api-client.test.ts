@@ -75,7 +75,10 @@ describe("githubFetch", () => {
     expect(result.status).toBe(200);
   });
 
-  it("throws github_token_required on 401", async () => {
+  it("throws github_auth_failed with hint invalid-token on 401", async () => {
+    // githubFetch always sends a Bearer token; a 401 back means *that
+    // token* was rejected, not that one is missing. The "no token in the
+    // store" case is handled by the route handler before we reach here.
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(makeFetchResponse(401, { message: "Bad credentials" })),
@@ -84,11 +87,13 @@ describe("githubFetch", () => {
       githubFetch(API_BASE, "/repos/o/r/pulls/1", { token: TOKEN }),
     ).rejects.toSatisfy(
       (e: unknown) =>
-        e instanceof GithubApiError && e.error.kind === "github_token_required",
+        e instanceof GithubApiError &&
+        e.error.kind === "github_auth_failed" &&
+        e.error.hint === "invalid-token",
     );
   });
 
-  it("github_token_required includes host", async () => {
+  it("github_auth_failed (invalid-token) includes host", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(makeFetchResponse(401, {})),
@@ -101,7 +106,11 @@ describe("githubFetch", () => {
     ).rejects.toSatisfy((e: unknown) => {
       if (!(e instanceof GithubApiError)) return false;
       const err = e.error;
-      return err.kind === "github_token_required" && err.host === "github.com";
+      return (
+        err.kind === "github_auth_failed" &&
+        err.host === "github.com" &&
+        err.hint === "invalid-token"
+      );
     });
   });
 

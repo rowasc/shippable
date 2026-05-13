@@ -10,6 +10,7 @@
 import { useState } from "react";
 import "./CredentialsPanel.css";
 import { useCredentials } from "../auth/useCredentials";
+import type { Credential } from "../auth/credential";
 import { AuthClientError } from "../auth/client";
 import {
   githubApiBaseForHost,
@@ -32,11 +33,32 @@ export function CredentialsPanel({ mode }: Props) {
     mode === "boot" ? { kind: "anthropic" } : null,
   );
   const [addOpen, setAddOpen] = useState(false);
+  // Panel-level error slot for actions whose feedback can't live in the
+  // row (clear in particular — the row unmounts as soon as `refresh()`
+  // updates the list, so an inline error inside the row is dropped
+  // along with it). Auto-cleared on the next action.
+  const [actionErr, setActionErr] = useState<string | null>(null);
 
   const hasAnthropic = credentials.list.some((c) => c.kind === "anthropic");
   const githubHosts = credentials.list.flatMap((c) =>
     c.kind === "github" ? [c.host] : [],
   );
+
+  async function clearCredential(credential: Credential): Promise<void> {
+    setActionErr(null);
+    try {
+      await credentials.clear(credential);
+    } catch (e) {
+      // The server-side clear already succeeded (the row will be gone
+      // when this resolves); only the Keychain step failed. Tell the
+      // user about it so they know the entry may resurrect on relaunch.
+      setActionErr(
+        `Cleared on the server, but the Keychain delete didn't go through: ${
+          e instanceof Error ? e.message : String(e)
+        }. The entry may come back on next launch.`,
+      );
+    }
+  }
 
   return (
     <div className="creds">
@@ -50,6 +72,20 @@ export function CredentialsPanel({ mode }: Props) {
           never leaves this machine. You can also skip and use the rule-based
           plan; AI is opt-in.
         </p>
+      )}
+
+      {actionErr && (
+        <div className="creds__alert" role="alert">
+          <span>{actionErr}</span>
+          <button
+            type="button"
+            className="creds__alert-close"
+            aria-label="dismiss"
+            onClick={() => setActionErr(null)}
+          >
+            ×
+          </button>
+        </div>
       )}
 
       <CredentialRow
@@ -69,7 +105,7 @@ export function CredentialsPanel({ mode }: Props) {
         }}
         onClear={
           mode === "settings" && hasAnthropic
-            ? () => credentials.clear({ kind: "anthropic" })
+            ? () => clearCredential({ kind: "anthropic" })
             : undefined
         }
       />
@@ -92,9 +128,7 @@ export function CredentialsPanel({ mode }: Props) {
               await credentials.set({ kind: "github", host }, value);
               setEditing(null);
             }}
-            onClear={() =>
-              credentials.clear({ kind: "github", host })
-            }
+            onClear={() => clearCredential({ kind: "github", host })}
           />
         ))}
 
@@ -187,6 +221,19 @@ function CredentialRow({
     }
   }
 
+  async function handleClear() {
+    if (!onClear) return;
+    setBusy(true);
+    try {
+      // Errors are caught and surfaced at the panel level — by the
+      // time this resolves the row is typically gone (the list
+      // refresh runs as part of clear), so inline state would be lost.
+      await onClear();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (editing) {
     return (
       <div className="creds__row">
@@ -237,18 +284,21 @@ function CredentialRow({
         className="creds__btn"
         onClick={onStartEdit}
         aria-label={`${present ? "rotate" : "set"} ${label}`}
+        disabled={busy}
       >
         {present ? "rotate" : "set"}
       </button>
       {onClear && (
         <button
           className="creds__btn creds__btn--danger"
-          onClick={() => void onClear()}
+          onClick={handleClear}
           aria-label={`clear ${label}`}
+          disabled={busy}
         >
-          clear
+          {busy ? "clearing…" : "clear"}
         </button>
       )}
+      {err && <p className="creds__error">{err}</p>}
     </div>
   );
 }
@@ -270,6 +320,23 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
   const [stage, setStage] = useState<"host" | "trust" | "token">("host");
   const [busy, setBusy] = useState(false);
   const [submitErr, setSubmitErr] = useState<string | null>(null);
+
+  // Reset the form whenever the user closes the add flow (cancel button,
+  // backdrop click via parent, successful submit, etc.). Without this the
+  // next time the user clicks "+ Add GitHub host" the component is still
+  // mounted from the previous open and resumes wherever they left off —
+  // typically the trust interstitial or the token-paste step, which is
+  // jarring and lets a typed host bleed into a new add. The set-in-render
+  // pattern (guarded with `host !== ""` etc.) is safer here than a
+  // useEffect because there's no external system to sync — we're deriving
+  // local state from a prop.
+  if (!open && (host !== "" || token !== "" || stage !== "host" || submitErr || busy)) {
+    setHost("");
+    setToken("");
+    setStage("host");
+    setSubmitErr(null);
+    setBusy(false);
+  }
 
   if (!open) {
     return (

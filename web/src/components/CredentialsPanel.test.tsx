@@ -144,6 +144,42 @@ describe("CredentialsPanel mode=settings", () => {
     );
   });
 
+  it("shows a panel-level Keychain warning when the keychain delete fails but the row still disappears", async () => {
+    // Tauri mode with a failing keychainRemove — server clear succeeds,
+    // list refreshes (row disappears, taking any row-level state with
+    // it), and the panel-level alert surfaces the failure so the user
+    // knows the Keychain entry is still there.
+    vi.mocked(client.authList)
+      .mockResolvedValueOnce([{ kind: "github", host: "github.com" }])
+      .mockResolvedValue([]);
+    const keychain = await import("../keychain");
+    vi.mocked(keychain.isTauri).mockReturnValue(true);
+    vi.mocked(keychain.keychainRemove).mockRejectedValueOnce(
+      new Error("user denied keychain access"),
+    );
+
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("github.com")).toBeTruthy(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /clear github.com/i }),
+    );
+    // Panel-level alert (role="alert") survives the row unmount.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/keychain delete didn't go through/i);
+    // The github.com row is gone — server-side state wins the UI.
+    expect(screen.queryByText("github.com")).toBeNull();
+    expect(client.authClear).toHaveBeenCalledWith({
+      kind: "github",
+      host: "github.com",
+    });
+  });
+
   it("rotate opens an inline editor; submit calls set()", async () => {
     vi.mocked(client.authList).mockResolvedValue([
       { kind: "github", host: "github.com" },
@@ -184,6 +220,37 @@ describe("CredentialsPanel mode=settings", () => {
     expect(screen.getByText(/i trust ghe\.example\.com/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /i trust/i }));
     expect(hostTrust.trustGithubHost).toHaveBeenCalledWith("ghe.example.com");
+  });
+
+  it("resets the Add GitHub host form when the user cancels mid-flow", async () => {
+    render(
+      <Wrap>
+        <CredentialsPanel mode="settings" />
+      </Wrap>,
+    );
+    await waitFor(() => expect(client.authList).toHaveBeenCalled());
+    // Open → host stage. Type a host, hit continue → trust stage.
+    fireEvent.click(
+      screen.getByRole("button", { name: /add github host/i }),
+    );
+    fireEvent.change(screen.getByPlaceholderText(/host/i), {
+      target: { value: "ghe.example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }));
+    expect(screen.getByText(/i trust ghe\.example\.com/i)).toBeTruthy();
+
+    // Cancel from the trust stage.
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    // Re-open: form must come up fresh on the host stage, not still on
+    // the trust interstitial for the previously typed host.
+    fireEvent.click(
+      screen.getByRole("button", { name: /add github host/i }),
+    );
+    expect(screen.queryByText(/i trust ghe\.example\.com/i)).toBeNull();
+    expect(
+      (screen.getByPlaceholderText(/host/i) as HTMLInputElement).value,
+    ).toBe("");
   });
 
   it("surfaces a friendly error when the server rejects a blocked GHE host", async () => {
