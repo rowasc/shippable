@@ -50,10 +50,11 @@ const ALLOWED_ORIGINS = loadAllowedOrigins();
 // of the default 3001.
 export function createApp(): Server {
   return createServer(async (req, res) => {
+  let origin: string | null = null;
   try {
     const check = classifyRequestOrigin(req.headers.origin);
     const fetchSite = classifyFetchSite(req.headers["sec-fetch-site"]);
-    const origin = check.kind === "value" ? check.origin : null;
+    origin = check.kind === "value" ? check.origin : null;
     if (req.method === "OPTIONS") {
       if (!isRequestAllowed(check, fetchSite)) {
         res.writeHead(403).end();
@@ -177,7 +178,11 @@ export function createApp(): Server {
       // Map oversized-body rejections from `readBody` to a real
       // 413 instead of a generic 500 — clients can recover, ops can
       // grep for it, and the security signal isn't lost in the noise.
+      // CORS headers matter here: without them the browser drops the
+      // response and fetch surfaces a generic "Load failed", hiding the
+      // real reason from the UI.
       if (!res.headersSent) {
+        writeCorsHeaders(res, origin);
         res.writeHead(413, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err.message }));
       }
@@ -185,6 +190,7 @@ export function createApp(): Server {
     }
     console.error("[server] unhandled error:", err);
     if (!res.headersSent) {
+      writeCorsHeaders(res, origin);
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "internal server error" }));
     }
