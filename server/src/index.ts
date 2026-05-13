@@ -1243,6 +1243,9 @@ async function handleAgentPostReply(
   let parsed: {
     worktreePath?: unknown;
     parentId?: unknown;
+    file?: unknown;
+    lines?: unknown;
+    target?: unknown;
     body?: unknown;
     intent?: unknown;
     agentLabel?: unknown;
@@ -1257,24 +1260,16 @@ async function handleAgentPostReply(
   }
   const wtPath =
     typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
-  const parentId =
-    typeof parsed.parentId === "string" ? parsed.parentId : "";
   const replyBody = typeof parsed.body === "string" ? parsed.body : "";
-  if (!wtPath || !parentId || replyBody.length === 0) {
+  if (!wtPath || replyBody.length === 0) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
         error:
-          "expected { worktreePath: string, parentId: string, body: string, intent: 'ack' | 'accept' | 'reject' }",
+          "expected { worktreePath, body, intent, and either parentId (reply) or file+lines+target (top-level) }",
       }),
     );
-    return;
-  }
-  if (!isAgentResponseIntent(parsed.intent)) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid intent" }));
     return;
   }
   try {
@@ -1286,28 +1281,88 @@ async function handleAgentPostReply(
     res.end(JSON.stringify({ error: message }));
     return;
   }
-  // Reject replies whose parentId never appeared in this worktree's
-  // delivered list — an agent posting against a fabricated id is either
-  // confused or talking past us; either way it would silently create an
-  // orphan that the UI merge step drops.
-  if (!agentQueue.isDeliveredInteractionId(wtPath, parentId)) {
+  const agentLabel =
+    typeof parsed.agentLabel === "string" && parsed.agentLabel.length > 0
+      ? parsed.agentLabel
+      : undefined;
+  const hasParent =
+    typeof parsed.parentId === "string" && parsed.parentId.length > 0;
+  const hasAnchor =
+    typeof parsed.file === "string" &&
+    parsed.file.length > 0 &&
+    typeof parsed.lines === "string" &&
+    parsed.lines.length > 0;
+  if (hasParent === hasAnchor) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        error: `parentId ${JSON.stringify(parentId)} is not a delivered interaction for this worktree`,
+        error:
+          "exactly one of { parentId } (reply) or { file, lines, target } (top-level) must be set",
       }),
     );
     return;
   }
-  const id = agentQueue.postReply(wtPath, {
-    parentId,
+  if (hasParent) {
+    const parentId = parsed.parentId as string;
+    if (!isAgentResponseIntent(parsed.intent)) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "reply intent must be ack | accept | reject" }));
+      return;
+    }
+    // Reject replies whose parentId never appeared in this worktree's
+    // delivered list — an agent posting against a fabricated id is either
+    // confused or talking past us; either way it would silently create an
+    // orphan that the UI merge step drops.
+    if (!agentQueue.isDeliveredInteractionId(wtPath, parentId)) {
+      writeCorsHeaders(res, origin);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: `parentId ${JSON.stringify(parentId)} is not a delivered interaction for this worktree`,
+        }),
+      );
+      return;
+    }
+    const id = agentQueue.postReply(wtPath, {
+      parentId,
+      body: replyBody,
+      intent: parsed.intent,
+      agentLabel,
+    });
+    writeCorsHeaders(res, origin);
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ id }));
+    return;
+  }
+  // Top-level — intent must be an ask; target must be line | block.
+  if (
+    typeof parsed.intent !== "string" ||
+    !ASK_INTENTS.includes(parsed.intent as AskIntent)
+  ) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: "top-level intent must be comment | question | request | blocker",
+      }),
+    );
+    return;
+  }
+  if (parsed.target !== "line" && parsed.target !== "block") {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "top-level target must be line | block" }));
+    return;
+  }
+  const id = agentQueue.postTopLevel(wtPath, {
+    file: parsed.file as string,
+    lines: parsed.lines as string,
+    target: parsed.target,
     body: replyBody,
-    intent: parsed.intent,
-    agentLabel:
-      typeof parsed.agentLabel === "string" && parsed.agentLabel.length > 0
-        ? parsed.agentLabel
-        : undefined,
+    intent: parsed.intent as AskIntent,
+    agentLabel,
   });
   writeCorsHeaders(res, origin);
   res.writeHead(200, { "Content-Type": "application/json" });

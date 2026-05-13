@@ -94,26 +94,54 @@ export async function handleCheckReviewComments(
 }
 
 export type AgentResponseIntent = "ack" | "accept" | "reject";
+export type AskIntent = "comment" | "question" | "request" | "blocker";
+export type AgentIntent = AgentResponseIntent | AskIntent;
 
-interface PostReplyInput {
+interface PostInteractionInput {
   worktreePath?: string;
-  parentId: string;
-  /**
-   * Free-form prose for the reply. Named `replyText` rather than `body`
-   * because some model serializers conflate `body` with the HTML element
-   * and emit `</body>` close tags into the value — see the reply-flow
-   * notes in `docs/sdd/agent-reply-support/spec.md`.
-   */
-  replyText: string;
-  intent: AgentResponseIntent;
+  /** Reply mode: the id of the interaction this entry answers. */
+  parentId?: string;
+  /** Top-level mode: 'line' for a single line, 'block' for a range. */
+  target?: "line" | "block";
+  /** Top-level mode: repo-relative file path. */
+  file?: string;
+  /** Top-level mode: the line number or inclusive range, e.g. "118" or "72-79". */
+  lines?: string;
+  body: string;
+  intent: AgentIntent;
 }
 
-interface PostReplyResponse {
+interface PostInteractionResponse {
   id: string;
 }
 
-export async function handlePostReviewReply(
-  input: PostReplyInput,
+const ASK_INTENTS: readonly AskIntent[] = [
+  "comment",
+  "question",
+  "request",
+  "blocker",
+];
+const RESPONSE_INTENTS: readonly AgentResponseIntent[] = [
+  "ack",
+  "accept",
+  "reject",
+];
+
+function isAskIntent(value: unknown): value is AskIntent {
+  return (
+    typeof value === "string" && ASK_INTENTS.includes(value as AskIntent)
+  );
+}
+
+function isResponseIntent(value: unknown): value is AgentResponseIntent {
+  return (
+    typeof value === "string" &&
+    RESPONSE_INTENTS.includes(value as AgentResponseIntent)
+  );
+}
+
+export async function handlePostReviewInteraction(
+  input: PostInteractionInput,
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
   const port = resolvePort(deps);
@@ -122,19 +150,49 @@ export async function handlePostReviewReply(
   const url = `${baseUrl}/api/agent/replies`;
   const fetchFn = deps?.fetchFn ?? fetch;
 
+  const hasParent =
+    typeof input.parentId === "string" && input.parentId.length > 0;
+  const hasAnchor =
+    typeof input.target === "string" &&
+    typeof input.file === "string" &&
+    input.file.length > 0 &&
+    typeof input.lines === "string" &&
+    input.lines.length > 0;
+  if (hasParent === hasAnchor) {
+    return errorResult(
+      "Either parentId (reply mode) or target+file+lines (top-level mode) must be set — never both.",
+    );
+  }
+  if (hasParent && !isResponseIntent(input.intent)) {
+    return errorResult(
+      "Reply intent must be one of: ack, accept, reject.",
+    );
+  }
+  if (!hasParent && !isAskIntent(input.intent)) {
+    return errorResult(
+      "Top-level intent must be one of: comment, question, request, blocker.",
+    );
+  }
+
+  const payload: Record<string, unknown> = {
+    worktreePath,
+    body: input.body,
+    intent: input.intent,
+  };
+  if (hasParent) {
+    payload.parentId = input.parentId;
+  } else {
+    payload.target = input.target;
+    payload.file = input.file;
+    payload.lines = input.lines;
+  }
+
   let response: Response;
   try {
     response = await fetchFn(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        worktreePath,
-        parentId: input.parentId,
-        // Wire-level field on the local server endpoint stays `body` —
-        // the rename is contained to the MCP tool's input schema.
-        body: input.replyText,
-        intent: input.intent,
-      }),
+      body: JSON.stringify(payload),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -149,9 +207,9 @@ export async function handlePostReviewReply(
     );
   }
 
-  let parsed: PostReplyResponse;
+  let parsed: PostInteractionResponse;
   try {
-    parsed = (await response.json()) as PostReplyResponse;
+    parsed = (await response.json()) as PostInteractionResponse;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(
@@ -159,9 +217,10 @@ export async function handlePostReviewReply(
     );
   }
 
+  const summary = hasParent
+    ? `Posted reply ${parsed.id} for interaction ${input.parentId}.`
+    : `Posted ${input.intent} ${parsed.id} on ${input.file}:${input.lines}.`;
   return {
-    content: [
-      { type: "text", text: `Posted reply ${parsed.id} for interaction ${input.parentId}.` },
-    ],
+    content: [{ type: "text", text: summary }],
   };
 }

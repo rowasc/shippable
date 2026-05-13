@@ -251,19 +251,13 @@ export function ReviewWorkspace({
     error: deliveredErrorState,
   } = useDeliveredPolling({ worktreePath: wtPath });
 
-  // Reconcile polled agent replies into the matching reviewer Reply's
-  // `agentReplies` array. The reducer is idempotent so we don't have to
-  // dedupe before dispatching.
+  // Reconcile polled agent entries into state.interactions. The reducer
+  // handles both reply-shaped (parentId) and top-level (file+lines)
+  // envelopes; it's idempotent so we don't dedupe before dispatching.
   useEffect(() => {
     if (polledAgentReplies.length === 0) return;
     dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
   }, [polledAgentReplies, dispatch]);
-
-  // NOTE: AgentComment polling temporarily unwired during the Interaction
-  // primitive migration. state.agentComments / MERGE_AGENT_COMMENTS still
-  // exist in the reducer; the post-migration cleanup commit re-attaches
-  // useDeliveredPolling.agentComments → dispatch once the polling hook
-  // exposes that field again on the new wire shape.
 
 
   const wantedFetchKey =
@@ -1434,6 +1428,7 @@ export function ReviewWorkspace({
                     delivered: deliveredComments,
                     lastSuccessfulPollAt: deliveredLastSuccessAt,
                     deliveredError: deliveredErrorState,
+                    agentStartedThreads: agentStartedThreads(state.interactions),
                     onPickSession: (fp) => setPinnedSession(fp),
                     onRefresh: () => setAgentRefreshTick((t) => t + 1),
                   }
@@ -1705,6 +1700,27 @@ type DefinitionPeekState =
       definitions: DefinitionLocation[];
       scopeKey: string;
     };
+
+/**
+ * Filter `state.interactions` to threads the agent started — first entry
+ * is agent-authored, no user-authored ask at the head. Returns one entry
+ * per thread (the head). Drives the AgentContextSection "Comments"
+ * rollup.
+ */
+function agentStartedThreads(
+  interactions: Record<string, Interaction[]>,
+): Array<{ threadKey: string; head: Interaction }> {
+  const out: Array<{ threadKey: string; head: Interaction }> = [];
+  for (const [threadKey, list] of Object.entries(interactions)) {
+    if (list.length === 0) continue;
+    const head = list[0];
+    if (head.authorRole !== "agent") continue;
+    out.push({ threadKey, head });
+  }
+  // Sort newest first by the head's createdAt.
+  out.sort((a, b) => b.head.createdAt.localeCompare(a.head.createdAt));
+  return out;
+}
 
 function DefinitionStatusChip({
   currentSource,

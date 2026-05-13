@@ -4,14 +4,17 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import {
   handleCheckReviewComments,
-  handlePostReviewReply,
+  handlePostReviewInteraction,
 } from "./handler.js";
 
 const TOOL_DESCRIPTION =
-  "Check Shippable for pending reviewer interactions. Call this tool when the user mentions reviewing code, pulling reviewer feedback, checking shippable, or asks about review comments. Returns a `<reviewer-feedback>` envelope with one `<interaction id=\"…\" target=\"…\" intent=\"…\" author=\"…\" authorRole=\"…\" file=\"…\" lines=\"…\">…</interaction>` per pending entry. IMPORTANT: each `<interaction>` carries an `id` attribute — you MUST capture it (alongside the body) so you can later report back via `shippable_post_review_reply`. The pending queue is drained on read, so this is the only chance to read the id.";
+  "Check Shippable for pending reviewer interactions. Call this tool when the user mentions reviewing code, pulling reviewer feedback, checking shippable, or asks about review comments. Returns a `<reviewer-feedback>` envelope with one `<interaction id=\"…\" target=\"…\" intent=\"…\" author=\"…\" authorRole=\"…\" file=\"…\" lines=\"…\">…</interaction>` per pending entry. IMPORTANT: each `<interaction>` carries an `id` attribute — you MUST capture it (alongside the body) so you can later report back via `shippable_post_review_interaction`. The pending queue is drained on read, so this is the only chance to read the id.";
 
-const POST_REPLY_DESCRIPTION =
-  "Post a structured reply to a Shippable reviewer interaction after addressing it. Call this tool once per interaction in the most recent shippable batch — intent 'accept' (you agreed and will do or have done it), 'reject' (you disagree and won't), or 'ack' (you saw it but no commitment either way). The `parentId` is the `id` attribute from the `<interaction id=\"…\">` element returned by `shippable_check_review_comments`. Put your reply prose in `replyText`. Also call when the user asks you to 'report back to shippable' or similar.";
+const POST_INTERACTION_DESCRIPTION =
+  "Post a review interaction back to Shippable. Two modes, distinguished by which fields you supply:\n\n" +
+  "• Reply mode — set `parentId` (the id from a `<interaction>` element returned by `shippable_check_review_comments`) and `intent` to 'accept' | 'reject' | 'ack'. Use after addressing one of the reviewer's interactions.\n\n" +
+  "• Top-level mode — set `target` ('line' | 'block'), `file` (repo-relative path), `lines` (e.g. '118' or '72-79'), and `intent` to 'comment' | 'question' | 'request' | 'blocker'. Use when you noticed something on your own and want to start a fresh thread on a particular line or range.\n\n" +
+  "Put your prose in `body`. Also call when the user asks you to 'report back to shippable' or similar.";
 
 async function main(): Promise<void> {
   const server = new McpServer({
@@ -38,40 +41,62 @@ async function main(): Promise<void> {
   );
 
   server.registerTool(
-    "shippable_post_review_reply",
+    "shippable_post_review_interaction",
     {
-      description: POST_REPLY_DESCRIPTION,
+      description: POST_INTERACTION_DESCRIPTION,
       inputSchema: {
         parentId: z
           .string()
+          .optional()
           .describe(
-            "The id of the reviewer interaction this reply answers. This is the `id` attribute of the `<interaction>` element returned by `shippable_check_review_comments` — capture it on the first read; the queue drains on pull.",
+            "Reply mode only: the id of the reviewer interaction this reply answers. Capture from a `<interaction id=\"…\">` element returned by `shippable_check_review_comments` — the queue drains on pull. Omit when starting a fresh top-level thread.",
           ),
-        replyText: z
+        target: z
+          .enum(["line", "block"])
+          .optional()
+          .describe(
+            "Top-level mode only: 'line' for a single line, 'block' for a range. Required when parentId is not set.",
+          ),
+        file: z
+          .string()
+          .optional()
+          .describe(
+            "Top-level mode only: repo-relative file path the interaction anchors to. Required when parentId is not set.",
+          ),
+        lines: z
+          .string()
+          .optional()
+          .describe(
+            "Top-level mode only: the line number ('118') or inclusive range ('72-79') the interaction anchors to. Required when parentId is not set.",
+          ),
+        body: z
           .string()
           .describe(
-            "Free-form prose explaining what you did (or didn't do) for this interaction. Plain text or Markdown; no XML/HTML wrapping needed.",
+            "Free-form prose. Plain text or Markdown; no XML/HTML wrapping needed.",
           ),
         intent: z
-          .enum(["accept", "reject", "ack"])
+          .enum([
+            "accept",
+            "reject",
+            "ack",
+            "comment",
+            "question",
+            "request",
+            "blocker",
+          ])
           .describe(
-            "What happened with this interaction: 'accept' if you agreed and acted on it, 'reject' if you disagree and won't, 'ack' if you saw it but no commitment either way.",
+            "Reply intents (use with parentId): 'accept' if you agreed and acted on it, 'reject' if you disagree and won't, 'ack' if you saw it but no commitment either way. Top-level intents (use with target+file+lines): 'comment' (observation), 'question' (expects an answer), 'request' (expects a code change, non-blocking), 'blocker' (expects a code change AND won't approve until it lands).",
           ),
         worktreePath: z
           .string()
           .optional()
           .describe(
-            "Absolute path to the worktree the reply belongs to. Defaults to the agent's current working directory.",
+            "Absolute path to the worktree the interaction belongs to. Defaults to the agent's current working directory.",
           ),
       },
     },
-    async ({ parentId, replyText, intent, worktreePath }) => {
-      return handlePostReviewReply({
-        parentId,
-        replyText,
-        intent,
-        worktreePath,
-      });
+    async (input) => {
+      return handlePostReviewInteraction(input);
     },
   );
 

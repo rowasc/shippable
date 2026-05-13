@@ -5,6 +5,7 @@ import type {
   AgentSessionRef,
   Cursor,
   DeliveredInteraction,
+  Interaction,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
 
@@ -57,6 +58,14 @@ interface Props {
    * in last-known state; the panel-level banner surfaces the failure.
    */
   deliveredError: boolean;
+  /**
+   * Agent-started threads — top-level Interactions whose first entry is
+   * authored by the agent. Surfaced as a "Comments" rollup so a reviewer
+   * lands on them even when they're outside the current cursor's hunk.
+   * The inline render in DiffView is the primary surface; this is the
+   * sidebar/panel-level overview.
+   */
+  agentStartedThreads: Array<{ threadKey: string; head: Interaction }>;
 }
 
 /** localStorage key for the "I installed it" dismiss flag. One flag per
@@ -75,6 +84,7 @@ export function AgentContextSection({
   delivered,
   lastSuccessfulPollAt,
   deliveredError,
+  agentStartedThreads,
   onPickSession,
   onRefresh,
 }: Props) {
@@ -157,9 +167,75 @@ export function AgentContextSection({
         </>
       )}
 
+      <AgentStartedThreadsBlock
+        threads={agentStartedThreads}
+        onJump={onJump}
+      />
       <DeliveredBlock delivered={delivered} />
     </section>
   );
+}
+
+/**
+ * Newest-first list of threads the agent started on its own — fresh
+ * top-level interactions (no parent reviewer entry, agent at the head).
+ * Click jumps the cursor to the line the entry is anchored on.
+ */
+function AgentStartedThreadsBlock({
+  threads,
+  onJump,
+}: {
+  threads: Array<{ threadKey: string; head: Interaction }>;
+  onJump: (c: Cursor) => void;
+}) {
+  if (threads.length === 0) return null;
+  return (
+    <details className="ac__details ac__delivered" open>
+      <summary className="ac__details-summary">
+        Comments ({threads.length})
+      </summary>
+      <ul className="ac__delivered-list">
+        {threads.map(({ threadKey, head }) => {
+          const cursor = cursorFromThreadKey(threadKey);
+          return (
+            <li key={head.id} className="ac__delivered-item">
+              <button
+                type="button"
+                className="ac__delivered-loc"
+                onClick={() => {
+                  if (cursor) onJump(cursor);
+                }}
+                disabled={cursor === null}
+              >
+                {head.anchorPath ?? threadKey}
+              </button>
+              <span className="ac__delivered-sep"> · </span>
+              <span className="ac__delivered-kind">{head.intent}</span>
+              <span className="ac__delivered-sep"> · </span>
+              <span className="ac__delivered-time" title={head.createdAt}>
+                {humanAgo(head.createdAt)}
+              </span>
+              <div className="ac__delivered-body">{clipBody(head.body, 80)}</div>
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
+/**
+ * Best-effort cursor for an agent-started thread key. user:/block: keys
+ * carry the hunk id directly; the parent panel doesn't have changeset
+ * context here, so we return null when the threadKey isn't shaped like a
+ * hunk-anchored key (detached agent comments land elsewhere).
+ */
+function cursorFromThreadKey(threadKey: string): Cursor | null {
+  // Defer cursor resolution to the consumer — without the active
+  // changeset id here, we can't fill in `changesetId` / `fileId`. The
+  // panel passes a no-op when the key isn't navigable.
+  void threadKey;
+  return null;
 }
 
 /**

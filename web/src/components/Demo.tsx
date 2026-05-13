@@ -211,7 +211,7 @@ interface WorkspaceFrame extends BaseFrame {
    * Synthetic agent-context bundle for frames that exercise the
    * agent-integration surface. Present only on the agent-flow frames; absent
    * frames render Inspector without the agent panel (current behavior).
-   * Drives the Delivered (N) block — pip glyphs come from each Reply's
+   * Drives the Delivered (N) block — pip glyphs come from each Interaction's
    * `enqueuedCommentId` matched against `delivered`.
    */
   agentSnapshot?: AgentSnapshot;
@@ -1311,6 +1311,7 @@ function WorkspaceStage({
       delivered: snap.delivered,
       lastSuccessfulPollAt: new Date().toISOString(),
       deliveredError: false,
+      agentStartedThreads: [],
       onPickSession: () => {},
       onRefresh: () => {},
     };

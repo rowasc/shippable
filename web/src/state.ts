@@ -1,14 +1,11 @@
 import type {
-  AgentComment,
   CharRange,
   Cursor,
   ChangeSet,
   DetachedInteraction,
   DiffFile,
-  DiffLine,
   Hunk,
   Interaction,
-  InteractionIntent,
   InteractionTarget,
   LineSelection,
   ParsedReplyKey,
@@ -17,7 +14,6 @@ import type {
 import {
   blockCommentKey,
   hunkSummaryReplyKey,
-  isAskIntent,
   isValidInteractionPair,
   lineNoteReplyKey,
   parseReplyKey,
@@ -26,55 +22,44 @@ import {
 } from "./types";
 import { findAnchorInFile, hashAnchorWindow } from "./anchor";
 
-// Legacy reply-shape inputs preserved for the persist/test adapters below.
-// The exported types of the same name lived in types.ts before the unified
-// Interaction store; we keep these internal shapes so callers can construct
-// loose Reply/AgentReply-like literals when feeding the adapters.
-export interface ReplyShape {
-  id: string;
-  author: string;
-  body: string;
-  createdAt: string;
-  enqueuedCommentId?: string | null;
-  enqueueError?: boolean;
-  agentReplies?: AgentReplyShape[];
-  originSha?: string;
-  originType?: "committed" | "dirty";
-  anchorPath?: string;
-  anchorContext?: DiffLine[];
-  anchorHash?: string;
-  anchorLineNo?: number;
-  external?: { source: "pr"; htmlUrl: string };
-}
-export interface AgentReplyShape {
-  id: string;
-  body: string;
-  outcome: "addressed" | "declined" | "noted";
-  postedAt: string;
-  agentLabel?: string;
-}
-export interface DetachedReplyShape {
-  reply: ReplyShape;
-  threadKey: string;
-}
-
 /**
- * Wire shape returned by `/api/agent/replies` — an Interaction-shaped
- * payload with a `parentId` field that points at the delivered
- * Interaction id the agent is responding to. The reducer resolves
- * parentId → threadKey via state.interactions[*].enqueuedCommentId
- * and merges the entry into the matching thread with authorRole=agent.
+ * Wire shape returned by `GET /api/agent/replies` — one envelope serves
+ * both shapes the agent posts:
+ *   - reply-shaped (`parentId` set) — a response to a delivered reviewer
+ *     interaction. The reducer resolves parentId → threadKey via
+ *     `state.interactions[*].enqueuedCommentId` and merges the entry into
+ *     that thread.
+ *   - Top-level-shaped (`file` + `lines` set) — a fresh thread the agent
+ *     started, anchored at (file, lines). The reducer resolves (file,
+ *     lines) → hunkId by walking the active changeset, then builds the
+ *     matching user:/block: thread key. Unresolvable entries (file not
+ *     in the diff, or lines outside any hunk) land in
+ *     `state.detachedInteractions`.
  */
-export interface PolledAgentReply {
-  id: string;
-  parentId: string;
-  body: string;
-  intent: "ack" | "accept" | "reject";
-  author: string;
-  authorRole: "agent";
-  target: InteractionTarget;
-  postedAt: string;
-}
+export type PolledAgentReply =
+  | {
+      id: string;
+      parentId: string;
+      body: string;
+      intent: "ack" | "accept" | "reject";
+      author: string;
+      authorRole: "agent";
+      target: InteractionTarget;
+      postedAt: string;
+    }
+  | {
+      id: string;
+      /** Repo-relative file path. */
+      file: string;
+      /** Line number or range — `"118"` or `"72-79"`. */
+      lines: string;
+      body: string;
+      intent: "comment" | "question" | "request" | "blocker";
+      author: string;
+      authorRole: "agent";
+      target: "line" | "block";
+      postedAt: string;
+    };
 
 /**
  * Sentinel cursor used while no changeset is loaded (welcome screen).
@@ -106,7 +91,6 @@ export function initialState(
       previewedFiles: new Set(),
       selection: null,
       detachedInteractions: [],
-      agentComments: [],
     };
   }
   const cs = seed[0];
@@ -125,7 +109,6 @@ export function initialState(
     previewedFiles: new Set(),
     selection: null,
     detachedInteractions: [],
-    agentComments: [],
   };
 }
 
@@ -213,13 +196,6 @@ export type Action =
       // place, new ids append on the same thread, sorted by createdAt.
       type: "MERGE_AGENT_REPLIES";
       polled: PolledAgentReply[];
-    }
-  | {
-      // Replace `state.agentComments` with the polled batch. See
-      // `mergeAgentComments` for semantics — note this is replace-not-merge,
-      // unlike the additive MERGE_AGENT_REPLIES above.
-      type: "MERGE_AGENT_COMMENTS";
-      polled: AgentComment[];
     }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
@@ -478,8 +454,6 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "MERGE_AGENT_REPLIES":
       return mergeAgentInteractions(state, action.polled);
-    case "MERGE_AGENT_COMMENTS":
-      return mergeAgentComments(state, action.polled);
     case "SET_EXPAND_LEVEL": {
       const field = action.dir === "above" ? "expandLevelAbove" : "expandLevelBelow";
       return {
@@ -658,13 +632,6 @@ function reloadChangeset(
       nextInteractions[key] = list;
       continue;
     }
-    // Agent-comment threads aren't hunk-anchored — their key carries the
-    // server-minted AgentComment id directly. Pass them through unchanged;
-    // the reload pass only re-emits hunk-anchored keys.
-    if (parsed.kind === "agentComment") {
-      nextInteractions[key] = list;
-      continue;
-    }
     const oldRef = oldHunkInfo.get(parsed.hunkId);
     if (!oldRef) {
       // This interaction belongs to a different changeset; pass through.
@@ -766,13 +733,6 @@ function rekey(
       return hunkSummaryReplyKey(newHunkId);
     case "teammate":
       return teammateReplyKey(newHunkId);
-    case "agentComment":
-      // Agent-comment threads aren't hunk-anchored and never reach this
-      // function — the reload loop above passes them through. Guard
-      // defensively so a future caller can't silently drop the key.
-      throw new Error(
-        "rekey called for an agentComment thread; agent-comment threads aren't hunk-anchored",
-      );
   }
 }
 
@@ -875,8 +835,8 @@ export interface CommentStop {
 }
 
 /**
- * Order: changeset file order → hunk order → line index. Reply-derived stops
- * come only from `user:` and `block:` keys; `parseReplyKey` handles the
+ * Order: changeset file order → hunk order → line index. Stops come from
+ * `user:` and `block:` interaction keys; `parseReplyKey` handles the
  * colon-bearing hunk ids that PR csIds introduce.
  */
 export function buildCommentStops(
@@ -1019,82 +979,203 @@ function mergeAgentInteractions(
 ): ReviewState {
   if (polled.length === 0) return state;
 
-  // Group polled entries by commentId.
-  const byCommentId = new Map<string, PolledAgentReply[]>();
-  for (const p of polled) {
-    let bucket = byCommentId.get(p.parentId);
-    if (!bucket) {
-      bucket = [];
-      byCommentId.set(p.parentId, bucket);
-    }
-    bucket.push(p);
-  }
+  // Active changeset is the only one we can resolve top-level entries
+  // against. reply-shaped polled entries don't need it — they ride parentId →
+  // enqueuedCommentId, which already encodes the thread location.
+  const activeCs = state.changesets.find(
+    (c) => c.id === state.cursor.changesetId,
+  );
 
-  // Find each commentId's thread by scanning all interactions for a user
-  // entry whose enqueuedCommentId matches. Threads carrying no matching
-  // entry are silently skipped (the user may have deleted the parent
-  // before the poll round-tripped).
+  // Index parentId → existing threadKey for reply-shaped entries.
   const threadKeyByCommentId = new Map<string, string>();
-  for (const [key, list] of Object.entries(state.interactions)) {
-    for (const ix of list) {
-      const cid = ix.enqueuedCommentId;
-      if (cid != null && byCommentId.has(cid)) {
-        threadKeyByCommentId.set(cid, key);
+  let anyReplyShaped = false;
+  for (const p of polled) {
+    if ("parentId" in p) {
+      anyReplyShaped = true;
+      threadKeyByCommentId.set(p.parentId, "");
+    }
+  }
+  if (anyReplyShaped) {
+    for (const [key, list] of Object.entries(state.interactions)) {
+      for (const ix of list) {
+        const cid = ix.enqueuedCommentId;
+        if (cid != null && threadKeyByCommentId.has(cid)) {
+          threadKeyByCommentId.set(cid, key);
+        }
       }
     }
   }
-  if (threadKeyByCommentId.size === 0) return state;
 
-  // Walk each thread that's gaining/updating agent entries.
+  // Bucket polled entries by destination — a thread key when resolvable,
+  // otherwise null (top-level entries that can't be anchored land in
+  // `detachedInteractions`).
+  type Resolved = { threadKey: string; interaction: Interaction };
+  const resolved: Resolved[] = [];
+  const detachedAdditions: DetachedInteraction[] = [];
+
+  for (const p of polled) {
+    if ("parentId" in p) {
+      const threadKey = threadKeyByCommentId.get(p.parentId);
+      if (!threadKey) continue;
+      resolved.push({
+        threadKey,
+        interaction: {
+          id: p.id,
+          threadKey,
+          target: p.target.startsWith("reply-to-")
+            ? p.target
+            : replyTargetForKey(threadKey),
+          intent: p.intent,
+          author: p.author,
+          authorRole: "agent",
+          body: p.body,
+          createdAt: p.postedAt,
+        },
+      });
+      continue;
+    }
+
+    // Top-level: resolve (file, lines) against the active changeset.
+    const located = activeCs
+      ? resolveAgentTopLevelAnchor(activeCs, p.file, p.lines)
+      : null;
+    if (located) {
+      const threadKey =
+        located.lo === located.hi
+          ? userCommentKey(located.hunkId, located.lo)
+          : blockCommentKey(located.hunkId, located.lo, located.hi);
+      const target: InteractionTarget = located.lo === located.hi ? "line" : "block";
+      resolved.push({
+        threadKey,
+        interaction: {
+          id: p.id,
+          threadKey,
+          target,
+          intent: p.intent,
+          author: p.author,
+          authorRole: "agent",
+          body: p.body,
+          createdAt: p.postedAt,
+        },
+      });
+    } else {
+      // Either no active changeset, file not in the diff, or lines fall
+      // outside any hunk. Park in detached with a synthetic threadKey so
+      // the Sidebar's Detached group surfaces it.
+      const detachedKey = `agent-detached:${p.id}`;
+      const interaction: Interaction = {
+        id: p.id,
+        threadKey: detachedKey,
+        target: p.target,
+        intent: p.intent,
+        author: p.author,
+        authorRole: "agent",
+        body: p.body,
+        createdAt: p.postedAt,
+        anchorPath: p.file,
+      };
+      detachedAdditions.push({ interaction, threadKey: detachedKey });
+    }
+  }
+
+  if (resolved.length === 0 && detachedAdditions.length === 0) return state;
+
+  // Apply resolved entries thread-by-thread.
   let touched = false;
   const nextInteractions: Record<string, Interaction[]> = { ...state.interactions };
-  for (const [commentId, incoming] of byCommentId) {
-    const threadKey = threadKeyByCommentId.get(commentId);
-    if (!threadKey) continue;
+  const byThread = new Map<string, Interaction[]>();
+  for (const r of resolved) {
+    let bucket = byThread.get(r.threadKey);
+    if (!bucket) {
+      bucket = [];
+      byThread.set(r.threadKey, bucket);
+    }
+    bucket.push(r.interaction);
+  }
+  for (const [threadKey, incomingInteractions] of byThread) {
     const existing = nextInteractions[threadKey] ?? [];
-    const incomingInteractions = incoming.map((p) =>
-      polledToInteraction(p, threadKey),
-    );
     const merged = reconcileAgentInteractions(existing, incomingInteractions);
     if (merged !== existing) {
       nextInteractions[threadKey] = merged;
       touched = true;
     }
   }
+
+  // Append detached entries, de-duping against existing ids so re-polls
+  // don't pile up.
+  let nextDetached = state.detachedInteractions;
+  if (detachedAdditions.length > 0) {
+    const existingIds = new Set(
+      nextDetached.map((d) => d.interaction.id),
+    );
+    const fresh = detachedAdditions.filter(
+      (d) => !existingIds.has(d.interaction.id),
+    );
+    if (fresh.length > 0) {
+      nextDetached = [...nextDetached, ...fresh];
+      touched = true;
+    }
+  }
+
   if (!touched) return state;
-  return { ...state, interactions: nextInteractions };
-}
-
-/** Map the legacy AgentReply.outcome surface onto the new response-intent
- *  vocabulary. Used by `agentReplyToInteraction` for the legacy persistence
- *  bridge; the wire-side translation lives in `polledToInteraction` and uses
- *  the new `intent` field directly. */
-function agentOutcomeToIntent(
-  outcome: "addressed" | "declined" | "noted",
-): InteractionIntent {
-  if (outcome === "addressed") return "accept";
-  if (outcome === "declined") return "reject";
-  return "ack";
-}
-
-function polledToInteraction(
-  p: PolledAgentReply,
-  threadKey: string,
-): Interaction {
   return {
-    id: p.id,
-    threadKey,
-    // Trust the server's resolved target when it matches a reply-to-* role;
-    // fall back to the threadKey-derived target for safety.
-    target: p.target.startsWith("reply-to-")
-      ? p.target
-      : replyTargetForKey(threadKey),
-    intent: p.intent,
-    author: p.author,
-    authorRole: "agent",
-    body: p.body,
-    createdAt: p.postedAt,
+    ...state,
+    interactions: nextInteractions,
+    detachedInteractions: nextDetached,
   };
+}
+
+/**
+ * Resolve an agent's wire-shaped (file, lines) to a hunk + clamped
+ * line-index range inside the active changeset. Walks the changeset's
+ * files for a path match, then matches the hunk whose old or new line
+ * range contains the cited lines (an agent may cite a deleted-line
+ * number or an added-line number). Returns null when no hunk covers it.
+ */
+function resolveAgentTopLevelAnchor(
+  cs: ChangeSet,
+  file: string,
+  lines: string,
+): { hunkId: string; lo: number; hi: number } | null {
+  const match = lines.match(/^(\d+)(?:-(\d+))?$/);
+  if (!match) return null;
+  const loNo = Number(match[1]);
+  const hiNo = match[2] !== undefined ? Number(match[2]) : loNo;
+  if (!Number.isFinite(loNo) || !Number.isFinite(hiNo) || loNo > hiNo) {
+    return null;
+  }
+
+  const targetFile = cs.files.find((f) => f.path === file);
+  if (!targetFile) return null;
+
+  for (const hunk of targetFile.hunks) {
+    // Try the new-line side first (agent typically cites the post-change
+    // line number); fall back to the old-line side for deleted lines.
+    const loIdxNew = findLineIdxForLineNo(hunk, loNo, "new");
+    const hiIdxNew = findLineIdxForLineNo(hunk, hiNo, "new");
+    if (loIdxNew !== null && hiIdxNew !== null) {
+      return { hunkId: hunk.id, lo: loIdxNew, hi: hiIdxNew };
+    }
+    const loIdxOld = findLineIdxForLineNo(hunk, loNo, "old");
+    const hiIdxOld = findLineIdxForLineNo(hunk, hiNo, "old");
+    if (loIdxOld !== null && hiIdxOld !== null) {
+      return { hunkId: hunk.id, lo: loIdxOld, hi: hiIdxOld };
+    }
+  }
+  return null;
+}
+
+function findLineIdxForLineNo(
+  hunk: Hunk,
+  lineNo: number,
+  side: "new" | "old",
+): number | null {
+  for (let i = 0; i < hunk.lines.length; i++) {
+    const l = hunk.lines[i];
+    const no = side === "new" ? l.newNo : l.oldNo;
+    if (no === lineNo) return i;
+  }
+  return null;
 }
 
 /**
@@ -1164,63 +1245,6 @@ function shallowEqualAgentInteraction(a: Interaction, b: Interaction): boolean {
   );
 }
 
-/**
- * Replace the `state.agentComments` slot with the polled batch — the
- * server returns the worktree's full authoritative list (capped at 200)
- * on every poll, so additive merging would let evicted entries persist
- * stale and would leak across worktree switches (the hook resets its
- * polled state to `[]` on worktree change; the reducer must honour that).
- *
- * Reply-shaped (parent-set) entries are filtered out defensively; the
- * polling-split in `useDeliveredPolling.ts` should never dispatch them
- * here, but the guard means a future caller can't silently corrupt the
- * slot.
- *
- * Idempotent under structural equality: re-dispatching the same batch
- * returns the same state reference so React subscribers don't re-render
- * on idle polls.
- */
-function mergeAgentComments(
-  state: ReviewState,
-  polled: AgentComment[],
-): ReviewState {
-  const incoming = polled
-    .filter((c) => c.anchor !== undefined)
-    .slice()
-    .sort((a, b) => a.postedAt.localeCompare(b.postedAt));
-  if (sameAgentCommentsList(state.agentComments, incoming)) return state;
-  return { ...state, agentComments: incoming };
-}
-
-/** Order-sensitive structural equality — both lists are sorted by `postedAt`. */
-function sameAgentCommentsList(
-  a: AgentComment[],
-  b: AgentComment[],
-): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    if (!shallowEqualAgentComment(a[i], b[i])) return false;
-  }
-  return true;
-}
-
-function shallowEqualAgentComment(a: AgentComment, b: AgentComment): boolean {
-  if (
-    a.id !== b.id ||
-    a.body !== b.body ||
-    a.postedAt !== b.postedAt ||
-    a.agentLabel !== b.agentLabel
-  ) {
-    return false;
-  }
-  // Anchor-shaped comparison — reply-shaped entries don't reach this slot,
-  // but mirror the same defensive check.
-  if (a.anchor && b.anchor) {
-    return a.anchor.file === b.anchor.file && a.anchor.lines === b.anchor.lines;
-  }
-  return a.anchor === undefined && b.anchor === undefined;
-}
-
 export function hunkCoverage(
   hunk: { id: string; lines: unknown[] },
   lines: Record<string, Set<number>>,
@@ -1268,13 +1292,9 @@ export function reviewedFilesCount(
   return n;
 }
 
-// ── Migration / consumer helpers ─────────────────────────────────────────
-// These bridge the unified Interaction store to consumers that still think
-// in legacy Reply / ackedNotes terms. Two roles:
-//   - Read side: derive Set<string> / boolean ack views for components that
-//     still take the legacy shape.
-//   - Write side: translate persisted Reply[] / ackedNotes[] snapshots into
-//     Interactions during load.
+// ── Ack helpers ──────────────────────────────────────────────────────────
+// Derived Set<string> / boolean views over state.interactions, for
+// components and seeds that still take the AI-note ack as a Set.
 
 /**
  * True when the local user's latest response on the AI-note thread at
@@ -1327,59 +1347,6 @@ export function selectAckedNotes(
 }
 
 /**
- * Translate a single persisted/legacy Reply into a user Interaction on
- * the given thread. `isFirst` decides whether the target is the thread
- * head (`line`/`block`) or a reply (`reply-to-user`).
- */
-export function userReplyToInteraction(
-  reply: ReplyShape,
-  threadKey: string,
-  isFirst: boolean,
-): Interaction {
-  return {
-    id: reply.id,
-    threadKey,
-    target: isFirst ? firstTargetForKey(threadKey) : replyTargetForKey(threadKey),
-    intent: "comment",
-    author: reply.author,
-    authorRole: "user",
-    body: reply.body,
-    createdAt: reply.createdAt,
-    enqueuedCommentId: reply.enqueuedCommentId,
-    enqueueError: reply.enqueueError,
-    anchorPath: reply.anchorPath,
-    anchorHash: reply.anchorHash,
-    anchorContext: reply.anchorContext,
-    anchorLineNo: reply.anchorLineNo,
-    originSha: reply.originSha,
-    originType: reply.originType,
-    external: reply.external,
-  };
-}
-
-/**
- * Translate a single persisted/legacy AgentReply into a top-level agent
- * Interaction on the same thread as its parent. (Agents are no longer
- * nested under a user reply — they live as top-level Interactions
- * sharing the parent's threadKey.)
- */
-export function agentReplyToInteraction(
-  a: AgentReplyShape,
-  threadKey: string,
-): Interaction {
-  return {
-    id: a.id,
-    threadKey,
-    target: replyTargetForKey(threadKey),
-    intent: agentOutcomeToIntent(a.outcome),
-    author: a.agentLabel ?? "agent",
-    authorRole: "agent",
-    body: a.body,
-    createdAt: a.postedAt,
-  };
-}
-
-/**
  * Concatenate Interaction maps, preserving per-thread arrays. `a` entries
  * come first; `b` entries append. Used at boot/load when ingest-derived
  * Interactions (AI / teammate) need to be merged with user-authored ones.
@@ -1397,34 +1364,10 @@ export function mergeInteractionMaps(
 }
 
 /**
- * Bulk-translate a `Record<string, Reply[]>` (legacy snapshot or test
- * fixture) into the unified Interaction store. Each Reply's nested
- * `agentReplies` are flattened to top-level agent Interactions on the
- * same thread, ordered by their `postedAt`.
- */
-export function repliesToInteractions(
-  replies: Record<string, ReplyShape[]>,
-): Record<string, Interaction[]> {
-  const out: Record<string, Interaction[]> = {};
-  for (const [key, list] of Object.entries(replies)) {
-    const ixs: Interaction[] = [];
-    list.forEach((r, i) => {
-      ixs.push(userReplyToInteraction(r, key, i === 0));
-      for (const a of r.agentReplies ?? []) {
-        ixs.push(agentReplyToInteraction(a, key));
-      }
-    });
-    out[key] = ixs;
-  }
-  return out;
-}
-
-/**
- * Translate a legacy `ackedNotes` Set (`${hunkId}:${lineIdx}` keys) into
- * ack Interactions merged into the given map. Used during persist load
- * to fold the deprecated field into `state.interactions`. The ack entries
- * are attributed to `user` and stamped with the sentinel timestamp so
- * they sort before any real activity but after ingest carriers.
+ * Append local-user ack Interactions for the given `${hunkId}:${lineIdx}`
+ * note keys, merged into the given map. Used by gallery fixtures and
+ * Demo seeds to flip specific notes into the acked state without
+ * round-tripping through the reducer.
  */
 export function ackedNotesToInteractions(
   acked: ReadonlySet<string>,
@@ -1448,147 +1391,11 @@ export function ackedNotesToInteractions(
       author: user,
       authorRole: "user",
       body: "",
-      createdAt: PERSIST_ACK_TIMESTAMP,
+      // Slightly after the seam's INGEST_TIMESTAMP so the ack sorts after
+      // the AI note it responds to, but before any real user activity.
+      createdAt: "0001-01-02T00:00:00.000Z",
     };
     out[threadKey] = out[threadKey] ? [...out[threadKey], ack] : [ack];
   }
   return out;
-}
-
-/**
- * Sentinel timestamp used for ack Interactions reconstituted from the
- * legacy `ackedNotes` Set. Slightly after the seam's INGEST_TIMESTAMP so
- * the ack sorts after the AI note it responds to, but before any real
- * user activity that has an actual timestamp.
- */
-const PERSIST_ACK_TIMESTAMP = "0001-01-02T00:00:00.000Z";
-
-/**
- * Translate a legacy `DetachedReply` array into the unified
- * `DetachedInteraction[]` shape.
- */
-export function detachedRepliesToDetachedInteractions(
-  detached: DetachedReplyShape[],
-): DetachedInteraction[] {
-  return detached.map(({ reply, threadKey }) => ({
-    interaction: userReplyToInteraction(reply, threadKey, true),
-    threadKey,
-  }));
-}
-
-/**
- * Down-project the unified Interaction store back to the legacy
- * `Record<string, Reply[]>` shape. Used by persist.ts to keep the v2
- * snapshot format unchanged while in-memory state runs on Interactions.
- *
- * Drops AI/teammate Interactions — those re-arrive from ingest on
- * reload. Drops response intents (ack/unack/accept/reject) on user
- * authorship — acks travel via the legacy `ackedNotes` field. Agent
- * Interactions are nested back under the first user Reply in the thread
- * via `agentReplies` so they round-trip through localStorage.
- *
- * This is the same projection as `interactionsToRepliesForView`, just
- * filtered for what persist needs to round-trip. Kept as a separate
- * entry point so the persist intent stays explicit at call sites.
- */
-export function interactionsToReplies(
-  interactions: Record<string, Interaction[]>,
-): Record<string, ReplyShape[]> {
-  return interactionsToRepliesForView(interactions);
-}
-
-function interactionToReply(ix: Interaction): ReplyShape {
-  return {
-    id: ix.id,
-    author: ix.author,
-    body: ix.body,
-    createdAt: ix.createdAt,
-    enqueuedCommentId: ix.enqueuedCommentId,
-    enqueueError: ix.enqueueError,
-    anchorPath: ix.anchorPath,
-    anchorHash: ix.anchorHash,
-    anchorContext: ix.anchorContext,
-    anchorLineNo: ix.anchorLineNo,
-    originSha: ix.originSha,
-    originType: ix.originType,
-    external: ix.external,
-  };
-}
-
-/**
- * Down-project detached Interactions back to the legacy `DetachedReply[]`
- * shape. Mirror of `detachedRepliesToDetachedInteractions`. Non-user
- * entries are dropped (same reasoning as `interactionsToReplies`).
- */
-export function detachedInteractionsToDetachedReplies(
-  detached: DetachedInteraction[],
-): DetachedReplyShape[] {
-  const out: DetachedReplyShape[] = [];
-  for (const d of detached) {
-    if (d.interaction.authorRole !== "user") continue;
-    if (!isAskIntent(d.interaction.intent)) continue;
-    out.push({ reply: interactionToReply(d.interaction), threadKey: d.threadKey });
-  }
-  return out;
-}
-
-/**
- * View-layer projection of `state.interactions` back to the legacy
- * `Record<string, Reply[]>` shape with agent Interactions re-nested as
- * `agentReplies` on the FIRST user Reply in each thread. Used by view-
- * model builders (Sidebar, DiffView, Inspector) that still consume the
- * legacy shape — they'll move to consume Interactions directly in a
- * later slice. Differs from `interactionsToReplies` (which drops agents,
- * because that one is used by persist where agents re-arrive from
- * polling).
- *
- * Nesting on the first user reply is a best-effort restoration of the
- * legacy "agent reply belongs to the user reply whose enqueuedCommentId
- * matched"; the linking commentId isn't preserved in storage, and
- * threads typically have a single user-initiated entry that all agent
- * responses come back against.
- */
-export function interactionsToRepliesForView(
-  interactions: Record<string, Interaction[]>,
-): Record<string, ReplyShape[]> {
-  const out: Record<string, ReplyShape[]> = {};
-  for (const [key, list] of Object.entries(interactions)) {
-    const replies: ReplyShape[] = [];
-    const agentReplies: AgentReplyShape[] = [];
-    for (const ix of list) {
-      if (ix.authorRole === "user" && isAskIntent(ix.intent)) {
-        replies.push(interactionToReply(ix));
-      } else if (ix.authorRole === "agent") {
-        agentReplies.push(interactionToAgentReply(ix));
-      }
-    }
-    if (replies.length === 0 && agentReplies.length === 0) continue;
-    if (replies.length > 0 && agentReplies.length > 0) {
-      replies[0] = { ...replies[0], agentReplies };
-    }
-    out[key] = replies;
-  }
-  return out;
-}
-
-function interactionToAgentReply(ix: Interaction): AgentReplyShape {
-  const reply: AgentReplyShape = {
-    id: ix.id,
-    body: ix.body,
-    outcome: agentIntentToOutcome(ix.intent),
-    postedAt: ix.createdAt,
-  };
-  // Only surface agentLabel when it was set explicitly. polledToInteraction
-  // defaults missing labels to "agent" so a round-trip through the store
-  // wouldn't otherwise distinguish "no label" from "label is literally agent".
-  if (ix.author && ix.author !== "agent") reply.agentLabel = ix.author;
-  return reply;
-}
-
-function agentIntentToOutcome(
-  intent: InteractionIntent,
-): "addressed" | "declined" | "noted" {
-  if (intent === "accept") return "addressed";
-  if (intent === "reject") return "declined";
-  return "noted";
 }

@@ -2,55 +2,21 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   buildCommentStops,
   changesetCoverage,
-  detachedInteractionsToDetachedReplies,
-  detachedRepliesToDetachedInteractions,
   fileCoverage,
+  firstTargetForKey,
   hunkCoverage,
   initialState,
-  interactionsToRepliesForView,
   mergeInteractionMaps,
   reducer,
-  repliesToInteractions,
+  replyTargetForKey,
   reviewedFilesCount,
   selectAckedNotes,
-  userReplyToInteraction,
 } from "./state";
 import type { Action } from "./state";
-
-// ── Test-local migration adapters ────────────────────────────────────────
-// state.test.ts pre-dated the unified Interaction store; these helpers
-// keep the assertions readable in the legacy Reply/DetachedReply/Set<string>
-// terms by projecting the new store back at the assertion boundary. They
-// also bridge ADD_REPLY-shape dispatches onto the new ADD_INTERACTION
-// action.
-function viewReplies(s: ReviewState): Record<string, Reply[]> {
-  return interactionsToRepliesForView(s.interactions);
-}
-function viewDetached(s: ReviewState): DetachedReply[] {
-  return detachedInteractionsToDetachedReplies(s.detachedInteractions);
-}
-function ackedSet(s: ReviewState): Set<string> {
-  return selectAckedNotes(s);
-}
-function addReplyAction(
-  s: ReviewState,
-  targetKey: string,
-  reply: Reply,
-): Action {
-  const isFirst = (s.interactions[targetKey]?.length ?? 0) === 0;
-  return {
-    type: "ADD_INTERACTION",
-    targetKey,
-    interaction: userReplyToInteraction(reply, targetKey, isFirst),
-  };
-}
 import { captureAnchorContext } from "./anchor";
 import type {
-  DetachedReplyShape as DetachedReply,
-  ReplyShape as Reply,
-} from "./state";
-import type {
   ChangeSet,
+  DetachedInteraction,
   DiffFile,
   DiffLine,
   Hunk,
@@ -60,6 +26,170 @@ import type {
   ReviewState,
   WorktreeSource,
 } from "./types";
+
+// ── Test fixtures shaped as user-Interaction literals ───────────────────
+// Tests author user-authored Interactions through this minimal literal —
+// the helper fills in the bookkeeping (target, intent="comment",
+// authorRole="user") so each test stays focused on the behaviour it
+// exercises. `isFirst=true` keeps the head's target as "line"/"block".
+interface UserInteractionLiteral {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  enqueuedCommentId?: string | null;
+  enqueueError?: boolean;
+  originSha?: string;
+  originType?: "committed" | "dirty";
+  anchorPath?: string;
+  anchorContext?: DiffLine[];
+  anchorHash?: string;
+  anchorLineNo?: number;
+  external?: { source: "pr"; htmlUrl: string };
+}
+
+function mkUserInteraction(
+  threadKey: string,
+  isFirst: boolean,
+  literal: UserInteractionLiteral,
+): Interaction {
+  return {
+    id: literal.id,
+    threadKey,
+    target: isFirst ? firstTargetForKey(threadKey) : replyTargetForKey(threadKey),
+    intent: "comment",
+    author: literal.author,
+    authorRole: "user",
+    body: literal.body,
+    createdAt: literal.createdAt,
+    enqueuedCommentId: literal.enqueuedCommentId,
+    enqueueError: literal.enqueueError,
+    anchorPath: literal.anchorPath,
+    anchorHash: literal.anchorHash,
+    anchorContext: literal.anchorContext,
+    anchorLineNo: literal.anchorLineNo,
+    originSha: literal.originSha,
+    originType: literal.originType,
+    external: literal.external,
+  };
+}
+
+function mkUserInteractionMap(
+  literals: Record<string, UserInteractionLiteral[]>,
+): Record<string, Interaction[]> {
+  const out: Record<string, Interaction[]> = {};
+  for (const [key, list] of Object.entries(literals)) {
+    out[key] = list.map((l, i) => mkUserInteraction(key, i === 0, l));
+  }
+  return out;
+}
+
+function mkDetachedInteractions(
+  detached: Array<{ literal: UserInteractionLiteral; threadKey: string }>,
+): DetachedInteraction[] {
+  return detached.map(({ literal, threadKey }) => ({
+    interaction: mkUserInteraction(threadKey, true, literal),
+    threadKey,
+  }));
+}
+
+// ── Assertion helpers ────────────────────────────────────────────────────
+// Projections over `state.interactions` for legibility — tests assert
+// against legacy reply-shaped objects (with agent responses re-nested as
+// `agentReplies`) to keep diffs small. The legacy types are gone
+// from production code; these local types carry the shape the tests use.
+interface LegacyAgentReply {
+  id: string;
+  body: string;
+  outcome: "addressed" | "declined" | "noted";
+  postedAt: string;
+}
+interface LegacyReply extends UserInteractionLiteral {
+  agentReplies?: LegacyAgentReply[];
+}
+interface LegacyDetached {
+  reply: LegacyReply;
+  threadKey: string;
+}
+
+function legacyReplyFromInteraction(ix: Interaction): LegacyReply {
+  return {
+    id: ix.id,
+    author: ix.author,
+    body: ix.body,
+    createdAt: ix.createdAt,
+    enqueuedCommentId: ix.enqueuedCommentId,
+    enqueueError: ix.enqueueError,
+    anchorPath: ix.anchorPath,
+    anchorHash: ix.anchorHash,
+    anchorContext: ix.anchorContext,
+    anchorLineNo: ix.anchorLineNo,
+    originSha: ix.originSha,
+    originType: ix.originType,
+    external: ix.external,
+  };
+}
+function legacyAgentReplyFromInteraction(ix: Interaction): LegacyAgentReply {
+  const outcome: LegacyAgentReply["outcome"] =
+    ix.intent === "accept"
+      ? "addressed"
+      : ix.intent === "reject"
+        ? "declined"
+        : "noted";
+  return { id: ix.id, body: ix.body, outcome, postedAt: ix.createdAt };
+}
+function viewReplies(s: ReviewState): Record<string, LegacyReply[]> {
+  const out: Record<string, LegacyReply[]> = {};
+  for (const [key, list] of Object.entries(s.interactions)) {
+    const userReplies: LegacyReply[] = [];
+    const agentReplies: LegacyAgentReply[] = [];
+    for (const ix of list) {
+      if (
+        ix.authorRole === "user" &&
+        (ix.intent === "comment" ||
+          ix.intent === "question" ||
+          ix.intent === "request" ||
+          ix.intent === "blocker")
+      ) {
+        userReplies.push(legacyReplyFromInteraction(ix));
+      } else if (ix.authorRole === "agent") {
+        agentReplies.push(legacyAgentReplyFromInteraction(ix));
+      }
+    }
+    if (userReplies.length === 0 && agentReplies.length === 0) continue;
+    if (userReplies.length > 0 && agentReplies.length > 0) {
+      userReplies[0] = { ...userReplies[0], agentReplies };
+    }
+    out[key] = userReplies;
+  }
+  return out;
+}
+function viewDetached(s: ReviewState): LegacyDetached[] {
+  const out: LegacyDetached[] = [];
+  for (const d of s.detachedInteractions) {
+    if (d.interaction.authorRole !== "user") continue;
+    out.push({
+      reply: legacyReplyFromInteraction(d.interaction),
+      threadKey: d.threadKey,
+    });
+  }
+  return out;
+}
+function ackedSet(s: ReviewState): Set<string> {
+  return selectAckedNotes(s);
+}
+function addReplyAction(
+  s: ReviewState,
+  targetKey: string,
+  literal: UserInteractionLiteral,
+): Action {
+  const isFirst = (s.interactions[targetKey]?.length ?? 0) === 0;
+  return {
+    type: "ADD_INTERACTION",
+    targetKey,
+    interaction: mkUserInteraction(targetKey, isFirst, literal),
+  };
+}
 import {
   blockCommentKey,
   lineNoteReplyKey,
@@ -310,7 +440,7 @@ function csWithComments(): {
     makeFile("cs1/f1", [f1h1, makeHunk("cs1/f1#h2", 3)]),
     makeFile("cs1/f2", [makeHunk("cs1/f2#h1", 2)]),
   ]);
-  const dummyReply = (id: string): Reply => ({
+  const dummyReply = (id: string): UserInteractionLiteral => ({
     id,
     author: "you",
     body: "x",
@@ -333,7 +463,7 @@ function csWithComments(): {
         },
       ],
     },
-    repliesToInteractions({
+    mkUserInteractionMap({
       [userCommentKey("cs1/f2#h1", 0)]: [dummyReply("r1")],
       [blockCommentKey("cs1/f1#h2", 1, 2)]: [dummyReply("r2")],
       // Empty array — should be ignored (no actual comment).
@@ -763,7 +893,7 @@ describe("RELOAD_CHANGESET", () => {
     ]);
     const oldCs = makeChangeset("cs-old", [oldFile]);
     const key = `user:f1#h1:2`;
-    const prReply: Reply = {
+    const prReply: UserInteractionLiteral = {
       id: "pr-comment:42",
       author: "external-reviewer",
       body: "from the PR",
@@ -775,7 +905,7 @@ describe("RELOAD_CHANGESET", () => {
     };
     const seeded = {
       ...initialState([oldCs]),
-      interactions: repliesToInteractions({ [key]: [prReply] }),
+      interactions: mkUserInteractionMap({ [key]: [prReply] }),
     };
     // Same content, fresh hunk id (typical "new fetch of the same commit").
     const reloadFile = makeReloadFile("f1-new", "f1.ts", "f1-new#h1", [
@@ -840,7 +970,7 @@ describe("ADD_REPLY", () => {
     expect(viewReplies(s)["k"]).toEqual([r1, r2]);
   });
 
-  it("preserves a Reply's enqueuedCommentId on add (defaults to null)", () => {
+  it("preserves an Interaction's enqueuedCommentId on add (defaults to null)", () => {
     // The App-level submit handler attaches `enqueuedCommentId: null` before
     // dispatching; the reducer just spreads the reply, so this should pass
     // verbatim. The patch action below sets the id once the server responds.
@@ -1070,7 +1200,6 @@ describe("MERGE_AGENT_REPLIES", () => {
         body: "x",
         createdAt: "2026-04-30T00:00:00Z",
         enqueuedCommentId,
-        agentReplies: [],
       }),
     );
   }
@@ -1104,7 +1233,7 @@ describe("MERGE_AGENT_REPLIES", () => {
     };
   }
 
-  it("attaches a polled agent reply to the matching reviewer Reply by enqueuedCommentId", () => {
+  it("attaches a polled agent entry to the matching reviewer Interaction by enqueuedCommentId", () => {
     const s1 = withReply(s0, "k", "cmt_1");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
@@ -1193,7 +1322,7 @@ describe("MERGE_AGENT_REPLIES", () => {
     expect(replies[1].id).toBe("ar2");
   });
 
-  it("is a no-op when no Reply matches the polled commentId", () => {
+  it("is a no-op when no Interaction matches the polled commentId", () => {
     const s1 = withReply(s0, "k", "cmt_1");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
@@ -1274,130 +1403,130 @@ describe("MERGE_AGENT_REPLIES", () => {
   });
 });
 
-// ── MERGE_AGENT_COMMENTS ───────────────────────────────────────────────────
+// ── MERGE_AGENT_REPLIES — top-level (anchor-shaped) entries ───────────────
+// The same action handles agent-started top-level interactions. The reducer
+// resolves (file, lines) against the active changeset to a hunk + lineIdx,
+// then files the Interaction under the matching user:/block: thread key.
+// Unresolvable entries land in `detachedInteractions`.
 
-describe("MERGE_AGENT_COMMENTS", () => {
-  const tlEntry = (
-    id: string,
-    file: string,
-    lines: string,
-    postedAt: string,
-    body: string = `b-${id}`,
-  ) => ({
-    id,
-    body,
-    postedAt,
-    anchor: { file, lines },
-  });
-
-  it("appends top-level entries into the empty agentComments slot, sorted by postedAt", () => {
-    const merged = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [
-        tlEntry("ac_2", "src/foo.ts", "10", "2026-04-30T00:02:00Z"),
-        tlEntry("ac_1", "src/foo.ts", "5-8", "2026-04-30T00:01:00Z"),
-      ],
-    });
-    expect(merged.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
-    expect(merged.agentComments[0].anchor?.lines).toBe("5-8");
-  });
-
-  it("idempotent: re-merging the same batch returns the same state reference", () => {
-    const batch = [
-      tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z"),
+describe("MERGE_AGENT_REPLIES — top-level entries", () => {
+  function csForTopLevel(): ChangeSet {
+    // f1 path = "src/foo.ts" with one hunk covering lines 5-10 (newNo).
+    const lines: DiffLine[] = [
+      { kind: "context", text: "a", oldNo: 5, newNo: 5 },
+      { kind: "context", text: "b", oldNo: 6, newNo: 6 },
+      { kind: "context", text: "c", oldNo: 7, newNo: 7 },
+      { kind: "context", text: "d", oldNo: 8, newNo: 8 },
+      { kind: "context", text: "e", oldNo: 9, newNo: 9 },
+      { kind: "context", text: "f", oldNo: 10, newNo: 10 },
     ];
-    const s1 = reducer(s0, { type: "MERGE_AGENT_COMMENTS", polled: batch });
-    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: batch });
-    expect(s2).toBe(s1);
+    const hunk: Hunk = {
+      id: "cs1/f1#h1",
+      header: "@@",
+      oldStart: 5,
+      oldCount: 6,
+      newStart: 5,
+      newCount: 6,
+      lines,
+    };
+    const file: DiffFile = {
+      id: "cs1/f1",
+      path: "src/foo.ts",
+      language: "ts",
+      status: "modified",
+      hunks: [hunk],
+    };
+    return {
+      id: "cs1",
+      title: "t",
+      author: "tester",
+      branch: "h",
+      base: "b",
+      createdAt: "2026-04-30T00:00:00.000Z",
+      description: "",
+      files: [file],
+    };
+  }
+
+  function topLevel(args: {
+    id: string;
+    file: string;
+    lines: string;
+    body?: string;
+    intent?: "comment" | "question" | "request" | "blocker";
+    target?: "line" | "block";
+    postedAt?: string;
+  }): import("./state").PolledAgentReply {
+    return {
+      id: args.id,
+      file: args.file,
+      lines: args.lines,
+      body: args.body ?? `b-${args.id}`,
+      intent: args.intent ?? "comment",
+      author: "agent",
+      authorRole: "agent",
+      target: args.target ?? (args.lines.includes("-") ? "block" : "line"),
+      postedAt: args.postedAt ?? "2026-04-30T00:01:00Z",
+    };
+  }
+
+  it("resolves a single-line top-level entry to the matching user: thread key", () => {
+    const s = initialState([csForTopLevel()]);
+    const merged = reducer(s, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [topLevel({ id: "ag_1", file: "src/foo.ts", lines: "7" })],
+    });
+    const key = userCommentKey("cs1/f1#h1", 2); // lineNo 7 → lineIdx 2
+    expect(merged.interactions[key]).toHaveLength(1);
+    expect(merged.interactions[key][0]).toMatchObject({
+      id: "ag_1",
+      authorRole: "agent",
+      target: "line",
+      threadKey: key,
+    });
   });
 
-  it("updates existing ids in place when content changes", () => {
-    const s1 = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z", "v1")],
+  it("resolves a block-shaped top-level entry to the matching block: thread key", () => {
+    const s = initialState([csForTopLevel()]);
+    const merged = reducer(s, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [topLevel({ id: "ag_2", file: "src/foo.ts", lines: "6-8" })],
     });
-    const s2 = reducer(s1, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z", "v2")],
+    const key = blockCommentKey("cs1/f1#h1", 1, 3);
+    expect(merged.interactions[key]).toHaveLength(1);
+    expect(merged.interactions[key][0]).toMatchObject({
+      id: "ag_2",
+      target: "block",
     });
-    expect(s2.agentComments).toHaveLength(1);
-    expect(s2.agentComments[0].body).toBe("v2");
   });
 
-  it("appends late-arriving entries in postedAt order", () => {
-    const s1 = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z")],
+  it("places top-level entries whose file isn't in the diff into detachedInteractions", () => {
+    const s = initialState([csForTopLevel()]);
+    const merged = reducer(s, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [topLevel({ id: "ag_3", file: "src/other.ts", lines: "1" })],
     });
-    const s2 = reducer(s1, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [
-        tlEntry("ac_1", "src/foo.ts", "1", "2026-04-30T00:01:00Z"),
-        tlEntry("ac_2", "src/foo.ts", "2", "2026-04-30T00:02:00Z"),
-      ],
-    });
-    expect(s2.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
+    expect(merged.detachedInteractions).toHaveLength(1);
+    expect(merged.detachedInteractions[0].interaction.id).toBe("ag_3");
+    expect(merged.detachedInteractions[0].interaction.authorRole).toBe("agent");
   });
 
-  it("ignores reply-shaped entries (defensive — splitter should never send them here)", () => {
-    const merged = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [
-        {
-          id: "ar_1",
-          body: "x",
-          postedAt: "2026-04-30T00:01:00Z",
-          parent: { commentId: "cmt_1", outcome: "noted" },
-        },
-      ],
+  it("places top-level entries whose line is outside any hunk into detachedInteractions", () => {
+    const s = initialState([csForTopLevel()]);
+    const merged = reducer(s, {
+      type: "MERGE_AGENT_REPLIES",
+      polled: [topLevel({ id: "ag_4", file: "src/foo.ts", lines: "99" })],
     });
-    expect(merged).toBe(s0);
-    expect(merged.agentComments).toEqual([]);
+    expect(merged.detachedInteractions).toHaveLength(1);
+    expect(merged.detachedInteractions[0].interaction.id).toBe("ag_4");
   });
 
-  it("replaces — entries missing from the polled batch are evicted", () => {
-    // The server returns the worktree's full authoritative list every
-    // poll (capped at 200). When an entry ages out of the cap, the next
-    // poll must remove it from state.agentComments — additive merging
-    // would leave stale entries indefinitely.
-    const s1 = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [
-        tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z"),
-        tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z"),
-      ],
-    });
-    expect(s1.agentComments.map((c) => c.id)).toEqual(["ac_1", "ac_2"]);
-    const s2 = reducer(s1, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z")],
-    });
-    expect(s2.agentComments.map((c) => c.id)).toEqual(["ac_2"]);
-  });
-
-  it("clears the slot on an empty polled batch (worktree-switch reset)", () => {
-    // When the polling hook resets to [] on worktree change, the empty
-    // dispatch flows through and clears the previous worktree's entries
-    // so they don't leak into the new worktree's view.
-    const s1 = reducer(s0, {
-      type: "MERGE_AGENT_COMMENTS",
-      polled: [tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z")],
-    });
-    expect(s1.agentComments).toHaveLength(1);
-    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: [] });
-    expect(s2.agentComments).toEqual([]);
-  });
-
-  it("idempotent on a structurally-equal but freshly-allocated batch", () => {
-    // Re-polling produces a new array; the reducer must compare element
-    // contents, not array refs, to preserve the no-rerender invariant.
-    const batch = () => [
-      tlEntry("ac_1", "a.ts", "1", "2026-04-30T00:01:00Z"),
-      tlEntry("ac_2", "a.ts", "2", "2026-04-30T00:02:00Z"),
-    ];
-    const s1 = reducer(s0, { type: "MERGE_AGENT_COMMENTS", polled: batch() });
-    const s2 = reducer(s1, { type: "MERGE_AGENT_COMMENTS", polled: batch() });
-    expect(s2).toBe(s1);
+  it("deduplicates detached entries by id across repeated polls", () => {
+    const s = initialState([csForTopLevel()]);
+    const dup = topLevel({ id: "ag_5", file: "missing.ts", lines: "1" });
+    const s1 = reducer(s, { type: "MERGE_AGENT_REPLIES", polled: [dup] });
+    const s2 = reducer(s1, { type: "MERGE_AGENT_REPLIES", polled: [dup] });
+    expect(s2.detachedInteractions).toHaveLength(1);
   });
 });
 
@@ -1821,7 +1950,7 @@ describe("MERGE_PR_OVERLAY", () => {
 // ── MERGE_PR_REPLIES ───────────────────────────────────────────────────────
 
 describe("MERGE_PR_REPLIES", () => {
-  function makePrReply(id: string, body = "external"): Reply {
+  function makePrReply(id: string, body = "external"): UserInteractionLiteral {
     return {
       id,
       author: "external-reviewer",
@@ -1837,7 +1966,7 @@ describe("MERGE_PR_REPLIES", () => {
     const next = reducer(state, {
       type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:1")] }),
+      prInteractions: mkUserInteractionMap({ [key]: [makePrReply("pr-comment:1")] }),
       prDetached: [],
     });
     expect(viewReplies(next)[key]).toHaveLength(1);
@@ -1847,7 +1976,7 @@ describe("MERGE_PR_REPLIES", () => {
   it("preserves user replies on the same key", () => {
     const cs = defaultChangeset();
     const key = userCommentKey("cs1/f1#h1", 0);
-    const userReply: Reply = {
+    const userReply: UserInteractionLiteral = {
       id: "u1",
       author: "luiz",
       body: "mine",
@@ -1855,12 +1984,12 @@ describe("MERGE_PR_REPLIES", () => {
     };
     const state = {
       ...initialState([cs]),
-      interactions: repliesToInteractions({ [key]: [userReply] }),
+      interactions: mkUserInteractionMap({ [key]: [userReply] }),
     };
     const next = reducer(state, {
       type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:1")] }),
+      prInteractions: mkUserInteractionMap({ [key]: [makePrReply("pr-comment:1")] }),
       prDetached: [],
     });
     expect(viewReplies(next)[key]).toHaveLength(2);
@@ -1873,12 +2002,12 @@ describe("MERGE_PR_REPLIES", () => {
     const stale = makePrReply("pr-comment:OLD", "stale upstream comment");
     const state = {
       ...initialState([cs]),
-      interactions: repliesToInteractions({ [key]: [stale] }),
+      interactions: mkUserInteractionMap({ [key]: [stale] }),
     };
     const next = reducer(state, {
       type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
-      prInteractions: repliesToInteractions({ [key]: [makePrReply("pr-comment:NEW")] }),
+      prInteractions: mkUserInteractionMap({ [key]: [makePrReply("pr-comment:NEW")] }),
       prDetached: [],
     });
     expect(viewReplies(next)[key]).toHaveLength(1);
@@ -1887,12 +2016,12 @@ describe("MERGE_PR_REPLIES", () => {
 
   it("merges in detached replies and strips prior PR-sourced detached entries", () => {
     const cs = defaultChangeset();
-    const stalePrDetached: DetachedReply = {
-      reply: makePrReply("pr-comment:STALE"),
+    const stalePrDetached = {
+      literal: makePrReply("pr-comment:STALE"),
       threadKey: "pr-detached:STALE",
     };
-    const userDetached: DetachedReply = {
-      reply: {
+    const userDetached = {
+      literal: {
         id: "u-d",
         author: "luiz",
         body: "stranded",
@@ -1902,18 +2031,15 @@ describe("MERGE_PR_REPLIES", () => {
     };
     const state = {
       ...initialState([cs]),
-      detachedInteractions: detachedRepliesToDetachedInteractions([
-        stalePrDetached,
-        userDetached,
-      ]),
+      detachedInteractions: mkDetachedInteractions([stalePrDetached, userDetached]),
     };
-    const newPrDetached: DetachedReply = {
-      reply: {
+    const newPrDetached = {
+      literal: {
         ...makePrReply("pr-comment:NEW"),
         anchorPath: "src/foo.ts",
         anchorLineNo: 10,
         anchorContext: [],
-        originType: "committed",
+        originType: "committed" as const,
       },
       threadKey: "pr-detached:NEW",
     };
@@ -1921,7 +2047,7 @@ describe("MERGE_PR_REPLIES", () => {
       type: "MERGE_PR_INTERACTIONS",
       changesetId: "cs1",
       prInteractions: {},
-      prDetached: detachedRepliesToDetachedInteractions([newPrDetached]),
+      prDetached: mkDetachedInteractions([newPrDetached]),
     });
     // User detached preserved, stale PR-detached removed, new PR-detached installed.
     expect(viewDetached(next)).toHaveLength(2);

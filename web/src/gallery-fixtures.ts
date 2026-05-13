@@ -8,6 +8,11 @@ import {
 import { CS_42, INTERACTIONS_42 } from "./fixtures/cs-42-preferences";
 import { CS_57, INTERACTIONS_57 } from "./fixtures/cs-57-session-race";
 import {
+  CS_91,
+  CS_91_DETACHED,
+  CS_91_INTERACTIONS,
+} from "./fixtures/cs-91-agent-flow";
+import {
   ackedNotesToInteractions,
   initialState,
   mergeInteractionMaps,
@@ -370,7 +375,39 @@ export const fixtureFileReviewed: GalleryFixture = {
   cursorLineIdx: 0,
 };
 
-// ── 7. plan (rule-based) ───────────────────────────────────────────────────
+// ── 7. agent-flow seeded ──────────────────────────────────────────────────
+// Exercises every shape of agent-authored Interaction in one fixture:
+//   - a user-authored line comment with an agent reply threaded under it
+//   - an agent-started top-level block comment
+//   - an out-of-hunk agent comment in state.detachedInteractions
+// Cursor lands on the user-comment line so the Inspector opens that
+// thread by default.
+
+const CS_91_QUEUE_FILE = CS_91.files[0];
+const CS_91_QUEUE_HUNK = CS_91_QUEUE_FILE.hunks[0];
+
+export const fixtureAgentFlowSeeded: GalleryFixture = {
+  kind: "diff",
+  name: "agent-flow-seeded",
+  description:
+    "cs-91 with three agent-authored shapes: a reply threaded under a delivered user comment, a top-level agent block comment, and an out-of-hunk agent comment surfaced in the Detached group.",
+  state: {
+    ...initialState([CS_91]),
+    cursor: {
+      changesetId: CS_91.id,
+      fileId: CS_91_QUEUE_FILE.id,
+      hunkId: CS_91_QUEUE_HUNK.id,
+      lineIdx: 6,
+    },
+    interactions: CS_91_INTERACTIONS,
+    detachedInteractions: CS_91_DETACHED,
+  },
+  fileId: CS_91_QUEUE_FILE.id,
+  hunkId: CS_91_QUEUE_HUNK.id,
+  cursorLineIdx: 6,
+};
+
+// ── 8. plan (rule-based) ───────────────────────────────────────────────────
 // The "where to begin" screen for cs-42, computed deterministically from the
 // parsed ChangeSet (no AI). Shows the intent/map/entry-points layout with
 // every claim citing a source.
@@ -425,4 +462,5 @@ export const ALL_FIXTURES: GalleryFixture[] = [
   fixtureBlockSelectionGallery,
   fixtureAiSaturated,
   fixtureTeammateEndorsed,
+  fixtureAgentFlowSeeded,
 ];

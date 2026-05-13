@@ -1,4 +1,5 @@
-import type { ChangeSet } from "../types";
+import type { ChangeSet, DetachedInteraction, Interaction } from "../types";
+import { blockCommentKey, userCommentKey } from "../types";
 
 // Powers the "agent integration" segment of the demo reel — see the
 // trailing frames in `web/src/components/Demo.tsx`. A tight server-side
@@ -54,6 +55,10 @@ export const CS_91: ChangeSet = {
         },
       ],
     },
+    // Note: `interactions` and `detachedInteractions` for cs-91 are
+    // exposed below as separate exports — fixtures consumers (Demo,
+    // gallery) seed them via the LOAD_CHANGESET action's optional
+    // interactions arg.
     {
       id: "cs-91/server/src/index.ts",
       path: "server/src/index.ts",
@@ -85,4 +90,71 @@ export const CS_91: ChangeSet = {
     },
   ],
 };
+
+// Seeded interactions for the agent-flow demo:
+//   - a user-authored line comment on the queue file with an agent reply
+//     ('accept') threaded under it
+//   - an agent-started top-level block comment on the route file
+//   - an out-of-hunk agent comment that lands in detachedInteractions
+//     (file is in the diff but the cited line falls outside any hunk)
+const QUEUE_HUNK = "cs-91/server/src/agent-queue.ts#h1";
+const ROUTE_HUNK = "cs-91/server/src/index.ts#h1";
+
+const userLineKey = userCommentKey(QUEUE_HUNK, 6); // lineIdx 6 → newNo 10 ("assertGitDir" line)
+const agentBlockKey = blockCommentKey(ROUTE_HUNK, 3, 6); // newNo n/a — covers the deleted check
+
+const userLineInteraction: Interaction = {
+  id: "u-luiz-1",
+  threadKey: userLineKey,
+  target: "line",
+  intent: "request",
+  author: "luiz",
+  authorRole: "user",
+  body: "Move this guard above the queue lookup so we don't allocate an entry for a bad path.",
+  createdAt: "2026-05-06T09:32:00Z",
+  enqueuedCommentId: "cmt_luiz_1",
+};
+
+const agentReplyToUser: Interaction = {
+  id: "ag-r-1",
+  threadKey: userLineKey,
+  target: "reply-to-user",
+  intent: "accept",
+  author: "agent",
+  authorRole: "agent",
+  body: "Reordered — guard is now the first thing the function does.",
+  createdAt: "2026-05-06T09:35:00Z",
+};
+
+const agentTopLevel: Interaction = {
+  id: "ag-tl-1",
+  threadKey: agentBlockKey,
+  target: "block",
+  intent: "comment",
+  author: "agent",
+  authorRole: "agent",
+  body: "Removing the route-level guard relies on assertGitDir being idempotent — flagging in case that ever changes.",
+  createdAt: "2026-05-06T09:36:00Z",
+};
+
+const agentDetached: Interaction = {
+  id: "ag-det-1",
+  threadKey: "agent-detached:ag-det-1",
+  target: "line",
+  intent: "comment",
+  author: "agent",
+  authorRole: "agent",
+  body: "Worth adding a smoke test under tests/queue.ts — but that file isn't in this changeset.",
+  createdAt: "2026-05-06T09:37:00Z",
+  anchorPath: "tests/queue.ts",
+};
+
+export const CS_91_INTERACTIONS: Record<string, Interaction[]> = {
+  [userLineKey]: [userLineInteraction, agentReplyToUser],
+  [agentBlockKey]: [agentTopLevel],
+};
+
+export const CS_91_DETACHED: DetachedInteraction[] = [
+  { interaction: agentDetached, threadKey: agentDetached.threadKey },
+];
 

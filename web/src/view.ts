@@ -483,9 +483,6 @@ function buildCommentCounts(
   for (const [key, list] of Object.entries(interactions)) {
     const parsed = parseReplyKey(key);
     if (!parsed) continue;
-    // Agent-comment threads aren't hunk-anchored; skip them in the
-    // hunk-based counter.
-    if (parsed.kind === "agentComment") continue;
     const fileId = hunkToFile.get(parsed.hunkId);
     if (!fileId) continue;
     const userish = list.filter(
@@ -784,7 +781,7 @@ export interface AiNoteRowItem {
   isAcked: boolean;
   /** True when this line is the cursor position. */
   isCurrent: boolean;
-  /** Reply-thread key for this note (passed to onStartDraft / onSubmitReply). */
+  /** Thread key for this note (passed to onStartDraft / onSubmitReply). */
   replyKey: string;
   /** Existing replies on this note's thread. */
   replies: Interaction[];
@@ -813,7 +810,7 @@ export interface UserCommentRowItem {
    */
   rangeHiLineIdx?: number;
   rangeHiLineNo?: number;
-  /** Reply-thread key for this user comment. */
+  /** Thread key for this user comment. */
   threadKey: string;
   replies: Interaction[];
   isDrafting: boolean;
@@ -850,7 +847,7 @@ export interface InspectorViewModel {
 
   // ── AI hunk summary panel (absent when hunk has no aiSummary) ──────────
   aiSummary: string | null;
-  /** Reply key for the hunk summary thread. */
+  /** Thread key for the hunk summary thread. */
   aiSummaryReplyKey: string | null;
   aiSummaryReplies: Interaction[];
   aiSummaryIsDrafting: boolean;

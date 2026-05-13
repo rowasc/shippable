@@ -267,7 +267,8 @@ describe("useDeliveredPolling — polling lifecycle", () => {
     await act(() => Promise.resolve());
     expect(repliesFetcher).toHaveBeenCalledWith("/wt");
     expect(r.result.current.agentReplies).toHaveLength(1);
-    expect(r.result.current.agentReplies[0].parentId).toBe("cmt_1");
+    const first = r.result.current.agentReplies[0];
+    expect("parentId" in first ? first.parentId : null).toBe("cmt_1");
   });
 
   it("resets state when worktreePath changes", async () => {

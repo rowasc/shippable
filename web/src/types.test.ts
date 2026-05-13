@@ -1,39 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { agentCommentReplyKey, parseReplyKey } from "./types";
+import { parseReplyKey } from "./types";
 
-describe("agentCommentReplyKey + parseReplyKey", () => {
-  it("agentCommentReplyKey returns the prefixed key", () => {
-    expect(agentCommentReplyKey("ac-1")).toBe("agentComment:ac-1");
-  });
-
-  it("parses agentComment:<id>", () => {
-    const parsed = parseReplyKey("agentComment:01HZABCD");
-    expect(parsed).toEqual({
-      kind: "agentComment",
-      agentCommentId: "01HZABCD",
-    });
-  });
-
-  it("returns null for agentComment: with empty id", () => {
-    expect(parseReplyKey("agentComment:")).toBeNull();
-  });
-
-  it("treats colons inside the id as part of the id (no further parsing)", () => {
-    // Agent-comment ids are opaque server-minted strings; tolerate exotic
-    // values rather than rejecting them.
-    const parsed = parseReplyKey("agentComment:foo:bar");
-    expect(parsed).toEqual({
-      kind: "agentComment",
-      agentCommentId: "foo:bar",
-    });
-  });
-
-  it("leaves the existing kinds parsing unchanged", () => {
+describe("parseReplyKey", () => {
+  it("parses note:hunkId:lineIdx", () => {
     expect(parseReplyKey("note:h1:3")).toEqual({
       kind: "note",
       hunkId: "h1",
       lineIdx: 3,
     });
+  });
+
+  it("parses user:hunkId:lineIdx", () => {
+    expect(parseReplyKey("user:h1:7")).toEqual({
+      kind: "user",
+      hunkId: "h1",
+      lineIdx: 7,
+    });
+  });
+
+  it("parses block:hunkId:lo-hi and exposes lineIdx=lo", () => {
     expect(parseReplyKey("block:h1:5-9")).toEqual({
       kind: "block",
       hunkId: "h1",
@@ -41,10 +26,34 @@ describe("agentCommentReplyKey + parseReplyKey", () => {
       hi: 9,
       lineIdx: 5,
     });
+  });
+
+  it("parses hunkSummary:hunkId", () => {
+    expect(parseReplyKey("hunkSummary:h1")).toEqual({
+      kind: "hunkSummary",
+      hunkId: "h1",
+      lineIdx: 0,
+    });
+  });
+
+  it("parses teammate:hunkId", () => {
     expect(parseReplyKey("teammate:h1")).toEqual({
       kind: "teammate",
       hunkId: "h1",
       lineIdx: 0,
+    });
+  });
+
+  it("returns null for malformed input", () => {
+    expect(parseReplyKey("bogus")).toBeNull();
+    expect(parseReplyKey("note:")).toBeNull();
+  });
+
+  it("preserves colons inside the hunk id (PR csIds carry them)", () => {
+    expect(parseReplyKey("note:pr:github.com:foo:bar:42#h1:3")).toEqual({
+      kind: "note",
+      hunkId: "pr:github.com:foo:bar:42#h1",
+      lineIdx: 3,
     });
   });
 });

@@ -366,7 +366,7 @@ function filterDraftsByHunk(
 }
 
 /**
- * Reply-key shapes (see types.ts):
+ * Thread-key shapes (see types.ts):
  *   note:hunkId:lineIdx · user:hunkId:lineIdx · block:hunkId:lo-hi
  *   hunkSummary:hunkId  · teammate:hunkId
  * The hunkId can contain `/` and `#`, so we split on the first colon to

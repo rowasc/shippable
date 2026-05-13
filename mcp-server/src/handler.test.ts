@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
   handleCheckReviewComments,
-  handlePostReviewReply,
+  handlePostReviewInteraction,
 } from "./handler.js";
 
 interface CapturedRequest {
@@ -181,15 +181,15 @@ describe("handleCheckReviewComments", () => {
   });
 });
 
-describe("handlePostReviewReply", () => {
-  it("POSTs to /api/agent/replies with the input and returns the assigned id", async () => {
+describe("handlePostReviewInteraction — reply mode", () => {
+  it("POSTs to /api/agent/replies with parentId and returns the assigned id", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "reply-1" }));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewInteraction(
       {
         worktreePath: "/repo",
         parentId: "c1",
-        replyText: "fixed it",
+        body: "fixed it",
         intent: "accept",
       },
       { fetchFn },
@@ -213,8 +213,8 @@ describe("handlePostReviewReply", () => {
   it("falls back to deps.cwd() when worktreePath is absent", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewReply(
-      { parentId: "c1", replyText: "x", intent: "ack" },
+    await handlePostReviewInteraction(
+      { parentId: "c1", body: "x", intent: "ack" },
       { fetchFn, cwd: () => "/tmp/cwd" },
     );
 
@@ -226,11 +226,11 @@ describe("handlePostReviewReply", () => {
   it("returns an error result on HTTP 500 with port and status in the message", async () => {
     const { fetchFn } = makeFetch(new Response("oops", { status: 500 }));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewInteraction(
       {
         worktreePath: "/repo",
         parentId: "c1",
-        replyText: "x",
+        body: "x",
         intent: "accept",
       },
       { fetchFn, port: 4242 },
@@ -244,11 +244,11 @@ describe("handlePostReviewReply", () => {
   it("returns an error result without throwing on fetch rejection", async () => {
     const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewInteraction(
       {
         worktreePath: "/repo",
         parentId: "c1",
-        replyText: "x",
+        body: "x",
         intent: "reject",
       },
       { fetchFn, port: 7777 },
@@ -263,11 +263,11 @@ describe("handlePostReviewReply", () => {
     vi.stubEnv("SHIPPABLE_PORT", "5050");
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewReply(
+    await handlePostReviewInteraction(
       {
         worktreePath: "/repo",
         parentId: "c1",
-        replyText: "x",
+        body: "x",
         intent: "ack",
       },
       { fetchFn },
@@ -284,11 +284,11 @@ describe("handlePostReviewReply", () => {
       }),
     );
 
-    const result = await handlePostReviewReply(
+    const result = await handlePostReviewInteraction(
       {
         worktreePath: "/repo",
         parentId: "c1",
-        replyText: "x",
+        body: "x",
         intent: "accept",
       },
       { fetchFn, port: 5151 },
@@ -296,5 +296,97 @@ describe("handlePostReviewReply", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toMatch(/JSON|parse/i);
+  });
+
+  it("rejects reply intents that aren't ack/accept/reject", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+    const result = await handlePostReviewInteraction(
+      {
+        worktreePath: "/repo",
+        parentId: "c1",
+        body: "x",
+        intent: "comment",
+      },
+      { fetchFn },
+    );
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("handlePostReviewInteraction — top-level mode", () => {
+  it("POSTs with target+file+lines and returns the assigned id", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "tl-1" }));
+
+    const result = await handlePostReviewInteraction(
+      {
+        worktreePath: "/repo",
+        target: "line",
+        file: "src/foo.ts",
+        lines: "42",
+        body: "noticed this",
+        intent: "request",
+      },
+      { fetchFn },
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0]!.text).toContain("tl-1");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toMatch(/\/api\/agent\/replies$/);
+    const body = JSON.parse(String(calls[0]!.init?.body));
+    expect(body).toEqual({
+      worktreePath: "/repo",
+      target: "line",
+      file: "src/foo.ts",
+      lines: "42",
+      body: "noticed this",
+      intent: "request",
+    });
+  });
+
+  it("rejects top-level intents that aren't comment/question/request/blocker", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+    const result = await handlePostReviewInteraction(
+      {
+        worktreePath: "/repo",
+        target: "block",
+        file: "src/foo.ts",
+        lines: "1-3",
+        body: "x",
+        intent: "ack",
+      },
+      { fetchFn },
+    );
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects requests that set both parentId and anchor fields", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+    const result = await handlePostReviewInteraction(
+      {
+        worktreePath: "/repo",
+        parentId: "c1",
+        target: "line",
+        file: "src/foo.ts",
+        lines: "1",
+        body: "x",
+        intent: "comment",
+      },
+      { fetchFn },
+    );
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects requests that set neither parentId nor anchor fields", async () => {
+    const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
+    const result = await handlePostReviewInteraction(
+      { worktreePath: "/repo", body: "x", intent: "comment" },
+      { fetchFn },
+    );
+    expect(result.isError).toBe(true);
+    expect(calls).toHaveLength(0);
   });
 });
