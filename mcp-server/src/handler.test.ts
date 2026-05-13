@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_PORT,
   handleCheckReviewComments,
-  handlePostReviewInteraction,
+  handlePostReviewComment,
 } from "./handler.js";
 
 interface CapturedRequest {
@@ -181,15 +181,15 @@ describe("handleCheckReviewComments", () => {
   });
 });
 
-describe("handlePostReviewInteraction — reply mode", () => {
-  it("POSTs to /api/agent/replies with parentId and returns the assigned id", async () => {
+describe("handlePostReviewComment — reply mode", () => {
+  it("POSTs to /api/agent/replies with parentInteractionId and returns the assigned id", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "reply-1" }));
 
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "fixed it",
+        parentInteractionId: "c1",
+        replyText: "fixed it",
         intent: "accept",
       },
       { fetchFn },
@@ -199,8 +199,9 @@ describe("handlePostReviewInteraction — reply mode", () => {
     expect(result.content[0]!.text).toContain("reply-1");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toMatch(/\/api\/agent\/replies$/);
-    // Wire field on the local server endpoint stays `body` — the
-    // `replyText` rename is contained to the MCP tool's input schema.
+    // MCP boundary translates: `parentInteractionId` → `parentId` and
+    // `replyText` → `body` on the way to the HTTP wire. Server-side
+    // names stay unchanged.
     const body = JSON.parse(String(calls[0]!.init?.body));
     expect(body).toEqual({
       worktreePath: "/repo",
@@ -213,8 +214,8 @@ describe("handlePostReviewInteraction — reply mode", () => {
   it("falls back to deps.cwd() when worktreePath is absent", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewInteraction(
-      { parentId: "c1", body: "x", intent: "ack" },
+    await handlePostReviewComment(
+      { parentInteractionId: "c1", replyText: "x", intent: "ack" },
       { fetchFn, cwd: () => "/tmp/cwd" },
     );
 
@@ -226,11 +227,11 @@ describe("handlePostReviewInteraction — reply mode", () => {
   it("returns an error result on HTTP 500 with port and status in the message", async () => {
     const { fetchFn } = makeFetch(new Response("oops", { status: 500 }));
 
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "x",
+        parentInteractionId: "c1",
+        replyText: "x",
         intent: "accept",
       },
       { fetchFn, port: 4242 },
@@ -244,11 +245,11 @@ describe("handlePostReviewInteraction — reply mode", () => {
   it("returns an error result without throwing on fetch rejection", async () => {
     const { fetchFn } = makeFetch(new Error("ECONNREFUSED"));
 
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "x",
+        parentInteractionId: "c1",
+        replyText: "x",
         intent: "reject",
       },
       { fetchFn, port: 7777 },
@@ -263,11 +264,11 @@ describe("handlePostReviewInteraction — reply mode", () => {
     vi.stubEnv("SHIPPABLE_PORT", "5050");
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
 
-    await handlePostReviewInteraction(
+    await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "x",
+        parentInteractionId: "c1",
+        replyText: "x",
         intent: "ack",
       },
       { fetchFn },
@@ -284,11 +285,11 @@ describe("handlePostReviewInteraction — reply mode", () => {
       }),
     );
 
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "x",
+        parentInteractionId: "c1",
+        replyText: "x",
         intent: "accept",
       },
       { fetchFn, port: 5151 },
@@ -300,11 +301,11 @@ describe("handlePostReviewInteraction — reply mode", () => {
 
   it("rejects reply intents that aren't ack/accept/reject", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
-        body: "x",
+        parentInteractionId: "c1",
+        replyText: "x",
         intent: "comment",
       },
       { fetchFn },
@@ -314,17 +315,17 @@ describe("handlePostReviewInteraction — reply mode", () => {
   });
 });
 
-describe("handlePostReviewInteraction — top-level mode", () => {
+describe("handlePostReviewComment — top-level mode", () => {
   it("POSTs with target+file+lines and returns the assigned id", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "tl-1" }));
 
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
         target: "line",
         file: "src/foo.ts",
         lines: "42",
-        body: "noticed this",
+        replyText: "noticed this",
         intent: "request",
       },
       { fetchFn },
@@ -347,13 +348,13 @@ describe("handlePostReviewInteraction — top-level mode", () => {
 
   it("rejects top-level intents that aren't comment/question/request/blocker", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
         target: "block",
         file: "src/foo.ts",
         lines: "1-3",
-        body: "x",
+        replyText: "x",
         intent: "ack",
       },
       { fetchFn },
@@ -362,16 +363,16 @@ describe("handlePostReviewInteraction — top-level mode", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("rejects requests that set both parentId and anchor fields", async () => {
+  it("rejects requests that set both parentInteractionId and anchor fields", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
-    const result = await handlePostReviewInteraction(
+    const result = await handlePostReviewComment(
       {
         worktreePath: "/repo",
-        parentId: "c1",
+        parentInteractionId: "c1",
         target: "line",
         file: "src/foo.ts",
         lines: "1",
-        body: "x",
+        replyText: "x",
         intent: "comment",
       },
       { fetchFn },
@@ -380,10 +381,10 @@ describe("handlePostReviewInteraction — top-level mode", () => {
     expect(calls).toHaveLength(0);
   });
 
-  it("rejects requests that set neither parentId nor anchor fields", async () => {
+  it("rejects requests that set neither parentInteractionId nor anchor fields", async () => {
     const { fetchFn, calls } = makeFetch(jsonResponse({ id: "x" }));
-    const result = await handlePostReviewInteraction(
-      { worktreePath: "/repo", body: "x", intent: "comment" },
+    const result = await handlePostReviewComment(
+      { worktreePath: "/repo", replyText: "x", intent: "comment" },
       { fetchFn },
     );
     expect(result.isError).toBe(true);

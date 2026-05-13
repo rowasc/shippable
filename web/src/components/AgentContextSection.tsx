@@ -548,11 +548,11 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 
 /**
  * Two magic phrases — one per direction of the loop. `check shippable` pulls
- * pending reviewer comments via the `shippable_check_review_comments` tool;
- * `report back to shippable` posts per-comment replies via the new
- * `shippable_post_review_reply` tool. The descriptions on both tools tune
- * for implicit triggering, but a literal phrase is the prompt-drift escape
- * hatch — see docs/sdd/agent-reply-support/spec.md.
+ * pending reviewer interactions via the `shippable_check_review_comments`
+ * tool; `report back to shippable` posts replies (or fresh top-level
+ * interactions) via `shippable_post_review_comment`. The descriptions on
+ * both tools tune for implicit triggering, but a literal phrase is the
+ * prompt-drift escape hatch — see docs/sdd/agent-reply-support/spec.md.
  */
 const MAGIC_PHRASE_PULL = "check shippable";
 const MAGIC_PHRASE_REPORT = "report back to shippable";
