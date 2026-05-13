@@ -97,21 +97,29 @@ export type AgentResponseIntent = "ack" | "accept" | "reject";
 export type AskIntent = "comment" | "question" | "request" | "blocker";
 export type AgentIntent = AgentResponseIntent | AskIntent;
 
-interface PostInteractionInput {
+interface PostCommentInput {
   worktreePath?: string;
   /** Reply mode: the id of the interaction this entry answers. */
-  parentId?: string;
+  parentInteractionId?: string;
   /** Top-level mode: 'line' for a single line, 'block' for a range. */
   target?: "line" | "block";
   /** Top-level mode: repo-relative file path. */
   file?: string;
   /** Top-level mode: the line number or inclusive range, e.g. "118" or "72-79". */
   lines?: string;
-  body: string;
+  /**
+   * Free-form prose for the interaction. Named `replyText` rather than
+   * `body` because some model serializers conflate `body` with HTML's
+   * `<body>` element and emit `</body>` close tags into the value — see
+   * docs/sdd/agent-reply-support/spec.md. The HTTP wire field on the
+   * local Shippable server stays `body`; the rename is contained to the
+   * MCP boundary because that's where the serializer problem bites.
+   */
+  replyText: string;
   intent: AgentIntent;
 }
 
-interface PostInteractionResponse {
+interface PostCommentResponse {
   id: string;
 }
 
@@ -140,8 +148,8 @@ function isResponseIntent(value: unknown): value is AgentResponseIntent {
   );
 }
 
-export async function handlePostReviewInteraction(
-  input: PostInteractionInput,
+export async function handlePostReviewComment(
+  input: PostCommentInput,
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
   const port = resolvePort(deps);
@@ -151,7 +159,8 @@ export async function handlePostReviewInteraction(
   const fetchFn = deps?.fetchFn ?? fetch;
 
   const hasParent =
-    typeof input.parentId === "string" && input.parentId.length > 0;
+    typeof input.parentInteractionId === "string" &&
+    input.parentInteractionId.length > 0;
   const hasAnchor =
     typeof input.target === "string" &&
     typeof input.file === "string" &&
@@ -160,7 +169,7 @@ export async function handlePostReviewInteraction(
     input.lines.length > 0;
   if (hasParent === hasAnchor) {
     return errorResult(
-      "Either parentId (reply mode) or target+file+lines (top-level mode) must be set — never both.",
+      "Either parentInteractionId (reply mode) or target+file+lines (top-level mode) must be set — never both.",
     );
   }
   if (hasParent && !isResponseIntent(input.intent)) {
@@ -174,13 +183,16 @@ export async function handlePostReviewInteraction(
     );
   }
 
+  // Translate MCP-boundary names to the HTTP wire shape — server-side
+  // stays `parentId` + `body` (see PostCommentInput JSDoc for why the
+  // MCP names diverge).
   const payload: Record<string, unknown> = {
     worktreePath,
-    body: input.body,
+    body: input.replyText,
     intent: input.intent,
   };
   if (hasParent) {
-    payload.parentId = input.parentId;
+    payload.parentId = input.parentInteractionId;
   } else {
     payload.target = input.target;
     payload.file = input.file;
@@ -207,9 +219,9 @@ export async function handlePostReviewInteraction(
     );
   }
 
-  let parsed: PostInteractionResponse;
+  let parsed: PostCommentResponse;
   try {
-    parsed = (await response.json()) as PostInteractionResponse;
+    parsed = (await response.json()) as PostCommentResponse;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return errorResult(
@@ -218,7 +230,7 @@ export async function handlePostReviewInteraction(
   }
 
   const summary = hasParent
-    ? `Posted reply ${parsed.id} for interaction ${input.parentId}.`
+    ? `Posted reply ${parsed.id} for interaction ${input.parentInteractionId}.`
     : `Posted ${input.intent} ${parsed.id} on ${input.file}:${input.lines}.`;
   return {
     content: [{ type: "text", text: summary }],

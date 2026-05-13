@@ -643,13 +643,13 @@ function buildFrames(): Frame[] {
   // can see what was already there before scrolling shows the new lines.
   const reviewerFeedbackEnvelope =
     `<reviewer-feedback from="shippable" commit="a3c91d7e">\n` +
-    `  <comment id="cmt_a1" file="server/src/agent-queue.ts" lines="4" kind="line">\n` +
+    `  <interaction id="cmt_a1" target="line" intent="request" author="@luiz" authorRole="user" file="server/src/agent-queue.ts" lines="4">\n` +
     `    \`assertGitDir\` reads like it returns void — rename to\n` +
     `    \`assertWorktreeIsGitDir\`?\n` +
-    `  </comment>\n` +
-    `  <comment id="cmt_a2" file="server/src/agent-queue.ts" lines="10" kind="line">\n` +
+    `  </interaction>\n` +
+    `  <interaction id="cmt_a2" target="line" intent="blocker" author="@luiz" authorRole="user" file="server/src/agent-queue.ts" lines="10">\n` +
     `    this should throw — \`{ id: "" }\` reads as success on the wire.\n` +
-    `  </comment>\n` +
+    `  </interaction>\n` +
     `</reviewer-feedback>`;
 
   const cliFetchLines: AgentCliLine[] = [
@@ -677,14 +677,14 @@ function buildFrames(): Frame[] {
       {
         kind: "tool",
         tool: "shippable_post_review_comment",
-        args: "cmt_a1 · addressed",
+        args: "cmt_a1 · accept",
         result:
           "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
       },
       {
         kind: "tool",
         tool: "shippable_post_review_comment",
-        args: "cmt_a2 · declined",
+        args: "cmt_a2 · reject",
         result:
           "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",
       },
