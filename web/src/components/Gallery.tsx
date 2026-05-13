@@ -4,8 +4,9 @@ import { DiffView } from "./DiffView";
 import { ReviewPlanView } from "./ReviewPlanView";
 import { SyntaxShowcase } from "./SyntaxShowcase";
 import { ThemePicker } from "./ThemePicker";
-import { reducer } from "../state";
+import { reducer, selectAckedNotes } from "../state";
 import { buildDiffViewModel } from "../view";
+import { selectIngestSignals } from "../interactions";
 import { ALL_FIXTURES } from "../gallery-fixtures";
 import { useTheme } from "../useTheme";
 import type {
@@ -153,14 +154,15 @@ function DiffGalleryItem({ fixture }: { fixture: DiffGalleryFixture }) {
             : fixture.cursorLineIdx,
         read: itemState.readLines,
         isFileReviewed: itemState.reviewedFiles.has(file.id),
-        acked: itemState.ackedNotes,
-        replies: itemState.replies,
+        acked: selectAckedNotes(itemState),
+        replies: itemState.interactions,
         expandLevelAbove: itemState.expandLevelAbove,
         expandLevelBelow: itemState.expandLevelBelow,
         fileFullyExpanded: itemState.fullExpandedFiles.has(file.id),
         filePreviewing: itemState.previewedFiles.has(file.id),
         imageAssets: cs.imageAssets,
         selection: itemState.selection,
+        signals: selectIngestSignals(itemState),
       })}
       onSetExpandLevel={handleSetExpandLevel}
       onToggleExpandFile={handleToggleExpandFile}

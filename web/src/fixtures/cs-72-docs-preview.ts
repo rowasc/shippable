@@ -1,4 +1,5 @@
-import type { ChangeSet, DiffLine, Reply } from "../types";
+import type { ChangeSet, DiffLine, Interaction } from "../types";
+import { hunkSummaryReplyKey } from "../types";
 
 // Exercises the markdown preview mode — every diff in this changeset is a
 // .md file, including a fresh page that uses tables, GFM alerts, task lists,
@@ -135,8 +136,6 @@ export const CS_72: ChangeSet = {
           newStart: 1,
           newCount: PREVIEW_DOC_LINES.length,
           aiReviewed: true,
-          aiSummary:
-            "New documentation page; reviewer should switch to Preview to confirm tables, alerts, code, and the screenshot all render before signing off.",
           lines: PREVIEW_DOC_LINES.map((text, i) => ({
             kind: "add",
             text,
@@ -178,4 +177,21 @@ export const CS_72: ChangeSet = {
   },
 };
 
-export const REPLIES_72: Record<string, Reply[]> = {};
+const PREVIEW_H1 = "cs-72/docs/preview-demo.md#h1";
+
+export const INTERACTIONS_72: Record<string, Interaction[]> = {
+  [hunkSummaryReplyKey(PREVIEW_H1)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(PREVIEW_H1)}`,
+      threadKey: hunkSummaryReplyKey(PREVIEW_H1),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "New documentation page; reviewer should switch to Preview to confirm tables, alerts, code, and the screenshot all render before signing off.",
+      createdAt: "0001-01-01T00:00:00.000Z",
+    },
+  ],
+};
+

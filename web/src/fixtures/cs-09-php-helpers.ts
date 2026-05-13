@@ -1,5 +1,8 @@
-import type { ChangeSet, Reply } from "../types";
-import { lineNoteReplyKey } from "../types";
+import type { ChangeSet, Interaction } from "../types";
+import {
+  hunkSummaryReplyKey,
+  lineNoteReplyKey,
+} from "../types";
 
 // PHP-flavored fixture. Doubles as a place to try the inline CodeRunner —
 // every named/anon function below should pop the run-with-inputs panel when
@@ -30,8 +33,6 @@ export const CS_09: ChangeSet = {
           newCount: 18,
           definesSymbols: ["format_money", "currency_symbol"],
           aiReviewed: true,
-          aiSummary:
-            "format_money divides cents by 100 then number_format()s — fine for USD/EUR but wrong for zero-decimal currencies (JPY, KRW). Consider a per-currency precision table.",
           lines: [
             { kind: "add", text: "<?php", newNo: 1 },
             { kind: "add", text: "// Money helpers used by the cart and the order summary.", newNo: 2 },
@@ -41,34 +42,6 @@ export const CS_09: ChangeSet = {
               kind: "add",
               text: "function format_money($cents, $currency = 'USD') {",
               newNo: 5,
-              aiNote: {
-                severity: "warning",
-                summary: "JPY/KRW have no minor unit",
-                detail:
-                  "Hard-coding /100 means 1234 JPY would render as ¥12.34. Move the divisor into the currency table.",
-                // The runner sandbox doesn't see other files in the diff,
-                // so the recipe inlines `currency_symbol` alongside
-                // `format_money` and ends with an `echo` so stdout shows
-                // the actual rendered string. Inputs match the AI's
-                // claim: 1234 cents in JPY should *not* divide by 100.
-                runRecipe: {
-                  source: [
-                    "function currency_symbol($code) {",
-                    "  $table = ['USD' => '$', 'EUR' => '€', 'GBP' => '£', 'JPY' => '¥'];",
-                    "  return $table[$code] ?? $code . ' ';",
-                    "}",
-                    "",
-                    "function format_money($cents, $currency = 'USD') {",
-                    "  $sym = currency_symbol($currency);",
-                    "  $amount = number_format($cents / 100, 2);",
-                    "  return $sym . $amount;",
-                    "}",
-                    "",
-                    "echo format_money($cents, $currency);",
-                  ].join("\n"),
-                  inputs: { cents: "1234", currency: "JPY" },
-                },
-              },
             },
             { kind: "add", text: "  $sym = currency_symbol($currency);", newNo: 6 },
             { kind: "add", text: "  $amount = number_format($cents / 100, 2);", newNo: 7 },
@@ -95,8 +68,6 @@ export const CS_09: ChangeSet = {
           definesSymbols: ["parse_money"],
           referencesSymbols: ["currency_symbol"],
           aiReviewed: true,
-          aiSummary:
-            "parse_money is regex-based and case-sensitive on the symbol. Any input that doesn't match returns null — callers need to handle that or this becomes a NPE waiting to happen.",
           expandAbove: [
             [
               { kind: "context", text: "function add_money($a_cents, $b_cents) {", oldNo: 16, newNo: 16 },
@@ -117,12 +88,6 @@ export const CS_09: ChangeSet = {
               kind: "add",
               text: "  if (preg_match('/^([\\$€£¥])?\\s*(\\d+)(?:\\.(\\d{1,2}))?$/u', $str, $m)) {",
               newNo: 23,
-              aiNote: {
-                severity: "question",
-                summary: "Locale-sensitive separators?",
-                detail:
-                  "Many users will type comma decimals (e.g. \"12,34\"). Worth deciding whether parse_money should accept them or stay strict.",
-              },
             },
             { kind: "add", text: "    $whole = (int)$m[2];", newNo: 24 },
             { kind: "add", text: "    $frac = isset($m[3]) ? (int)str_pad($m[3], 2, '0') : 0;", newNo: 25 },
@@ -209,14 +174,92 @@ export const CS_09: ChangeSet = {
   ],
 };
 
-export const REPLIES_09: Record<string, Reply[]> = {
-  [lineNoteReplyKey("cs-09/lib/money.php#h1", 4)]: [
+const H1_ID = "cs-09/lib/money.php#h1";
+const H2_ID = "cs-09/lib/money.php#h2";
+
+export const INTERACTIONS_09: Record<string, Interaction[]> = {
+  [hunkSummaryReplyKey(H1_ID)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(H1_ID)}`,
+      threadKey: hunkSummaryReplyKey(H1_ID),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "format_money divides cents by 100 then number_format()s — fine for USD/EUR but wrong for zero-decimal currencies (JPY, KRW). Consider a per-currency precision table.",
+      createdAt: "0001-01-01T00:00:00.000Z",
+    },
+  ],
+  [lineNoteReplyKey(H1_ID, 4)]: [
+    {
+      id: `ai:${lineNoteReplyKey(H1_ID, 4)}`,
+      threadKey: lineNoteReplyKey(H1_ID, 4),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "JPY/KRW have no minor unit\n\nHard-coding /100 means 1234 JPY would render as ¥12.34. Move the divisor into the currency table.",
+      createdAt: "0001-01-01T00:00:00.000Z",
+      // The runner sandbox doesn't see other files in the diff, so the
+      // recipe inlines `currency_symbol` alongside `format_money` and
+      // ends with `echo` so stdout shows the rendered string.
+      runRecipe: {
+        source: [
+          "function currency_symbol($code) {",
+          "  $table = ['USD' => '$', 'EUR' => '€', 'GBP' => '£', 'JPY' => '¥'];",
+          "  return $table[$code] ?? $code . ' ';",
+          "}",
+          "",
+          "function format_money($cents, $currency = 'USD') {",
+          "  $sym = currency_symbol($currency);",
+          "  $amount = number_format($cents / 100, 2);",
+          "  return $sym . $amount;",
+          "}",
+          "",
+          "echo format_money($cents, $currency);",
+        ].join("\n"),
+        inputs: { cents: "1234", currency: "JPY" },
+      },
+    },
     {
       id: "r-09-1",
+      threadKey: lineNoteReplyKey(H1_ID, 4),
+      target: "reply-to-ai-note",
+      intent: "comment",
       author: "marco",
+      authorRole: "user",
       body:
         "Good catch on JPY. I'll move the divisor into a {currency: precision} table next pass — leaving the warning for now since the cart only sells USD/EUR/GBP today.",
       createdAt: "2026-04-23T11:14:00Z",
     },
   ],
+  [hunkSummaryReplyKey(H2_ID)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(H2_ID)}`,
+      threadKey: hunkSummaryReplyKey(H2_ID),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "parse_money is regex-based and case-sensitive on the symbol. Any input that doesn't match returns null — callers need to handle that or this becomes a NPE waiting to happen.",
+      createdAt: "0001-01-01T00:00:00.000Z",
+    },
+  ],
+  [lineNoteReplyKey(H2_ID, 3)]: [
+    {
+      id: `ai:${lineNoteReplyKey(H2_ID, 3)}`,
+      threadKey: lineNoteReplyKey(H2_ID, 3),
+      target: "line",
+      intent: "question",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Locale-sensitive separators?\n\nMany users will type comma decimals (e.g. \"12,34\"). Worth deciding whether parse_money should accept them or stay strict.",
+      createdAt: "0001-01-01T00:00:00.000Z",
+    },
+  ],
 };
+

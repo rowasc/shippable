@@ -1,5 +1,9 @@
-import type { ChangeSet, Reply } from "../types";
-import { hunkSummaryReplyKey } from "../types";
+import type { ChangeSet, Interaction } from "../types";
+import {
+  hunkSummaryReplyKey,
+  lineNoteReplyKey,
+  teammateReplyKey,
+} from "../types";
 
 export const CS_57: ChangeSet = {
   id: "cs-57",
@@ -71,8 +75,6 @@ export const CS_57: ChangeSet = {
           newCount: 14,
           definesSymbols: ["ensureSessionReady"],
           aiReviewed: true,
-          aiSummary:
-            "Memoizes a readiness promise and polls hydrate state. Concern: no timeout or cancel path — if hydrate never resolves the promise (and thus every awaiting request) hangs forever.",
           expandAbove: [
             // block 1 (nearest): the end of hydrate() + blank
             [
@@ -104,33 +106,13 @@ export const CS_57: ChangeSet = {
           ],
           lines: [
             { kind: "add", text: "export function ensureSessionReady(): Promise<void> {", newNo: 26 },
-            {
-              kind: "add",
-              text: "  if (state.status !== \"loading\") return Promise.resolve();",
-              newNo: 27,
-              aiNote: {
-                severity: "info",
-                summary: "Fast path for already-ready / error",
-                detail:
-                  "Note this resolves even when state.status is 'error' — callers won't distinguish between 'session ready' and 'session subsystem failed.' Intentional?",
-              },
-            },
+            { kind: "add", text: "  if (state.status !== \"loading\") return Promise.resolve();", newNo: 27 },
             { kind: "add", text: "  if (readyPromise) return readyPromise;", newNo: 28 },
             { kind: "add", text: "  readyPromise = new Promise((resolve, reject) => {", newNo: 29 },
             { kind: "add", text: "    const check = () => {", newNo: 30 },
             { kind: "add", text: "      if (state.status === \"ready\") resolve();", newNo: 31 },
             { kind: "add", text: "      else if (state.status === \"error\") reject(state.error);", newNo: 32 },
-            {
-              kind: "add",
-              text: "      else setTimeout(check, 10);",
-              newNo: 33,
-              aiNote: {
-                severity: "warning",
-                summary: "Unbounded polling",
-                detail:
-                  "If hydrate() is never called, this polls forever. A timeout (e.g. 5s) with reject would bound the worst case. The test on line 35 `await sleep(20)` implicitly assumes 10ms polling, so any change here will need a test update.",
-              },
-            },
+            { kind: "add", text: "      else setTimeout(check, 10);", newNo: 33 },
             { kind: "add", text: "    };", newNo: 34 },
             { kind: "add", text: "    check();", newNo: 35 },
             { kind: "add", text: "  });", newNo: 36 },
@@ -169,24 +151,9 @@ export const CS_57: ChangeSet = {
           newStart: 9,
           newCount: 4,
           referencesSymbols: ["ensureSessionReady"],
-          teammateReview: {
-            user: "mina",
-            verdict: "approve",
-            note: "timeout budget looks fine given our boot SLO",
-          },
           lines: [
             { kind: "context", text: "export async function authMiddleware(req: Request, res: Response, next: NextFunction) {", oldNo: 8, newNo: 9 },
-            {
-              kind: "add",
-              text: "  await ensureSessionReady();",
-              newNo: 10,
-              aiNote: {
-                severity: "info",
-                summary: "Call site for the new helper",
-                detail:
-                  "If you haven't reviewed ensureSessionReady in server/session.ts yet, the unbounded polling there means this await could hang the first request after boot on a pathological failure. On the happy path this is a few ms.",
-              },
-            },
+            { kind: "add", text: "  await ensureSessionReady();", newNo: 10 },
             { kind: "context", text: "  const session = getSession(req);", oldNo: 9, newNo: 11 },
             { kind: "context", text: "  if (!session) return res.status(401).end();", oldNo: 10, newNo: 12 },
           ],
@@ -230,14 +197,84 @@ export const CS_57: ChangeSet = {
   ],
 };
 
-export const REPLIES_57: Record<string, Reply[]> = {
-  // thread on the hunk summary about ensureSessionReady
-  [hunkSummaryReplyKey("cs-57/server/session.ts#h2")]: [
+const SESSION_H2 = "cs-57/server/session.ts#h2";
+const AUTH_H2 = "cs-57/server/middleware/auth.ts#h2";
+const INGEST_TS = "0001-01-01T00:00:00.000Z";
+
+export const INTERACTIONS_57: Record<string, Interaction[]> = {
+  [hunkSummaryReplyKey(SESSION_H2)]: [
+    {
+      id: `ai:${hunkSummaryReplyKey(SESSION_H2)}`,
+      threadKey: hunkSummaryReplyKey(SESSION_H2),
+      target: "block",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Memoizes a readiness promise and polls hydrate state. Concern: no timeout or cancel path — if hydrate never resolves the promise (and thus every awaiting request) hangs forever.",
+      createdAt: INGEST_TS,
+    },
     {
       id: "r3",
+      threadKey: hunkSummaryReplyKey(SESSION_H2),
+      target: "reply-to-hunk-summary",
+      intent: "comment",
       author: "mina",
+      authorRole: "user",
       body: "+1 on adding a timeout. 5s feels right given our boot SLO.",
       createdAt: "2026-04-22T09:55:00Z",
     },
   ],
+  [lineNoteReplyKey(SESSION_H2, 1)]: [
+    {
+      id: `ai:${lineNoteReplyKey(SESSION_H2, 1)}`,
+      threadKey: lineNoteReplyKey(SESSION_H2, 1),
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Fast path for already-ready / error\n\nNote this resolves even when state.status is 'error' — callers won't distinguish between 'session ready' and 'session subsystem failed.' Intentional?",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(SESSION_H2, 7)]: [
+    {
+      id: `ai:${lineNoteReplyKey(SESSION_H2, 7)}`,
+      threadKey: lineNoteReplyKey(SESSION_H2, 7),
+      target: "line",
+      intent: "request",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Unbounded polling\n\nIf hydrate() is never called, this polls forever. A timeout (e.g. 5s) with reject would bound the worst case. The test on line 35 `await sleep(20)` implicitly assumes 10ms polling, so any change here will need a test update.",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [teammateReplyKey(AUTH_H2)]: [
+    {
+      id: `teammate:${teammateReplyKey(AUTH_H2)}`,
+      threadKey: teammateReplyKey(AUTH_H2),
+      target: "block",
+      intent: "ack",
+      author: "mina",
+      authorRole: "teammate",
+      body: "timeout budget looks fine given our boot SLO",
+      createdAt: INGEST_TS,
+    },
+  ],
+  [lineNoteReplyKey(AUTH_H2, 1)]: [
+    {
+      id: `ai:${lineNoteReplyKey(AUTH_H2, 1)}`,
+      threadKey: lineNoteReplyKey(AUTH_H2, 1),
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body:
+        "Call site for the new helper\n\nIf you haven't reviewed ensureSessionReady in server/session.ts yet, the unbounded polling there means this await could hang the first request after boot on a pathological failure. On the happy path this is a few ms.",
+      createdAt: INGEST_TS,
+    },
+  ],
 };
+

@@ -1,6 +1,10 @@
 import "./LoadModal.css";
 import { useRef, useState } from "react";
-import type { ChangeSet, DetachedReply, Reply } from "../types";
+import type {
+  ChangeSet,
+  DetachedInteraction,
+  Interaction,
+} from "../types";
 import { parseDiff } from "../parseDiff";
 import type { RecentSource } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
@@ -21,7 +25,10 @@ interface Props {
   onLoad: (
     cs: ChangeSet,
     source: RecentSource,
-    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
+    prData?: {
+      prInteractions: Record<string, Interaction[]>;
+      prDetached: DetachedInteraction[];
+    },
   ) => void;
   onClose: () => void;
 }
@@ -37,7 +44,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
   const pr = useGithubPrLoad({
     onResult: (result, prUrl) => {
       onLoad(result.changeSet, { kind: "pr", prUrl }, {
-        prReplies: result.prReplies,
+        prInteractions: result.prInteractions,
         prDetached: result.prDetached,
       });
     },

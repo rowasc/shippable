@@ -1,16 +1,26 @@
 import "./ReplyThread.css";
 import { useEffect, useRef, useState } from "react";
-import type { AgentReply, Cursor, DeliveredComment, Reply } from "../types";
+import type {
+  Cursor,
+  DeliveredInteraction,
+  Interaction,
+  InteractionIntent,
+} from "../types";
 import type { SymbolIndex } from "../symbols";
 import { RichText } from "./RichText";
 
 interface Props {
-  replies: Reply[];
+  /**
+   * Interactions on this thread. May include user-authored entries, agent
+   * responses, and (for AI/teammate-headed threads) the head Interaction
+   * itself — the renderer skips ingest-sourced heads since the surrounding
+   * Inspector card already shows them above the thread.
+   */
+  interactions: Interaction[];
   isDrafting: boolean;
   /**
    * Current draft body for this thread. Persists across composer
-   * close/reopen — the parent owns it. The composer is fully
-   * controlled.
+   * close/reopen — the parent owns it. The composer is fully controlled.
    */
   draftBody: string;
   onStartDraft: () => void;
@@ -18,11 +28,11 @@ interface Props {
   onCloseDraft: () => void;
   onChangeDraft: (body: string) => void;
   onSubmitReply: (body: string) => void;
-  /** Delete a reply by id. Only invoked for user-authored replies. */
+  /** Delete a reply by id. Only invoked for user-authored entries. */
   onDeleteReply: (replyId: string) => void;
   /**
-   * Retry the enqueue for a Reply whose previous attempt errored. Wired
-   * to the click on the ⚠ errored pip. Optional — surfaces only on
+   * Retry the enqueue for an Interaction whose previous attempt errored.
+   * Wired to the click on the ⚠ errored pip. Optional — surfaces only on
    * agent-context-aware threads. Threads without it fall back to the
    * three-state pip (no pip · ◌ queued · ✓ delivered).
    */
@@ -30,15 +40,16 @@ interface Props {
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
   /**
-   * Map keyed by `Comment.id` of comments the agent has fetched. Drives the
-   * `✓ delivered` pip on each Reply whose `enqueuedCommentId` is in the map.
-   * Empty/missing → no replies render the delivered glyph (only ◌ queued).
+   * Map keyed by delivered Interaction id of items the agent has fetched.
+   * Drives the `✓ delivered` pip on each user Interaction whose
+   * `enqueuedCommentId` is in the map. Empty/missing → no entries render
+   * the delivered glyph (only ◌ queued).
    */
-  deliveredById?: Record<string, DeliveredComment>;
+  deliveredById?: Record<string, DeliveredInteraction>;
 }
 
 export function ReplyThread({
-  replies,
+  interactions,
   isDrafting,
   draftBody,
   onStartDraft,
@@ -51,19 +62,28 @@ export function ReplyThread({
   onJump,
   deliveredById,
 }: Props) {
-  // A non-empty draft on a closed composer means the user closed without
-  // sending. Surface a hint so they know it's still waiting.
-  const hasUnsentDraft = !isDrafting && draftBody.trim().length > 0;
+  // The Inspector card above the thread already shows ingest-sourced
+  // heads (AI note, AI hunk summary, teammate review); skip them here so
+  // they don't render twice. User-authored thread heads (line/block) are
+  // kept — those *are* the first reply in the thread view.
+  const rows = interactions.filter((ix) => {
+    if (ix.authorRole === "ai" || ix.authorRole === "teammate") return false;
+    return true;
+  });
 
   // Inline two-step delete: clicking "× delete" arms the row instead of
   // popping a native browser confirm() that breaks focus and looks foreign.
   // The armed row swaps in a "delete?  [yes] [cancel]" cluster in place.
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
 
-  if (replies.length === 0 && !isDrafting) {
+  // A non-empty draft on a closed composer means the user closed without
+  // sending. Surface a hint so they know it's still waiting.
+  const hasUnsentDraft = !isDrafting && draftBody.trim().length > 0;
+
+  if (rows.length === 0 && !isDrafting) {
     return (
       <div className="thread thread--empty">
-        <button type="button" className="thread__start" onClick={onStartDraft}>
+        <button className="thread__start" onClick={onStartDraft}>
           {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       </div>
@@ -71,94 +91,90 @@ export function ReplyThread({
   }
   return (
     <div className="thread">
-      {replies.length > 0 && (
-        <div className="thread__label">
-          replies ({replies.length})
-        </div>
+      {rows.length > 0 && (
+        <div className="thread__label">replies ({rows.length})</div>
       )}
       <ul className="thread__list">
-        {replies.map((r) => {
-          // Deleting a reply that's already in the delivered set is local-only
-          // — the agent has already seen it and can't unsee it. The tooltip
-          // makes that distinction visible. (Pre-delivery deletes still hit
-          // /api/agent/unenqueue at the parent.)
-          const enqueuedId = r.enqueuedCommentId ?? null;
+        {rows.map((ix) => {
+          if (ix.authorRole === "agent") {
+            return (
+              <AgentRow key={ix.id} ix={ix} symbols={symbols} onJump={onJump} />
+            );
+          }
+          // user-authored entry
+          const enqueuedId = ix.enqueuedCommentId ?? null;
           const isDelivered = !!(enqueuedId && deliveredById?.[enqueuedId]);
           const deleteTitle = isDelivered
             ? "the agent already saw this; deleting only removes it from your view."
             : "delete reply";
-          const isExternal = r.external?.source === "pr";
+          const isExternal = ix.external?.source === "pr";
           return (
-          <li key={r.id} className="reply">
-            <div className="reply__head">
-              <span className="reply__author">@{r.author}</span>
-              <span className="reply__sep">·</span>
-              <span className="reply__time">{timeAgo(r.createdAt)}</span>
-              {isExternal ? (
-                <a
-                  className="reply__external"
-                  href={r.external!.htmlUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  title="Open on GitHub"
-                >
-                  ↗ GitHub
-                </a>
-              ) : (
-                <>
-                  <ReplyPip
-                    reply={r}
-                    deliveredById={deliveredById}
-                    onRetry={onRetryReply ? () => onRetryReply(r.id) : undefined}
-                  />
-                  {r.author === "you" && (
-                    armedDeleteId === r.id ? (
-                      <span className="reply__confirm" role="group" aria-label="confirm delete">
-                        <span className="reply__confirm-q">delete?</span>
-                        <button
-                          type="button"
-                          className="reply__confirm-yes"
-                          onClick={() => {
-                            setArmedDeleteId(null);
-                            onDeleteReply(r.id);
-                          }}
-                          autoFocus
+            <li key={ix.id} className="reply">
+              <div className="reply__head">
+                <span className="reply__author">@{ix.author}</span>
+                <span className="reply__sep">·</span>
+                <span className="reply__time">{timeAgo(ix.createdAt)}</span>
+                {isExternal ? (
+                  <a
+                    className="reply__external"
+                    href={ix.external!.htmlUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open on GitHub"
+                  >
+                    ↗ GitHub
+                  </a>
+                ) : (
+                  <>
+                    <ReplyPip
+                      ix={ix}
+                      deliveredById={deliveredById}
+                      onRetry={onRetryReply ? () => onRetryReply(ix.id) : undefined}
+                    />
+                    {ix.author === "you" && (
+                      armedDeleteId === ix.id ? (
+                        <span
+                          className="reply__confirm"
+                          role="group"
+                          aria-label="confirm delete"
                         >
-                          yes
-                        </button>
+                          <span className="reply__confirm-q">delete?</span>
+                          <button
+                            type="button"
+                            className="reply__confirm-yes"
+                            onClick={() => {
+                              setArmedDeleteId(null);
+                              onDeleteReply(ix.id);
+                            }}
+                            autoFocus
+                          >
+                            yes
+                          </button>
+                          <button
+                            type="button"
+                            className="reply__confirm-no"
+                            onClick={() => setArmedDeleteId(null)}
+                          >
+                            cancel
+                          </button>
+                        </span>
+                      ) : (
                         <button
-                          type="button"
-                          className="reply__confirm-no"
-                          onClick={() => setArmedDeleteId(null)}
+                          className="reply__delete"
+                          onClick={() => setArmedDeleteId(ix.id)}
+                          title={deleteTitle}
                         >
-                          cancel
+                          × delete
                         </button>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="reply__delete"
-                        onClick={() => setArmedDeleteId(r.id)}
-                        title={deleteTitle}
-                      >
-                        × delete
-                      </button>
-                    )
-                  )}
-                </>
-              )}
-            </div>
-            <div className="reply__body">
-              <RichText text={r.body} symbols={symbols} onJump={onJump} />
-            </div>
-            {!isExternal && (
-              <AgentRepliesList
-                entries={r.agentReplies ?? []}
-                symbols={symbols}
-                onJump={onJump}
-              />
-            )}
-          </li>
+                      )
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="reply__body">
+                <RichText text={ix.body} symbols={symbols} onJump={onJump} />
+              </div>
+            </li>
           );
         })}
       </ul>
@@ -170,7 +186,7 @@ export function ReplyThread({
           onSubmit={onSubmitReply}
         />
       ) : (
-        <button type="button" className="thread__start" onClick={onStartDraft}>
+        <button className="thread__start" onClick={onStartDraft}>
           {hasUnsentDraft ? "↻ resume draft" : "+ reply"}
         </button>
       )}
@@ -178,78 +194,62 @@ export function ReplyThread({
   );
 }
 
-/**
- * Renders the agent's structured replies threaded under a single reviewer
- * Reply. Defensive sort by `postedAt` ascending — the reducer already does
- * this, but a render-time guard keeps a future bypass-the-reducer caller
- * from accidentally surfacing them in the wrong order.
- */
-function AgentRepliesList({
-  entries,
+/** Render an agent-authored Interaction with intent-glyph + label. */
+function AgentRow({
+  ix,
   symbols,
   onJump,
 }: {
-  entries: AgentReply[];
+  ix: Interaction;
   symbols: SymbolIndex;
   onJump: (c: Cursor) => void;
 }) {
-  if (entries.length === 0) return null;
-  const ordered = entries
-    .slice()
-    .sort((a, b) => a.postedAt.localeCompare(b.postedAt));
   return (
-    <ul className="agent-reply-list">
-      {ordered.map((ar) => (
-        <li
-          key={ar.id}
-          className={`agent-reply agent-reply--${ar.outcome}`}
+    <li className={`agent-reply agent-reply--${ix.intent}`}>
+      <div className="agent-reply__head">
+        <span
+          className="agent-reply__icon"
+          aria-label={ix.intent}
+          title={intentLabel(ix.intent)}
         >
-          <div className="agent-reply__head">
-            <span
-              className="agent-reply__icon"
-              aria-label={ar.outcome}
-              title={outcomeLabel(ar.outcome)}
-            >
-              {outcomeGlyph(ar.outcome)}
-            </span>
-            <span className="agent-reply__label">{ar.agentLabel ?? "agent"}</span>
-            <span className="agent-reply__sep">·</span>
-            <span
-              className="agent-reply__time"
-              title={ar.postedAt}
-            >
-              {timeAgo(ar.postedAt)}
-            </span>
-          </div>
-          <div className="agent-reply__body">
-            <RichText text={ar.body} symbols={symbols} onJump={onJump} />
-          </div>
-        </li>
-      ))}
-    </ul>
+          {intentGlyph(ix.intent)}
+        </span>
+        <span className="agent-reply__label">{ix.author || "agent"}</span>
+        <span className="agent-reply__sep">·</span>
+        <span className="agent-reply__time" title={ix.createdAt}>
+          {timeAgo(ix.createdAt)}
+        </span>
+      </div>
+      <div className="agent-reply__body">
+        <RichText text={ix.body} symbols={symbols} onJump={onJump} />
+      </div>
+    </li>
   );
 }
 
-function outcomeGlyph(outcome: AgentReply["outcome"]): string {
-  switch (outcome) {
-    case "addressed":
+function intentGlyph(intent: InteractionIntent): string {
+  switch (intent) {
+    case "accept":
       return "✓";
-    case "declined":
+    case "reject":
       return "⊘";
-    case "noted":
+    case "ack":
       return "ℹ";
+    case "unack":
+      return "↺";
+    case "blocker":
+      return "🚧";
+    case "request":
+      return "🔧";
+    case "question":
+      return "❓";
+    case "comment":
+      return "•";
   }
 }
 
-function outcomeLabel(outcome: AgentReply["outcome"]): string {
-  switch (outcome) {
-    case "addressed":
-      return "addressed";
-    case "declined":
-      return "declined";
-    case "noted":
-      return "noted";
-  }
+function intentLabel(intent: InteractionIntent): string {
+  return intent;
 }
 
 function Composer({
@@ -295,11 +295,10 @@ function Composer({
         <span className="composer__hint">
           <kbd>⌘Enter</kbd> send · <kbd>Esc</kbd> close (saves draft)
         </span>
-        <button type="button" className="composer__cancel" onClick={onClose}>
+        <button className="composer__cancel" onClick={onClose}>
           close
         </button>
         <button
-          type="button"
           className="composer__send"
           disabled={!body.trim()}
           onClick={() => onSubmit(body.trim())}
@@ -312,37 +311,33 @@ function Composer({
 }
 
 /**
- * Per-reply pip. Four possible states; the precedence order is fixed:
+ * Per-interaction pip. Four possible states; the precedence order is fixed:
  *
- *   1. `✓ delivered` — when `deliveredById` carries the reply's
- *      `enqueuedCommentId`. Wins over everything else; if a comment was
- *      delivered any prior local error is stale and shouldn't render.
+ *   1. `✓ delivered` — when `deliveredById` carries the entry's
+ *      `enqueuedCommentId`. Wins over everything else; if an interaction
+ *      was delivered, any prior local error is stale and shouldn't render.
  *   2. `⚠ retry` — when `enqueueError === true` and there's no
  *      `enqueuedCommentId` yet. Click to re-POST `/api/agent/enqueue`
  *      *without* `supersedes` (the original POST never landed an id).
  *   3. `◌ queued` — id is set but not delivered.
- *   4. (no pip) — null id and no error (replies authored on a non-worktree
- *      changeset, fresh fixture replies, etc.).
- *
- * Tooltips are exact strings from the share-review-comments plan + the
- * slice-2 errored-pip follow-up. The queued tooltip uses `Reply.createdAt`
- * as the enqueue-time proxy.
+ *   4. (no pip) — null id and no error (entries authored on a non-worktree
+ *      changeset, fresh fixture entries, etc.).
  */
 function ReplyPip({
-  reply,
+  ix,
   deliveredById,
   onRetry,
 }: {
-  reply: Reply;
-  deliveredById?: Record<string, DeliveredComment>;
+  ix: Interaction;
+  deliveredById?: Record<string, DeliveredInteraction>;
   /** When the parent threads a retry handler in, the errored pip becomes
    *  a click-to-retry button. Without it the errored state still renders
    *  (so the user knows something went wrong), but as inert text. */
   onRetry?: () => void;
 }) {
-  const enqueuedId = reply.enqueuedCommentId ?? null;
-  const errored = !!reply.enqueueError;
-  // Delivered wins over everything: the agent has already seen this comment,
+  const enqueuedId = ix.enqueuedCommentId ?? null;
+  const errored = !!ix.enqueueError;
+  // Delivered wins over everything: the agent has already seen this entry,
   // so any local error flag is stale.
   if (enqueuedId) {
     const delivered = deliveredById?.[enqueuedId] ?? null;
@@ -359,7 +354,7 @@ function ReplyPip({
     return (
       <span
         className="reply__pip reply__pip--queued"
-        title={`Sent to your agent's queue at ${formatClock(reply.createdAt)}.`}
+        title={`Sent to your agent's queue at ${formatClock(ix.createdAt)}.`}
       >
         ◌ queued
       </span>

@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, ReactNode } from "react";
-import { buildCommentStops, changesetCoverage, fileCoverage, reviewedFilesCount } from "../state";
+import {
+  buildCommentStops,
+  changesetCoverage,
+  fileCoverage,
+  firstTargetForKey,
+  isAckedByMe,
+  replyTargetForKey,
+  reviewedFilesCount,
+  selectAckedNotes,
+} from "../state";
 import type { Action } from "../state";
 import {
   fetchDefinition,
@@ -39,14 +48,14 @@ import type {
   AgentSessionRef,
   ChangeSet,
   Cursor,
-  DetachedReply,
+  DetachedInteraction,
   EvidenceRef,
+  Interaction,
   PrSource,
   ReviewState,
-  Reply,
   WorktreeSource,
 } from "../types";
-import { blockCommentKey, lineNoteReplyKey, noteKey, userCommentKey } from "../types";
+import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "../types";
 import {
   enqueueComment,
   fetchAgentContextForWorktree,
@@ -75,6 +84,7 @@ import {
   buildGuidePromptViewModel,
   buildInspectorViewModel,
 } from "../view";
+import { selectIngestSignals } from "../interactions";
 
 interface Props {
   state: ReviewState;
@@ -89,9 +99,12 @@ interface Props {
    *  + recents upsert. `prData` is present only on GitHub PR loads. */
   onLoadChangeset: (
     cs: ChangeSet,
-    replies: Record<string, Reply[]>,
+    interactions: Record<string, Interaction[]>,
     source: RecentSource,
-    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
+    prData?: {
+      prInteractions: Record<string, Interaction[]>;
+      prDetached: DetachedInteraction[];
+    },
   ) => void;
   currentSource: RecentSource | null;
   /** Live-reload banner slot. App owns the polling hook + drift state and
@@ -224,7 +237,6 @@ export function ReviewWorkspace({
   const {
     delivered: deliveredComments,
     agentReplies: polledAgentReplies,
-    agentComments: polledAgentComments,
     lastSuccessfulPollAt: deliveredLastSuccessAt,
     error: deliveredErrorState,
   } = useDeliveredPolling({ worktreePath: wtPath });
@@ -237,17 +249,12 @@ export function ReviewWorkspace({
     dispatch({ type: "MERGE_AGENT_REPLIES", polled: polledAgentReplies });
   }, [polledAgentReplies, dispatch]);
 
-  // Replace-not-merge into state.agentComments. Skip the dispatch while
-  // `polledAgentComments === null` — that state means "haven't polled yet"
-  // (initial mount, or just after a worktree switch); dispatching the
-  // hook's initial `[]` here would clobber any persisted agent comments
-  // rehydrated from storage before the first poll lands. Once a real poll
-  // returns we dispatch even on an empty batch so the worktree's
-  // authoritative list (which may have evicted entries) wins.
-  useEffect(() => {
-    if (polledAgentComments === null) return;
-    dispatch({ type: "MERGE_AGENT_COMMENTS", polled: polledAgentComments });
-  }, [polledAgentComments, dispatch]);
+  // NOTE: AgentComment polling temporarily unwired during the Interaction
+  // primitive migration. state.agentComments / MERGE_AGENT_COMMENTS still
+  // exist in the reducer; the post-migration cleanup commit re-attaches
+  // useDeliveredPolling.agentComments → dispatch once the polling hook
+  // exposes that field again on the new wire shape.
+
 
   const wantedFetchKey =
     wtPath && wtSha
@@ -310,11 +317,14 @@ export function ReviewWorkspace({
     setPrAuthRejected(null);
     try {
       const result = await loadGithubPr(htmlUrl);
-      dispatch({ type: "LOAD_CHANGESET", changeset: result.changeSet });
       dispatch({
-        type: "MERGE_PR_REPLIES",
+        type: "LOAD_CHANGESET",
+        changeset: result.changeSet,
+      });
+      dispatch({
+        type: "MERGE_PR_INTERACTIONS",
         changesetId: result.changeSet.id,
-        prReplies: result.prReplies,
+        prInteractions: result.prInteractions,
         prDetached: result.prDetached,
       });
     } catch (e) {
@@ -368,13 +378,20 @@ export function ReviewWorkspace({
   }
 
   const suggestion = maybeSuggest(cs, state);
-  const lineNoteAcked = state.ackedNotes.has(
-    noteKey(state.cursor.hunkId, state.cursor.lineIdx),
+  const lineNoteAcked = isAckedByMe(
+    state,
+    state.cursor.hunkId,
+    state.cursor.lineIdx,
   );
+  const ackedSet = selectAckedNotes(state);
+  const ingestSignals = selectIngestSignals(state);
+  const lineHasAiNote = !!ingestSignals.aiNoteByLine[
+    `${state.cursor.hunkId}:${state.cursor.lineIdx}`
+  ];
 
   const palettePredicates: Record<string, boolean> = {
     hasSuggestion: !!suggestion,
-    lineHasAiNote: !!line?.aiNote,
+    lineHasAiNote,
     hasSelection: !!state.selection,
     hasPlan: showPlan,
     hasPicker: showPicker,
@@ -1051,8 +1068,8 @@ export function ReviewWorkspace({
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
-            replies: state.replies,
-            detachedReplies: state.detachedReplies,
+            interactions: state.interactions,
+            detachedInteractions: state.detachedInteractions,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId)!;
@@ -1067,7 +1084,7 @@ export function ReviewWorkspace({
             });
           }}
           onJumpToFirstComment={(fileId) => {
-            const stop = buildCommentStops(cs, state.replies).find(
+            const stop = buildCommentStops(cs, state.interactions).find(
               (s) => s.fileId === fileId,
             );
             if (!stop) return;
@@ -1101,14 +1118,15 @@ export function ReviewWorkspace({
               cursorLineIdx: state.cursor.lineIdx,
               read: state.readLines,
               isFileReviewed: state.reviewedFiles.has(file.id),
-              acked: state.ackedNotes,
-              replies: state.replies,
+              acked: ackedSet,
+              replies: state.interactions,
               expandLevelAbove: state.expandLevelAbove,
               expandLevelBelow: state.expandLevelBelow,
               fileFullyExpanded: state.fullExpandedFiles.has(file.id),
               filePreviewing: state.previewedFiles.has(file.id),
               imageAssets: cs.imageAssets,
               selection: state.selection,
+              signals: ingestSignals,
             })}
             onSetExpandLevel={(hunkId, dir, level) =>
               dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
@@ -1212,17 +1230,15 @@ export function ReviewWorkspace({
               line,
               cursor: state.cursor,
               symbols: symbolIndex,
-              acked: state.ackedNotes,
-              replies: state.replies,
+              acked: ackedSet,
+              replies: state.interactions,
               draftingKey,
+              signals: ingestSignals,
             })}
-            agentComments={state.agentComments}
-            repliesByKey={state.replies}
-            draftingKey={draftingKey}
-            commentCount={buildCommentStops(cs, state.replies).length}
+            commentCount={buildCommentStops(cs, state.interactions).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
             onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
-            lineHasAiNote={!!line?.aiNote}
+            lineHasAiNote={lineHasAiNote}
             symbols={symbolIndex}
             draftBodies={drafts}
             onJump={jumpTo}
@@ -1239,18 +1255,24 @@ export function ReviewWorkspace({
             }
             onSubmitReply={(key, body) => {
               const createdAt = new Date();
-              const replyId = `r-${createdAt.getTime()}`;
+              const interactionId = `r-${createdAt.getTime()}`;
+              const isFirst = (state.interactions[key]?.length ?? 0) === 0;
+              const interaction: Interaction = {
+                id: interactionId,
+                threadKey: key,
+                target: isFirst ? firstTargetForKey(key) : replyTargetForKey(key),
+                intent: "comment",
+                author: "you",
+                authorRole: "user",
+                body,
+                createdAt: createdAt.toISOString(),
+                enqueuedCommentId: null,
+                ...buildReplyAnchor(key, cs),
+              };
               dispatch({
-                type: "ADD_REPLY",
+                type: "ADD_INTERACTION",
                 targetKey: key,
-                reply: {
-                  id: replyId,
-                  author: "you",
-                  body,
-                  createdAt: createdAt.toISOString(),
-                  enqueuedCommentId: null,
-                  ...buildReplyAnchor(key, cs),
-                },
+                interaction,
               });
               setDrafts((prev) => {
                 if (!(key in prev)) return prev;
@@ -1260,33 +1282,39 @@ export function ReviewWorkspace({
               });
               setDraftingKey(null);
               // Fire-and-forget enqueue when a worktree is loaded.
-              // Non-worktree loads (paste/url/upload) save the Reply
+              // Non-worktree loads (paste/url/upload) save the Interaction
               // locally only; the pip never appears.
               if (activeWorktreeSource) {
-                const derived = deriveCommentPayload(key, cs, state.agentComments);
+                const derived = deriveCommentPayload(key, cs);
                 if (derived) {
                   enqueueComment({
                     worktreePath: activeWorktreeSource.worktreePath,
                     commitSha: activeWorktreeSource.commitSha,
-                    comment: { ...derived, body },
+                    interaction: {
+                      ...derived,
+                      intent: "comment",
+                      author: "you",
+                      authorRole: "user",
+                      body,
+                    },
                   })
                     .then((r) =>
                       dispatch({
-                        type: "PATCH_REPLY_ENQUEUED_ID",
+                        type: "PATCH_INTERACTION_ENQUEUED_ID",
                         targetKey: key,
-                        replyId,
+                        interactionId,
                         enqueuedCommentId: r.id,
                       }),
                     )
                     .catch((err: unknown) => {
                       console.error("[shippable] enqueueComment failed:", err);
                       // Surface the failure as an errored pip; the user can
-                      // click it to retry. The reply itself stays in place
-                      // so nothing is lost.
+                      // click it to retry. The interaction itself stays in
+                      // place so nothing is lost.
                       dispatch({
-                        type: "SET_REPLY_ENQUEUE_ERROR",
+                        type: "SET_INTERACTION_ENQUEUE_ERROR",
                         targetKey: key,
-                        replyId,
+                        interactionId,
                         error: true,
                       });
                     });
@@ -1294,50 +1322,57 @@ export function ReviewWorkspace({
               }
             }}
             onRetryReply={(key, replyId) => {
-              // Errored-pip retry path. Looks up the Reply by id, derives
-              // the same {kind,file,lines} the original submit produced,
-              // and re-POSTs /api/agent/enqueue. NO supersedes here — the
-              // original POST never landed an id, so there's no predecessor
-              // to replace. Mirrors the spec from the v0 task list.
+              // Errored-pip retry path. Looks up the Interaction by id,
+              // derives the same {kind,file,lines} the original submit
+              // produced, and re-POSTs /api/agent/enqueue. NO supersedes
+              // here — the original POST never landed an id, so there's
+              // no predecessor to replace. Mirrors the spec from the v0
+              // task list.
               if (!activeWorktreeSource) return;
-              const target = state.replies[key]?.find((r) => r.id === replyId);
-              if (!target) return;
-              const derived = deriveCommentPayload(key, cs, state.agentComments);
+              const ix = state.interactions[key]?.find((entry) => entry.id === replyId);
+              if (!ix) return;
+              const derived = deriveCommentPayload(key, cs);
               if (!derived) return;
               // Optimistically clear the error so the pip flips back to ◌
               // queued the moment the user clicks; if the retry fails we set
               // it again on the catch.
               dispatch({
-                type: "SET_REPLY_ENQUEUE_ERROR",
+                type: "SET_INTERACTION_ENQUEUE_ERROR",
                 targetKey: key,
-                replyId,
+                interactionId: replyId,
                 error: false,
               });
               enqueueComment({
                 worktreePath: activeWorktreeSource.worktreePath,
                 commitSha: activeWorktreeSource.commitSha,
-                comment: { ...derived, body: target.body },
+                interaction: {
+                  ...derived,
+                  intent: "comment",
+                  author: "you",
+                  authorRole: "user",
+                  body: ix.body,
+                },
               })
                 .then((r) =>
                   dispatch({
-                    type: "PATCH_REPLY_ENQUEUED_ID",
+                    type: "PATCH_INTERACTION_ENQUEUED_ID",
                     targetKey: key,
-                    replyId,
+                    interactionId: replyId,
                     enqueuedCommentId: r.id,
                   }),
                 )
                 .catch((err: unknown) => {
                   console.error("[shippable] retry enqueueComment failed:", err);
                   dispatch({
-                    type: "SET_REPLY_ENQUEUE_ERROR",
+                    type: "SET_INTERACTION_ENQUEUE_ERROR",
                     targetKey: key,
-                    replyId,
+                    interactionId: replyId,
                     error: true,
                   });
                 });
             }}
             onDeleteReply={(key, replyId) => {
-              const target = state.replies[key]?.find((r) => r.id === replyId);
+              const target = state.interactions[key]?.find((ix) => ix.id === replyId);
               const enqueuedId = target?.enqueuedCommentId ?? null;
               if (enqueuedId && activeWorktreeSource) {
                 unenqueueComment({
@@ -1347,7 +1382,7 @@ export function ReviewWorkspace({
                   console.error("[shippable] unenqueueComment failed:", err);
                 });
               }
-              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId });
+              dispatch({ type: "DELETE_INTERACTION", targetKey: key, interactionId: replyId });
             }}
             onVerifyAiNote={(recipe) => {
               setRunRequest((prev) => ({
@@ -1378,7 +1413,7 @@ export function ReviewWorkspace({
             worktreeSource={activeWorktreeSource ?? undefined}
             prSource={cs.prSource}
             changesetId={cs.id}
-            onMergePrOverlay={(csId, prSource, prConversation, prReplies, prDetached) => {
+            onMergePrOverlay={(csId, prSource, prConversation, prInteractions, prDetached) => {
               dispatch({
                 type: "MERGE_PR_OVERLAY",
                 changesetId: csId,
@@ -1386,9 +1421,9 @@ export function ReviewWorkspace({
                 prConversation,
               });
               dispatch({
-                type: "MERGE_PR_REPLIES",
+                type: "MERGE_PR_INTERACTIONS",
                 changesetId: csId,
-                prReplies,
+                prInteractions,
                 prDetached,
               });
             }}
@@ -1502,9 +1537,11 @@ export function ReviewWorkspace({
               break;
             }
           }
-          const targetHunk = file.hunks.find((h) => h.id === contextMenu.hunkId);
-          const targetLine = targetHunk?.lines[contextMenu.lineIdx];
-          const replyEnabled = !sel && !!targetLine?.aiNote;
+          const replyEnabled =
+            !sel &&
+            !!ingestSignals.aiNoteByLine[
+              `${contextMenu.hunkId}:${contextMenu.lineIdx}`
+            ];
           const items: ContextMenuItem[] = [
             {
               id: "comment",
@@ -1577,7 +1614,7 @@ export function ReviewWorkspace({
           context={buildHelpContext({
             hasSelection:
               !!state.selection && state.selection.hunkId === state.cursor.hunkId,
-            lineHasAiNote: !!line?.aiNote,
+            lineHasAiNote,
             lineNoteAcked,
             currentFileReadFraction: fileCoverage(file, state.readLines),
             currentFileReviewed: state.reviewedFiles.has(file.id),
@@ -1614,7 +1651,7 @@ export function ReviewWorkspace({
           readCoverage,
           reviewedFiles,
           selection: selectionForStatusBar(hunk, state.selection),
-          lineHasAiNote: !!line?.aiNote,
+          lineHasAiNote,
           lineNoteAcked,
           currentFileReadFraction: fileCoverage(file, state.readLines),
           currentFileReviewed: state.reviewedFiles.has(file.id),

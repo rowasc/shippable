@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { CS_42, REPLIES_42 } from "../fixtures/cs-42-preferences";
-import { CS_72, REPLIES_72 } from "../fixtures/cs-72-docs-preview";
-import { CS_91, REPLIES_91 } from "../fixtures/cs-91-agent-flow";
+import { CS_42, INTERACTIONS_42 } from "../fixtures/cs-42-preferences";
+import { CS_72, INTERACTIONS_72 } from "../fixtures/cs-72-docs-preview";
+import { CS_91 } from "../fixtures/cs-91-agent-flow";
 import {
+  ackedNotesToInteractions,
   buildCommentStops,
-  initialState,
-  reducer,
   changesetCoverage,
+  firstTargetForKey,
+  initialState,
+  mergeInteractionMaps,
+  reducer,
+  replyTargetForKey,
   reviewedFilesCount,
+  selectAckedNotes,
 } from "../state";
 import { planReview } from "../plan";
 import { applyThemeToRoot, type ThemeId } from "../tokens";
@@ -34,6 +39,7 @@ import {
   buildSidebarViewModel,
   buildStatusBarViewModel,
 } from "../view";
+import { selectIngestSignals } from "../interactions";
 import { buildSymbolIndex, type SymbolIndex } from "../symbols";
 import { maybeSuggest } from "../guide";
 import { buildAutoFillContext, type Prompt } from "../promptStore";
@@ -48,8 +54,9 @@ import {
   userCommentKey,
   type AgentContextSlice,
   type Cursor,
-  type DeliveredComment,
+  type DeliveredInteraction,
   type EvidenceRef,
+  type Interaction,
   type ReviewState,
   type ChangeSet,
 } from "../types";
@@ -164,7 +171,7 @@ const DEMO_RECENTS: RecentEntry[] = [
       branch: DEMO_WORKTREES[1].branch,
     },
     changeset: PREVIEW_CS,
-    replies: { ...REPLIES_72 },
+    interactions: { ...INTERACTIONS_72 },
   },
   {
     id: CS.id,
@@ -172,7 +179,7 @@ const DEMO_RECENTS: RecentEntry[] = [
     addedAt: Date.parse("2026-05-04T11:05:00Z"),
     source: { kind: "paste" },
     changeset: CS,
-    replies: { ...REPLIES_42 },
+    interactions: { ...INTERACTIONS_42 },
   },
 ];
 
@@ -216,7 +223,7 @@ interface WorkspaceFrame extends BaseFrame {
 
 interface AgentSnapshot {
   slice: AgentContextSlice | null;
-  delivered: DeliveredComment[];
+  delivered: DeliveredInteraction[];
 }
 
 /**
@@ -252,15 +259,17 @@ type Frame = WorkspaceFrame | WelcomeFrame | KeySetupFrame | PromptEditorFrame;
 
 // ── frame state helpers ───────────────────────────────────────────────────
 
-function repliesFor(cs: ChangeSet): Record<string, ReviewState["replies"][string]> {
-  if (cs.id === CS.id) return { ...REPLIES_42 };
-  if (cs.id === PREVIEW_CS.id) return { ...REPLIES_72 };
-  if (cs.id === AGENT_CS.id) return { ...REPLIES_91 };
+function ingestFor(cs: ChangeSet): Record<string, Interaction[]> {
+  if (cs.id === CS.id) return INTERACTIONS_42;
+  if (cs.id === PREVIEW_CS.id) return INTERACTIONS_72;
   return {};
 }
 
 function fresh(cs: ChangeSet = CS): ReviewState {
-  return { ...initialState([cs]), replies: repliesFor(cs) };
+  return {
+    ...initialState([cs]),
+    interactions: ingestFor(cs),
+  };
 }
 
 function withCursor(
@@ -484,24 +493,55 @@ function buildFrames(): Frame[] {
   const lineKey1 = userCommentKey(AGENT_H1.id, AGENT_LINE1_LINE_IDX);
   const lineKey2 = userCommentKey(AGENT_H1.id, AGENT_LINE2_LINE_IDX);
 
-  const replyLine1 = {
+  const replyLine1: Interaction = {
     id: "demo-r-a1",
+    threadKey: lineKey1,
+    target: "line",
+    intent: "comment",
     author: "you",
+    authorRole: "user",
     body: "`assertGitDir` reads like it returns void — rename to `assertWorktreeIsGitDir`?",
     createdAt: "2026-05-06T10:01:30Z",
     enqueuedCommentId: "cmt_a1",
   };
-  const replyLine2 = {
+  const replyLine2: Interaction = {
     id: "demo-r-a2",
+    threadKey: lineKey2,
+    target: "line",
+    intent: "comment",
     author: "you",
+    authorRole: "user",
     body: "this should throw — `{ id: \"\" }` reads as success on the wire.",
     createdAt: "2026-05-06T10:02:10Z",
     enqueuedCommentId: "cmt_a2",
   };
+  const agentReplyLine1: Interaction = {
+    id: "ar-1",
+    threadKey: lineKey1,
+    target: "reply-to-user",
+    intent: "accept",
+    author: "agent",
+    authorRole: "agent",
+    body: "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
+    createdAt: "2026-05-06T10:05:00Z",
+  };
+  const agentReplyLine2: Interaction = {
+    id: "ar-2",
+    threadKey: lineKey2,
+    target: "reply-to-user",
+    intent: "reject",
+    author: "agent",
+    authorRole: "agent",
+    body: "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",
+    createdAt: "2026-05-06T10:06:30Z",
+  };
 
-  const deliveredA1: DeliveredComment = {
+  const deliveredA1: DeliveredInteraction = {
     id: "cmt_a1",
-    kind: "line",
+    target: "line",
+    intent: "comment",
+    author: replyLine1.author,
+    authorRole: "user",
     file: AGENT_QUEUE_FILE.path,
     lines: "4",
     body: replyLine1.body,
@@ -510,9 +550,12 @@ function buildFrames(): Frame[] {
     enqueuedAt: replyLine1.createdAt,
     deliveredAt: "2026-05-06T10:04:00Z",
   };
-  const deliveredA2: DeliveredComment = {
+  const deliveredA2: DeliveredInteraction = {
     id: "cmt_a2",
-    kind: "line",
+    target: "line",
+    intent: "comment",
+    author: replyLine2.author,
+    authorRole: "user",
     file: AGENT_QUEUE_FILE.path,
     lines: "10",
     body: replyLine2.body,
@@ -551,7 +594,7 @@ function buildFrames(): Frame[] {
   };
 
   const agentBase = {
-    ...initialState([AGENT_CS], REPLIES_91),
+    ...initialState([AGENT_CS]),
     cursor: {
       changesetId: AGENT_CS.id,
       fileId: AGENT_QUEUE_FILE.id,
@@ -567,7 +610,7 @@ function buildFrames(): Frame[] {
   // → both render the ◌ queued pip. No delivered ids yet.
   const fAgent2State: ReviewState = {
     ...agentBase,
-    replies: {
+    interactions: {
       [lineKey1]: [replyLine1],
       [lineKey2]: [replyLine2],
     },
@@ -577,38 +620,14 @@ function buildFrames(): Frame[] {
   // both so pips flip to ✓ and the panel shows Delivered (2).
   const fAgent3State: ReviewState = { ...fAgent2State };
 
-  // Frame agent-4 — agent posts replies: addressed on the rename, declined
-  // on the throw-vs-silent-no-op call. Both visible in the same view because
+  // Frame agent-4 — agent posts replies: accept on the rename, reject on
+  // the throw-vs-silent-no-op call. Both visible in the same view because
   // the comments share a hunk.
   const fAgent4State: ReviewState = {
     ...agentBase,
-    replies: {
-      [lineKey1]: [
-        {
-          ...replyLine1,
-          agentReplies: [
-            {
-              id: "ar-1",
-              body: "Renamed to `assertWorktreeIsGitDir`; updated both call sites in `c8e21f9`.",
-              outcome: "addressed",
-              postedAt: "2026-05-06T10:05:00Z",
-            },
-          ],
-        },
-      ],
-      [lineKey2]: [
-        {
-          ...replyLine2,
-          agentReplies: [
-            {
-              id: "ar-2",
-              body: "Keeping the no-op — the route handler already shapes the 400 and the in-process caller relies on it. Noted in JSDoc.",
-              outcome: "declined",
-              postedAt: "2026-05-06T10:06:30Z",
-            },
-          ],
-        },
-      ],
+    interactions: {
+      [lineKey1]: [replyLine1, agentReplyLine1],
+      [lineKey2]: [replyLine2, agentReplyLine2],
     },
   };
 
@@ -677,21 +696,27 @@ function buildFrames(): Frame[] {
   };
 
   // 5 — ack the note at line 14, plus a user reply on the note at line 21.
+  const lineNote21 = lineNoteReplyKey(PREF_H1.id, 21);
   const f5State = withCursor(
     {
       ...fresh(),
-      ackedNotes: new Set([noteKey(PREF_H1.id, 14)]),
-      replies: {
-        ...REPLIES_42,
-        [lineNoteReplyKey(PREF_H1.id, 21)]: [
-          {
-            id: "demo-r1",
-            author: "you",
-            body: "Good catch — I'll add a useCallback before merging.",
-            createdAt: "2026-04-30T10:00:00Z",
-          },
-        ],
-      },
+      interactions: ackedNotesToInteractions(
+        new Set([noteKey(PREF_H1.id, 14)]),
+        mergeInteractionMaps(INTERACTIONS_42, {
+          [lineNote21]: [
+            {
+              id: "demo-r1",
+              threadKey: lineNote21,
+              target: "reply-to-ai-note",
+              intent: "comment",
+              author: "you",
+              authorRole: "user",
+              body: "Good catch — I'll add a useCallback before merging.",
+              createdAt: "2026-04-30T10:00:00Z",
+            },
+          ],
+        }),
+      ),
     },
     PREF_FILE.id,
     PREF_H1.id,
@@ -711,17 +736,20 @@ function buildFrames(): Frame[] {
       lineIdx: BLOCK_HI,
     },
     selection: { hunkId: STORAGE_H2.id, anchor: BLOCK_LO, head: BLOCK_HI },
-    replies: {
-      ...REPLIES_42,
+    interactions: mergeInteractionMaps(INTERACTIONS_42, {
       [blockKey]: [
         {
           id: "demo-block",
+          threadKey: blockKey,
+          target: "block",
+          intent: "comment",
           author: "dan",
+          authorRole: "user",
           body: "The whole try/catch reads cleaner as a parse-and-validate helper.",
           createdAt: "2026-04-30T11:00:00Z",
         },
       ],
-    },
+    }),
   };
 
   // 7 — storage.ts read end-to-end + signed off.
@@ -1258,6 +1286,11 @@ function WorkspaceStage({
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = useMemo(() => buildSymbolIndex(cs), [cs]);
+  const demoIngestSignals = selectIngestSignals(state);
+  const demoLineHasAiNote =
+    !!demoIngestSignals.aiNoteByLine[
+      `${state.cursor.hunkId}:${state.cursor.lineIdx}`
+    ];
   const jumpTo = (c: Cursor) => dispatch({ type: "SET_CURSOR", cursor: c });
 
   // Synthetic agent-context bundle for the trailing agent-integration
@@ -1437,7 +1470,7 @@ function WorkspaceStage({
 
       const predicates: Record<string, boolean> = {
         hasSuggestion: !!suggestion,
-        lineHasAiNote: !!line?.aiNote,
+        lineHasAiNote: demoLineHasAiNote,
         hasSelection: !!state.selection,
         hasPlan: showPlan,
         hasPicker: showPicker,
@@ -1593,6 +1626,7 @@ function WorkspaceStage({
     line,
     draftingKey,
     hunk,
+    demoLineHasAiNote,
   ]);
 
   return (
@@ -1650,8 +1684,8 @@ function WorkspaceStage({
             currentFileId: state.cursor.fileId,
             readLines: state.readLines,
             reviewedFiles: state.reviewedFiles,
-            replies: state.replies,
-            detachedReplies: state.detachedReplies,
+            interactions: state.interactions,
+            detachedInteractions: state.detachedInteractions,
           })}
           onPickFile={(fileId) => {
             const f = cs.files.find((ff) => ff.id === fileId);
@@ -1667,7 +1701,7 @@ function WorkspaceStage({
             });
           }}
           onJumpToFirstComment={(fileId) => {
-            const stop = buildCommentStops(cs, state.replies).find(
+            const stop = buildCommentStops(cs, state.interactions).find(
               (s) => s.fileId === fileId,
             );
             if (!stop) return;
@@ -1693,14 +1727,15 @@ function WorkspaceStage({
             cursorLineIdx: state.cursor.lineIdx,
             read: state.readLines,
             isFileReviewed: state.reviewedFiles.has(file.id),
-            acked: state.ackedNotes,
-            replies: state.replies,
+            acked: selectAckedNotes(state),
+            replies: state.interactions,
             expandLevelAbove: state.expandLevelAbove,
             expandLevelBelow: state.expandLevelBelow,
             fileFullyExpanded: state.fullExpandedFiles.has(file.id),
             filePreviewing: state.previewedFiles.has(file.id),
             imageAssets: cs.imageAssets,
             selection: state.selection,
+            signals: demoIngestSignals,
           })}
           onSetExpandLevel={(hunkId, dir, level) =>
             dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
@@ -1720,14 +1755,15 @@ function WorkspaceStage({
               line,
               cursor: state.cursor,
               symbols: symbolIndex,
-              acked: state.ackedNotes,
-              replies: state.replies,
+              acked: selectAckedNotes(state),
+              replies: state.interactions,
               draftingKey,
+              signals: demoIngestSignals,
             })}
-            commentCount={buildCommentStops(cs, state.replies).length}
+            commentCount={buildCommentStops(cs, state.interactions).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
             onNextComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: 1 })}
-            lineHasAiNote={!!line?.aiNote}
+            lineHasAiNote={demoLineHasAiNote}
             symbols={symbolIndex}
             draftBodies={drafts}
             onJump={jumpTo}
@@ -1743,17 +1779,23 @@ function WorkspaceStage({
               setDrafts((prev) => ({ ...prev, [key]: body }))
             }
             onSubmitReply={(key, body) => {
+              const isFirst = (state.interactions[key]?.length ?? 0) === 0;
+              const interaction: Interaction = {
+                id: `r-${Date.now()}`,
+                threadKey: key,
+                target: isFirst ? firstTargetForKey(key) : replyTargetForKey(key),
+                intent: "comment",
+                author: "you",
+                authorRole: "user",
+                body,
+                createdAt: new Date().toISOString(),
+                enqueuedCommentId: null,
+                ...buildReplyAnchor(key, cs),
+              };
               dispatch({
-                type: "ADD_REPLY",
+                type: "ADD_INTERACTION",
                 targetKey: key,
-                reply: {
-                  id: `r-${Date.now()}`,
-                  author: "you",
-                  body,
-                  createdAt: new Date().toISOString(),
-                  enqueuedCommentId: null,
-                  ...buildReplyAnchor(key, cs),
-                },
+                interaction,
               });
               setDrafts((prev) => {
                 if (!(key in prev)) return prev;
@@ -1764,7 +1806,11 @@ function WorkspaceStage({
               setDraftingKey(null);
             }}
             onDeleteReply={(key, replyId) =>
-              dispatch({ type: "DELETE_REPLY", targetKey: key, replyId })
+              dispatch({
+                type: "DELETE_INTERACTION",
+                targetKey: key,
+                interactionId: replyId,
+              })
             }
             onRetryReply={() => {
               // Demo mode has no agent backend; retry is a no-op. Failed

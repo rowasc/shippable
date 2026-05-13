@@ -1,11 +1,11 @@
 import { parseDiff } from "../../../web/src/parseDiff.ts";
 import type {
   ChangeSet,
-  DetachedReply,
+  DetachedInteraction,
   DiffLine,
+  Interaction,
   PrConversationItem,
   PrSource,
-  Reply,
 } from "../../../web/src/types.ts";
 import { blockCommentKey, userCommentKey } from "../../../web/src/types.ts";
 import { githubFetch, githubFetchAll } from "./api-client.ts";
@@ -63,9 +63,9 @@ interface GhIssueComment {
 export interface PrLoadResult {
   changeSet: ChangeSet;
   /** PR review comments that anchor to a line in the current diff. */
-  prReplies: Record<string, Reply[]>;
+  prInteractions: Record<string, Interaction[]>;
   /** PR review comments that no longer anchor (outdated, or moved off the patch view). */
-  prDetached: DetachedReply[];
+  prDetached: DetachedInteraction[];
 }
 
 function fileHeaders(f: GhPrFile): string {
@@ -120,9 +120,9 @@ function buildPositionIndex(
   return index;
 }
 
-/** Reply.anchorContext is documented as "up to 10 lines centered on the
- *  anchor". We honor that here so the Sidebar's detached snippet stays a
- *  glance, not a wall of code. */
+/** Interaction.anchorContext is documented as "up to 10 lines centered on
+ *  the anchor". We honor that here so the Sidebar's detached snippet stays
+ *  a glance, not a wall of code. */
 const ANCHOR_CONTEXT_BEFORE = 5;
 const ANCHOR_CONTEXT_AFTER = 4;
 
@@ -233,42 +233,40 @@ export async function loadPr(
 
   const positionIndex = buildPositionIndex(cs);
 
-  const prReplies: Record<string, Reply[]> = {};
-  const prDetached: DetachedReply[] = [];
+  const prInteractions: Record<string, Interaction[]> = {};
+  const prDetached: DetachedInteraction[] = [];
 
   for (const c of lineComments) {
-    const baseReply: Reply = {
-      id: `pr-comment:${c.id}`,
-      author: c.user.login,
-      body: c.body,
-      createdAt: c.created_at,
-      external: { source: "pr", htmlUrl: c.html_url },
-    };
-
     const fileMap = positionIndex.get(c.path);
     const hit = c.line !== null ? fileMap?.get(c.line) : undefined;
 
     if (!hit) {
       // Outdated (line === null) or anchor moved off the patch view —
-      // render as a DetachedReply so the user sees the original context.
+      // render as a DetachedInteraction so the user sees the original context.
       const anchorContext = c.diff_hunk
         ? parseDiffHunkLines(c.diff_hunk, c.path, {
             line: c.original_line,
             side: c.side,
           })
         : [];
-      const detachedReply: Reply = {
-        ...baseReply,
+      const detachedKey = `pr-detached:${c.id}`;
+      const detachedIx: Interaction = {
+        id: `pr-comment:${c.id}`,
+        threadKey: detachedKey,
+        target: "line",
+        intent: "comment",
+        author: c.user.login,
+        authorRole: "user",
+        body: c.body,
+        createdAt: c.created_at,
         anchorPath: c.path,
         anchorLineNo: c.original_line,
         anchorContext,
         originType: "committed",
         originSha: c.original_commit_id,
+        external: { source: "pr", htmlUrl: c.html_url },
       };
-      prDetached.push({
-        reply: detachedReply,
-        threadKey: `pr-detached:${c.id}`,
-      });
+      prDetached.push({ interaction: detachedIx, threadKey: detachedKey });
       continue;
     }
 
@@ -279,27 +277,43 @@ export async function loadPr(
       c.start_line !== c.line;
 
     let key: string;
+    let target: Interaction["target"];
     if (isMultiLine) {
       const startHit = fileMap?.get(c.start_line as number);
       if (startHit && startHit.hunkId === hit.hunkId) {
         const lo = Math.min(startHit.lineIdx, hit.lineIdx);
         const hi = Math.max(startHit.lineIdx, hit.lineIdx);
         key = blockCommentKey(hit.hunkId, lo, hi);
+        target = "block";
       } else {
         // Span crosses hunks (rare) — fall back to single-line on the end line.
         key = userCommentKey(hit.hunkId, hit.lineIdx);
+        target = "line";
       }
     } else {
       key = userCommentKey(hit.hunkId, hit.lineIdx);
+      target = "line";
     }
 
-    if (!prReplies[key]) prReplies[key] = [];
-    prReplies[key].push(baseReply);
+    const interaction: Interaction = {
+      id: `pr-comment:${c.id}`,
+      threadKey: key,
+      target,
+      intent: "comment",
+      author: c.user.login,
+      authorRole: "user",
+      body: c.body,
+      createdAt: c.created_at,
+      external: { source: "pr", htmlUrl: c.html_url },
+    };
+
+    if (!prInteractions[key]) prInteractions[key] = [];
+    prInteractions[key].push(interaction);
   }
 
   return {
     changeSet: { ...cs, prSource, prConversation },
-    prReplies,
+    prInteractions,
     prDetached,
   };
 }

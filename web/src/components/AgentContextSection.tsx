@@ -1,16 +1,12 @@
 import "./AgentContextSection.css";
 import { useEffect, useState } from "react";
 import type {
-  AgentComment,
   AgentContextSlice,
   AgentSessionRef,
   Cursor,
-  DeliveredComment,
-  Reply,
+  DeliveredInteraction,
 } from "../types";
-import { agentCommentReplyKey } from "../types";
 import type { SymbolIndex } from "../symbols";
-import { ReplyThread } from "./ReplyThread";
 
 interface Props {
   slice: AgentContextSlice | null;
@@ -49,7 +45,7 @@ interface Props {
    * composer. The list is bounded server-side at 200 — see
    * `DELIVERED_HISTORY_CAP` in `server/src/agent-queue.ts`.
    */
-  delivered: DeliveredComment[];
+  delivered: DeliveredInteraction[];
   /**
    * ISO timestamp of the most recent successful `fetchDelivered` call.
    * `null` before any successful poll. Drives the failure-mode banner's
@@ -61,33 +57,6 @@ interface Props {
    * in last-known state; the panel-level banner surfaces the failure.
    */
   deliveredError: boolean;
-  /**
-   * Top-level agent comments for this worktree. Each is rendered as a
-   * new root in the panel with a `ReplyThread` underneath so the reviewer
-   * can respond. Empty list hides the block entirely.
-   */
-  agentComments: AgentComment[];
-  /**
-   * Reviewer-side reply map (`state.replies`). The agent-comments block
-   * looks up entries by `agentCommentReplyKey(id)`. Other keys are ignored.
-   */
-  replies: Record<string, Reply[]>;
-  /**
-   * The reply-key currently being drafted, or null when no composer is open.
-   * Threading through so each agent-comment thread can know whether its
-   * composer is the active one.
-   */
-  draftingKey: string | null;
-  /** Active draft body lookup keyed by reply-key. */
-  draftFor: (key: string) => string;
-  /** Index of delivered comments by id — drives the per-reply ✓ pip. */
-  deliveredById: Record<string, DeliveredComment>;
-  onStartDraft: (key: string) => void;
-  onCloseDraft: () => void;
-  onChangeDraft: (key: string, body: string) => void;
-  onSubmitReply: (key: string, body: string) => void;
-  onDeleteReply: (key: string, replyId: string) => void;
-  onRetryReply: (key: string, replyId: string) => void;
 }
 
 /** localStorage key for the "I installed it" dismiss flag. One flag per
@@ -108,17 +77,6 @@ export function AgentContextSection({
   deliveredError,
   onPickSession,
   onRefresh,
-  agentComments,
-  replies,
-  draftingKey,
-  draftFor,
-  deliveredById,
-  onStartDraft,
-  onCloseDraft,
-  onChangeDraft,
-  onSubmitReply,
-  onDeleteReply,
-  onRetryReply,
 }: Props) {
   // Note: we deliberately don't early-return on "no slice + no candidates";
   // Inspector only renders this section when the active changeset has a
@@ -162,10 +120,7 @@ export function AgentContextSection({
 
       {error && (
         <div className="ac__err">
-          {error}{" "}
-          <button type="button" className="ac__err-retry" onClick={onRefresh}>
-            retry
-          </button>
+          {error} <button className="ac__err-retry" onClick={onRefresh}>retry</button>
         </div>
       )}
 
@@ -202,121 +157,8 @@ export function AgentContextSection({
         </>
       )}
 
-      <AgentCommentsBlock
-        agentComments={agentComments}
-        replies={replies}
-        draftingKey={draftingKey}
-        draftFor={draftFor}
-        symbols={symbols}
-        deliveredById={deliveredById}
-        onJump={onJump}
-        onStartDraft={onStartDraft}
-        onCloseDraft={onCloseDraft}
-        onChangeDraft={onChangeDraft}
-        onSubmitReply={onSubmitReply}
-        onDeleteReply={onDeleteReply}
-        onRetryReply={onRetryReply}
-      />
-
       <DeliveredBlock delivered={delivered} />
     </section>
-  );
-}
-
-/**
- * Top-level agent comments rendered as a new root kind in the panel. Each
- * comment surfaces with its anchor (`file:lines`), an "agent" identity, the
- * body, and a `ReplyThread` underneath so the reviewer can respond. Hidden
- * when there are no agent comments for this worktree.
- *
- * Per-thread reply state is wired through the same handlers the rest of
- * the reviewer UI uses — submit creates a Reply under the `agentComment:<id>`
- * key, and the existing enqueue path emits `kind: "reply-to-agent-comment"`
- * with `parentAgentCommentId` set.
- */
-function AgentCommentsBlock({
-  agentComments,
-  replies,
-  draftingKey,
-  draftFor,
-  symbols,
-  deliveredById,
-  onJump,
-  onStartDraft,
-  onCloseDraft,
-  onChangeDraft,
-  onSubmitReply,
-  onDeleteReply,
-  onRetryReply,
-}: {
-  agentComments: AgentComment[];
-  replies: Record<string, Reply[]>;
-  draftingKey: string | null;
-  draftFor: (key: string) => string;
-  symbols: SymbolIndex;
-  deliveredById: Record<string, DeliveredComment>;
-  onJump: (c: Cursor) => void;
-  onStartDraft: (key: string) => void;
-  onCloseDraft: () => void;
-  onChangeDraft: (key: string, body: string) => void;
-  onSubmitReply: (key: string, body: string) => void;
-  onDeleteReply: (key: string, replyId: string) => void;
-  onRetryReply: (key: string, replyId: string) => void;
-}) {
-  if (agentComments.length === 0) return null;
-  return (
-    <details className="ac__details ac__agent-comments" open>
-      <summary className="ac__details-summary">
-        Agent comments ({agentComments.length})
-      </summary>
-      <ul className="ac__agent-comments-list">
-        {agentComments.map((ac) => {
-          const replyKey = agentCommentReplyKey(ac.id);
-          const threadReplies = replies[replyKey] ?? [];
-          // mergeAgentComments filters to anchor-shaped entries, so `anchor`
-          // is always set here. The `!` records that invariant for readers.
-          const anchorLabel = `${ac.anchor!.file}:${ac.anchor!.lines}`;
-          return (
-            <li key={ac.id} className="ac__agent-comment">
-              <div className="ac__agent-comment-head">
-                <span className="ac__agent-comment-label">
-                  {ac.agentLabel ?? "agent"}
-                </span>
-                <span className="ac__agent-comment-sep"> · </span>
-                <span
-                  className="ac__agent-comment-loc"
-                  title={anchorLabel}
-                >
-                  {anchorLabel}
-                </span>
-                <span className="ac__agent-comment-sep"> · </span>
-                <span
-                  className="ac__agent-comment-time"
-                  title={ac.postedAt}
-                >
-                  {humanAgo(ac.postedAt)}
-                </span>
-              </div>
-              <div className="ac__agent-comment-body">{ac.body}</div>
-              <ReplyThread
-                replies={threadReplies}
-                isDrafting={draftingKey === replyKey}
-                draftBody={draftFor(replyKey)}
-                onStartDraft={() => onStartDraft(replyKey)}
-                onCloseDraft={onCloseDraft}
-                onChangeDraft={(body) => onChangeDraft(replyKey, body)}
-                onSubmitReply={(body) => onSubmitReply(replyKey, body)}
-                onDeleteReply={(replyId) => onDeleteReply(replyKey, replyId)}
-                onRetryReply={(replyId) => onRetryReply(replyKey, replyId)}
-                symbols={symbols}
-                onJump={onJump}
-                deliveredById={deliveredById}
-              />
-            </li>
-          );
-        })}
-      </ul>
-    </details>
   );
 }
 
@@ -332,7 +174,7 @@ function AgentCommentsBlock({
  * server drops oldest beyond the cap, so the only way to land at exactly
  * 200 in a long-running session is to be at the cap.
  */
-function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
+function DeliveredBlock({ delivered }: { delivered: DeliveredInteraction[] }) {
   if (delivered.length === 0) return null;
   const atCap = delivered.length === 200;
   return (
@@ -345,7 +187,7 @@ function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
           <li key={d.id} className="ac__delivered-item">
             <span className="ac__delivered-loc">{formatLoc(d)}</span>
             <span className="ac__delivered-sep"> · </span>
-            <span className="ac__delivered-kind">{d.kind}</span>
+            <span className="ac__delivered-kind">{d.target}</span>
             <span className="ac__delivered-sep"> · </span>
             <span className="ac__delivered-time" title={d.deliveredAt}>
               {humanAgo(d.deliveredAt)}
@@ -358,7 +200,7 @@ function DeliveredBlock({ delivered }: { delivered: DeliveredComment[] }) {
   );
 }
 
-function formatLoc(d: DeliveredComment): string {
+function formatLoc(d: DeliveredInteraction): string {
   return d.lines ? `${d.file}:${d.lines}` : d.file;
 }
 
@@ -631,10 +473,10 @@ function tokenizeBackticks(text: string, symbols: SymbolIndex): MsgPart[] {
 /**
  * Two magic phrases — one per direction of the loop. `check shippable` pulls
  * pending reviewer comments via the `shippable_check_review_comments` tool;
- * `report back to shippable` posts per-comment replies (or fresh top-level
- * agent comments) via the `shippable_post_review_comment` tool. The
- * descriptions on both tools tune for implicit triggering, but a literal
- * phrase is the prompt-drift escape hatch.
+ * `report back to shippable` posts per-comment replies via the new
+ * `shippable_post_review_reply` tool. The descriptions on both tools tune
+ * for implicit triggering, but a literal phrase is the prompt-drift escape
+ * hatch — see docs/sdd/agent-reply-support/spec.md.
  */
 const MAGIC_PHRASE_PULL = "check shippable";
 const MAGIC_PHRASE_REPORT = "report back to shippable";

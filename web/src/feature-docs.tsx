@@ -5,8 +5,13 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./App.css";
 import "./feature-docs.css";
-import { CS_42 } from "./fixtures/cs-42-preferences";
-import { initialState, changesetCoverage, reviewedFilesCount } from "./state";
+import { CS_42, INTERACTIONS_42 } from "./fixtures/cs-42-preferences";
+import {
+  changesetCoverage,
+  initialState,
+  reviewedFilesCount,
+  selectAckedNotes,
+} from "./state";
 import { planReview } from "./plan";
 import { maybeSuggest } from "./guide";
 import { applyThemeToRoot, getStoredThemeId } from "./tokens";
@@ -22,6 +27,7 @@ import {
   buildSidebarViewModel,
   buildStatusBarViewModel,
 } from "./view";
+import { selectIngestSignals } from "./interactions";
 import {
   fixtureAiSaturated,
   fixtureFileReviewed,
@@ -213,7 +219,7 @@ function topbarThemeId() {
 
 function makeContextExpandedState(): ReviewState {
   return {
-    ...initialState([CS]),
+    ...initialState([CS], INTERACTIONS_42),
     cursor: {
       changesetId: CS.id,
       fileId: USER_FILE.id,
@@ -227,7 +233,7 @@ function makeContextExpandedState(): ReviewState {
 
 function makeFullFileState(): ReviewState {
   return {
-    ...initialState([CS]),
+    ...initialState([CS], INTERACTIONS_42),
     cursor: {
       changesetId: CS.id,
       fileId: USER_FILE.id,
@@ -240,7 +246,7 @@ function makeFullFileState(): ReviewState {
 
 function makeGuideState(): ReviewState {
   return {
-    ...initialState([CS]),
+    ...initialState([CS], INTERACTIONS_42),
     cursor: {
       changesetId: CS.id,
       fileId: PREF_FILE.id,
@@ -284,6 +290,11 @@ function WorkspaceFrame({
   const file = cs.files.find((item) => item.id === state.cursor.fileId)!;
   const hunk = file.hunks.find((item) => item.id === state.cursor.hunkId)!;
   const line = hunk.lines[state.cursor.lineIdx];
+  const ingestSignals = selectIngestSignals(state);
+  const featureLineHasAiNote =
+    !!ingestSignals.aiNoteByLine[
+      `${state.cursor.hunkId}:${state.cursor.lineIdx}`
+    ];
   const symbolIndex = buildSymbolIndex(cs);
   const suggestion = showGuide ? maybeSuggest(cs, state) : null;
   const guideViewModel = suggestion
@@ -322,7 +333,7 @@ function WorkspaceFrame({
               currentFileId: state.cursor.fileId,
               readLines: state.readLines,
               reviewedFiles: state.reviewedFiles,
-              replies: state.replies,
+              interactions: state.interactions,
             })}
             onPickFile={() => {}}
             onJumpToFirstComment={() => {}}
@@ -338,13 +349,14 @@ function WorkspaceFrame({
               cursorLineIdx: state.cursor.lineIdx,
               read: state.readLines,
               isFileReviewed: state.reviewedFiles.has(file.id),
-              acked: state.ackedNotes,
-              replies: state.replies,
+              acked: selectAckedNotes(state),
+              replies: state.interactions,
               expandLevelAbove: state.expandLevelAbove,
               expandLevelBelow: state.expandLevelBelow,
               fileFullyExpanded: state.fullExpandedFiles.has(file.id),
               filePreviewing: state.previewedFiles.has(file.id),
               selection: state.selection,
+              signals: ingestSignals,
             })}
             onSetExpandLevel={() => {}}
             onToggleExpandFile={() => {}}
@@ -358,14 +370,15 @@ function WorkspaceFrame({
                 line,
                 cursor: state.cursor,
                 symbols: symbolIndex,
-                acked: state.ackedNotes,
-                replies: state.replies,
+                acked: selectAckedNotes(state),
+                replies: state.interactions,
                 draftingKey: null,
+                signals: ingestSignals,
               })}
               commentCount={0}
               onPrevComment={() => {}}
               onNextComment={() => {}}
-              lineHasAiNote={!!line?.aiNote}
+              lineHasAiNote={featureLineHasAiNote}
               symbols={symbolIndex}
               draftBodies={{}}
               onJump={() => {}}

@@ -9,7 +9,7 @@
  * See `docs/plans/worktree-live-reload.md` (slice c).
  */
 
-import type { ChangeSet, DiffLine, Hunk, Reply } from "./types";
+import type { ChangeSet, DiffLine, Hunk, Interaction } from "./types";
 
 /** Inner-window radius. ±2 → 5 lines for the matching hash. */
 const HASH_RADIUS = 2;
@@ -105,9 +105,9 @@ export function findAnchorInFile(
   return null;
 }
 
-/** Anchor metadata to merge onto a Reply at write time. */
+/** Anchor metadata to merge onto an Interaction at write time. */
 export type ReplyAnchorFields = Pick<
-  Reply,
+  Interaction,
   | "anchorPath"
   | "anchorContext"
   | "anchorHash"

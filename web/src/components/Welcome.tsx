@@ -1,6 +1,6 @@
 import "./Welcome.css";
-import { useState } from "react";
-import type { ChangeSet, DetachedReply, Reply } from "../types";
+import { useRef, useState } from "react";
+import type { ChangeSet, DetachedInteraction, Interaction } from "../types";
 import { parseDiff } from "../parseDiff";
 import { STUBS } from "../fixtures";
 import type { RecentEntry, RecentSource } from "../recents";
@@ -14,9 +14,12 @@ interface Props {
   /** The reviewer picked something (recent, stub, or freshly parsed). */
   onLoad: (
     cs: ChangeSet,
-    replies: Record<string, Reply[]>,
+    interactions: Record<string, Interaction[]>,
     source: RecentSource,
-    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
+    prData?: {
+      prInteractions: Record<string, Interaction[]>;
+      prDetached: DetachedInteraction[];
+    },
   ) => void;
   /** Notify parent so it re-reads recents from storage. */
   onRecentsChange: (next: RecentEntry[]) => void;
@@ -38,14 +41,18 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   // below") always points at something the eye can find.
   const [heroDropActive, setHeroDropActive] = useState(false);
   const [fileDropActive, setFileDropActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function deliver(
     cs: ChangeSet,
-    replies: Record<string, Reply[]>,
+    interactions: Record<string, Interaction[]>,
     source: RecentSource,
-    prData?: { prReplies: Record<string, Reply[]>; prDetached: DetachedReply[] },
+    prData?: {
+      prInteractions: Record<string, Interaction[]>;
+      prDetached: DetachedInteraction[];
+    },
   ) {
-    onLoad(cs, replies, source, prData);
+    onLoad(cs, interactions, source, prData);
   }
 
   const pr = useGithubPrLoad({
@@ -54,7 +61,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
         result.changeSet,
         {},
         { kind: "pr", prUrl },
-        { prReplies: result.prReplies, prDetached: result.prDetached },
+        { prInteractions: result.prInteractions, prDetached: result.prDetached },
       );
     },
   });
@@ -127,7 +134,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   });
 
   function loadFromRecent(r: RecentEntry) {
-    deliver(r.changeset, r.replies, r.source);
+    deliver(r.changeset, r.interactions, r.source);
   }
 
   function dismissRecent(id: string) {
@@ -288,6 +295,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               <span> or </span>
               <span className="welcome__drop-strong">click to choose a file</span>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".diff,.patch,text/plain"
                 onChange={(e) => {
@@ -324,7 +332,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && loadFromUrl()}
-              aria-invalid={url.trim() !== "" && !isValidHttpUrl(url)}
             />
             <button
               className="welcome__btn"
@@ -334,11 +341,6 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               {urlBusy || pr.busy ? "loading…" : "load"}
             </button>
           </div>
-          {url.trim() !== "" && !isValidHttpUrl(url) && (
-            <div className="welcome__hint welcome__hint--warn">
-              URL must start with <code>http://</code> or <code>https://</code>.
-            </div>
-          )}
           {pr.error && <div className="welcome__err">{pr.error}</div>}
         </section>
 
@@ -363,6 +365,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               <span> or </span>
               <span className="welcome__drop-strong">click to choose a file</span>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".diff,.patch,text/plain"
                 onChange={(e) => {
@@ -407,7 +410,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
                 type="button"
                 className="welcome__sample"
                 onClick={() =>
-                  deliver(s.changeset, s.replies, { kind: "stub", code: s.code })
+                  deliver(s.changeset, s.interactions, { kind: "stub", code: s.code })
                 }
                 title={s.changeset.title}
               >

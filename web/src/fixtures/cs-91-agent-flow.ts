@@ -1,4 +1,4 @@
-import type { ChangeSet, Reply } from "../types";
+import type { ChangeSet } from "../types";
 
 // Powers the "agent integration" segment of the demo reel — see the
 // trailing frames in `web/src/components/Demo.tsx`. A tight server-side
@@ -86,4 +86,3 @@ export const CS_91: ChangeSet = {
   ],
 };
 
-export const REPLIES_91: Record<string, Reply[]> = {};

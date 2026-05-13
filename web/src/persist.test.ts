@@ -3,14 +3,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadSession, peekSession, saveSession } from "./persist";
 import { initialState } from "./state";
 import type {
-  AgentComment,
   ChangeSet,
+  DetachedInteraction,
   DiffFile,
   DiffLine,
   Hunk,
-  Reply,
+  Interaction,
 } from "./types";
-import { agentCommentReplyKey, lineNoteReplyKey } from "./types";
+import { lineNoteReplyKey } from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
@@ -49,412 +49,269 @@ function makeChangeset(): ChangeSet {
   };
 }
 
+function userIx(
+  over: Partial<Interaction> & { threadKey: string },
+): Interaction {
+  return {
+    id: "u1",
+    target: "line",
+    intent: "comment",
+    author: "you",
+    authorRole: "user",
+    body: "hi",
+    createdAt: "2026-05-07T00:00:00.000Z",
+    ...over,
+  };
+}
+
 afterEach(() => {
   localStorage.clear();
 });
 
-describe("persist — Reply.enqueuedCommentId migration", () => {
-  it("rehydrates a persisted Reply missing enqueuedCommentId as null", () => {
-    // Hand-craft a snapshot that pre-dates slice 2 — the Reply has no
-    // `enqueuedCommentId` key at all. loadSession should fill it in.
+describe("persist v3 — round-trip user-authored Interactions", () => {
+  it("saves a user Interaction and reloads it untouched", () => {
     const cs = makeChangeset();
     const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const legacyReply = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "2026-04-30T00:00:00Z",
-    };
-    const snapshot = {
-      v: 1,
-      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
-      readLines: {},
-      reviewedFiles: [],
-      dismissedGuides: [],
-      ackedNotes: [],
-      replies: { [key]: [legacyReply] },
-      drafts: {},
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    const ix = userIx({
+      id: "u1",
+      threadKey: key,
+      body: "queued",
+      enqueuedCommentId: "cmt_42",
+    });
+    const state = { ...initialState([cs]), interactions: { [key]: [ix] } };
+    saveSession(state, {});
 
     const hydrated = loadSession([cs]);
     expect(hydrated.state).not.toBeNull();
-    const replies = hydrated.state!.replies[key];
-    expect(replies).toHaveLength(1);
-    // Field is present and explicitly null after migration.
-    expect(replies[0].enqueuedCommentId).toBeNull();
-    expect("enqueuedCommentId" in replies[0]).toBe(true);
+    const got = hydrated.state!.interactions[key];
+    expect(got).toHaveLength(1);
+    expect(got[0].id).toBe("u1");
+    expect(got[0].enqueuedCommentId).toBe("cmt_42");
+    expect(got[0].body).toBe("queued");
   });
 
-  it("normalizes an explicitly-undefined enqueuedCommentId the same as a missing one", () => {
-    // Older snapshots could carry the field in two shapes:
-    //   (a) the property is absent from the JSON object entirely, or
-    //   (b) the property is present in code but holds `undefined` (common
-    //       when a reviver/middleware sets it before re-serialization).
-    // JSON.stringify drops `undefined`-valued keys, so both shapes hit disk
-    // identically — but we still want a regression guard that the migration
-    // path (`r.enqueuedCommentId === undefined ? ... : r`) treats them as
-    // equivalent and produces an explicit `null` either way.
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-
-    // Shape (b): present-but-undefined. We assert the in-memory shape first
-    // so the test name isn't a lie about what we're exercising.
-    const legacyReply: Record<string, unknown> = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "2026-04-30T00:00:00Z",
-      enqueuedCommentId: undefined,
-    };
-    expect("enqueuedCommentId" in legacyReply).toBe(true);
-    expect(legacyReply.enqueuedCommentId).toBeUndefined();
-
-    const snapshot = {
-      v: 1,
-      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
-      readLines: {},
-      reviewedFiles: [],
-      dismissedGuides: [],
-      ackedNotes: [],
-      replies: { [key]: [legacyReply] },
-      drafts: {},
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-
-    const hydrated = loadSession([cs]);
-    const replies = hydrated.state!.replies[key];
-    expect(replies[0].enqueuedCommentId).toBeNull();
-    expect("enqueuedCommentId" in replies[0]).toBe(true);
-  });
-
-  it("preserves a non-null enqueuedCommentId across a save/load round-trip", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const reply: Reply = {
-      id: "r1",
-      author: "you",
-      body: "queued",
-      createdAt: "2026-04-30T00:00:00Z",
-      enqueuedCommentId: "cmt_42",
-    };
-    const state = {
-      ...initialState([cs]),
-      replies: { [key]: [reply] },
-    };
-    saveSession(state, {});
-
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state!.replies[key][0].enqueuedCommentId).toBe("cmt_42");
-  });
-});
-
-// Bug class: an older client encountering a snapshot written by a newer
-// version of the app must not pretend to load it. The migration table is
-// forward-only, so a v: 999 blob has no path back to the head we know about.
-// Failing closed = same behavior as a malformed blob: peek → null,
-// load → empty hydration. Anything else risks corrupt state on disk.
-describe("persist — Reply.agentReplies migration", () => {
-  it("rehydrates a persisted Reply missing agentReplies as []", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const legacyReply = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "2026-04-30T00:00:00Z",
-      enqueuedCommentId: "cmt_1",
-    };
-    const snapshot = {
-      v: 1,
-      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
-      readLines: {},
-      reviewedFiles: [],
-      dismissedGuides: [],
-      ackedNotes: [],
-      replies: { [key]: [legacyReply] },
-      drafts: {},
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-
-    const hydrated = loadSession([cs]);
-    const replies = hydrated.state!.replies[key];
-    expect(replies).toHaveLength(1);
-    expect(replies[0].agentReplies).toEqual([]);
-    expect("agentReplies" in replies[0]).toBe(true);
-  });
-
-  it("preserves an existing non-empty agentReplies array across save/load", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const reply: Reply = {
-      id: "r1",
-      author: "you",
-      body: "queued",
-      createdAt: "2026-04-30T00:00:00Z",
-      enqueuedCommentId: "cmt_42",
-      agentReplies: [
-        {
-          id: "ar1",
-          body: "fixed it",
-          outcome: "addressed",
-          postedAt: "2026-04-30T00:01:00Z",
-        },
-      ],
-    };
-    const state = {
-      ...initialState([cs]),
-      replies: { [key]: [reply] },
-    };
-    saveSession(state, {});
-
-    const hydrated = loadSession([cs]);
-    const got = hydrated.state!.replies[key][0];
-    expect(got.agentReplies).toHaveLength(1);
-    expect(got.agentReplies![0].outcome).toBe("addressed");
-  });
-});
-
-describe("persist — unknown future version fails closed", () => {
-  it("peekSession returns null for v greater than CURRENT_VERSION", () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        v: 999,
-        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
-        readLines: {},
-        reviewedFiles: [],
-        dismissedGuides: [],
-        ackedNotes: [],
-        replies: {},
-        drafts: {},
-      }),
-    );
-    expect(peekSession()).toBeNull();
-  });
-
-  it("loadSession returns empty hydration for v greater than CURRENT_VERSION", () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        v: 999,
-        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
-        readLines: {},
-        reviewedFiles: [],
-        dismissedGuides: [],
-        ackedNotes: [],
-        replies: {},
-        drafts: {},
-      }),
-    );
-    expect(loadSession([])).toEqual({ state: null, drafts: {} });
-  });
-});
-
-// Bug class: anchored-comment fields and detachedReplies must round-trip
-// cleanly. Without this, a comment that detached during one session would
-// silently disappear on the next reload of the page.
-describe("persist — v2 round-trip with anchor + detached state", () => {
-  it("preserves anchorContext, anchorHash, originSha, originType across save/load", () => {
+  it("preserves anchor fields (anchorPath, anchorContext, anchorHash, originSha, originType)", () => {
     const cs = makeChangeset();
     const key = lineNoteReplyKey("cs1/f1#h1", 0);
     const anchorContext: DiffLine[] = [
       { kind: "context", text: "line a", oldNo: 1, newNo: 1 },
       { kind: "context", text: "line b", oldNo: 2, newNo: 2 },
     ];
-    const reply: Reply = {
-      id: "r1",
-      author: "you",
+    const ix = userIx({
+      threadKey: key,
       body: "anchored",
-      createdAt: "2026-04-30T00:00:00Z",
       enqueuedCommentId: null,
       anchorPath: "cs1/f1.ts",
       anchorContext,
       anchorHash: "deadbeef",
       originSha: "abc1234",
       originType: "committed",
-    };
-    const state = {
-      ...initialState([cs]),
-      replies: { [key]: [reply] },
-    };
+    });
+    const state = { ...initialState([cs]), interactions: { [key]: [ix] } };
     saveSession(state, {});
 
-    const hydrated = loadSession([cs]);
-    const r = hydrated.state!.replies[key][0];
-    expect(r.anchorPath).toBe("cs1/f1.ts");
-    expect(r.anchorContext).toEqual(anchorContext);
-    expect(r.anchorHash).toBe("deadbeef");
-    expect(r.originSha).toBe("abc1234");
-    expect(r.originType).toBe("committed");
+    const got = loadSession([cs]).state!.interactions[key][0];
+    expect(got.anchorPath).toBe("cs1/f1.ts");
+    expect(got.anchorContext).toEqual(anchorContext);
+    expect(got.anchorHash).toBe("deadbeef");
+    expect(got.originSha).toBe("abc1234");
+    expect(got.originType).toBe("committed");
   });
 
-  it("round-trips detachedReplies", () => {
+  it("round-trips detached Interactions", () => {
     const cs = makeChangeset();
-    const detached = {
-      reply: {
+    const detached: DetachedInteraction = {
+      interaction: userIx({
         id: "r-d",
-        author: "you",
+        threadKey: "user:cs1/f1#h1:0",
         body: "stranded",
-        createdAt: "2026-04-30T00:00:00Z",
         anchorPath: "cs1/gone.ts",
         anchorContext: [
-          { kind: "context" as const, text: "vanishing", oldNo: 1, newNo: 1 },
+          { kind: "context", text: "vanishing", oldNo: 1, newNo: 1 },
         ],
         anchorHash: "feedface",
         originSha: "1234567890",
-        originType: "dirty" as const,
-      },
+        originType: "dirty",
+      }),
       threadKey: "user:cs1/f1#h1:0",
     };
     const state = {
       ...initialState([cs]),
-      detachedReplies: [detached],
+      detachedInteractions: [detached],
     };
     saveSession(state, {});
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state!.detachedReplies).toEqual([detached]);
-  });
 
-  it("migrates a v1 snapshot by adding an empty detachedReplies array", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const v1 = {
-      v: 1,
-      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
-      readLines: {},
-      reviewedFiles: [],
-      dismissedGuides: [],
-      ackedNotes: [],
-      replies: {
-        [key]: [
-          { id: "r1", author: "a", body: "hi", createdAt: "2026-04-30T00:00:00Z" },
-        ],
-      },
-      drafts: {},
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(v1));
     const hydrated = loadSession([cs]);
-    expect(hydrated.state).not.toBeNull();
-    expect(hydrated.state!.detachedReplies).toEqual([]);
-    expect(hydrated.state!.replies[key]).toHaveLength(1);
-  });
-
-  it("migrates a v2 snapshot by adding an empty agentComments array", () => {
-    const cs = makeChangeset();
-    const v2 = {
-      v: 2,
-      cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
-      readLines: {},
-      reviewedFiles: [],
-      dismissedGuides: [],
-      ackedNotes: [],
-      replies: {},
-      drafts: {},
-      detachedReplies: [],
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(v2));
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state).not.toBeNull();
-    expect(hydrated.state!.agentComments).toEqual([]);
-  });
-
-  it("v3 round-trips state.agentComments through save+load", () => {
-    const cs = makeChangeset();
-    const agentComment: AgentComment = {
-      id: "ac-1",
-      body: "I notice this block lacks tests",
-      postedAt: "2026-04-30T00:01:00.000Z",
-      anchor: { file: "cs1/f1.ts", lines: "1-2" },
-    };
-    const state = {
-      ...initialState([cs]),
-      agentComments: [agentComment],
-    };
-    saveSession(state, {});
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state!.agentComments).toEqual([agentComment]);
-  });
-
-  it("agentComment: reply-key prefix survives rehydrate even though it isn't hunk-anchored", () => {
-    const cs = makeChangeset();
-    const reviewerReply: Reply = {
-      id: "r1",
-      author: "you",
-      body: "agreed, will add",
-      createdAt: "2026-04-30T00:02:00.000Z",
-    };
-    const state = {
-      ...initialState([cs]),
-      replies: { [agentCommentReplyKey("ac-1")]: [reviewerReply] },
-    };
-    saveSession(state, {});
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state!.replies[agentCommentReplyKey("ac-1")]).toHaveLength(1);
-    expect(
-      hydrated.state!.replies[agentCommentReplyKey("ac-1")][0].body,
-    ).toBe("agreed, will add");
+    expect(hydrated.state!.detachedInteractions).toEqual([detached]);
   });
 });
 
-describe("persist — Reply.external is dropped on save", () => {
-  it("filters external replies from replies and detachedReplies", () => {
+describe("persist v3 — strip non-user-authored entries on save", () => {
+  it("drops AI and teammate Interactions on save (they regenerate from ingest)", () => {
     const cs = makeChangeset();
     const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const userReply: Reply = {
-      id: "u1",
-      author: "luiz",
-      body: "looks good",
-      createdAt: "2026-05-07T00:00:00.000Z",
-    };
-    const prReply: Reply = {
-      id: "pr-comment:42",
-      author: "external-reviewer",
-      body: "consider X",
-      createdAt: "2026-05-06T00:00:00.000Z",
-      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r42" },
-    };
-    const detachedPrReply: Reply = {
-      id: "pr-comment:43",
-      author: "external-reviewer",
-      body: "stale comment",
-      createdAt: "2026-05-06T00:00:00.000Z",
-      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r43" },
+    const userEntry = userIx({ id: "u1", threadKey: key, body: "my reply" });
+    const aiEntry: Interaction = {
+      id: "ai:1",
+      threadKey: key,
+      target: "line",
+      intent: "comment",
+      author: "ai",
+      authorRole: "ai",
+      body: "AI head",
+      createdAt: "0001-01-01T00:00:00.000Z",
     };
     const state = {
       ...initialState([cs]),
-      replies: { [key]: [userReply, prReply] },
-      detachedReplies: [{ reply: detachedPrReply, threadKey: key }],
+      interactions: { [key]: [aiEntry, userEntry] },
     };
     saveSession(state, {});
 
     const raw = localStorage.getItem(STORAGE_KEY);
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
-    expect(parsed.replies[key]).toHaveLength(1);
-    expect(parsed.replies[key][0].id).toBe("u1");
-    expect(parsed.detachedReplies).toEqual([]);
+    expect(parsed.interactions[key]).toHaveLength(1);
+    expect(parsed.interactions[key][0].id).toBe("u1");
   });
 
-  it("rehydrates without external replies after a save→load cycle", () => {
+  it("drops PR-imported (external.source === 'pr') Interactions on save", () => {
     const cs = makeChangeset();
     const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const prReply: Reply = {
-      id: "pr-comment:99",
+    const local = userIx({ id: "u1", threadKey: key, body: "local" });
+    const pr = userIx({
+      id: "pr-comment:42",
+      threadKey: key,
       author: "external-reviewer",
-      body: "drop me",
-      createdAt: "2026-05-06T00:00:00.000Z",
-      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r99" },
+      body: "consider X",
+      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r42" },
+    });
+    const detachedPr: DetachedInteraction = {
+      interaction: userIx({
+        id: "pr-comment:43",
+        threadKey: key,
+        author: "external-reviewer",
+        body: "stale comment",
+        external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r43" },
+      }),
+      threadKey: key,
     };
-    saveSession(
-      {
-        ...initialState([cs]),
-        replies: { [key]: [prReply] },
-      },
-      {},
+    const state = {
+      ...initialState([cs]),
+      interactions: { [key]: [local, pr] },
+      detachedInteractions: [detachedPr],
+    };
+    saveSession(state, {});
+
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    expect(parsed.interactions[key]).toHaveLength(1);
+    expect(parsed.interactions[key][0].id).toBe("u1");
+    expect(parsed.detachedInteractions).toEqual([]);
+  });
+
+  it("drops agent-authored Interactions on save (they regenerate from polling)", () => {
+    const cs = makeChangeset();
+    const key = lineNoteReplyKey("cs1/f1#h1", 0);
+    const userEntry = userIx({
+      id: "u1",
+      threadKey: key,
+      enqueuedCommentId: "cmt_1",
+    });
+    const agentEntry: Interaction = {
+      id: "ar1",
+      threadKey: key,
+      target: "reply-to-user",
+      intent: "accept",
+      author: "agent",
+      authorRole: "agent",
+      body: "fixed it",
+      createdAt: "2026-05-07T00:01:00.000Z",
+    };
+    const state = {
+      ...initialState([cs]),
+      interactions: { [key]: [userEntry, agentEntry] },
+    };
+    saveSession(state, {});
+
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    expect(parsed.interactions[key]).toHaveLength(1);
+    expect(parsed.interactions[key][0].id).toBe("u1");
+  });
+});
+
+describe("persist v3 — fails closed on non-v3 snapshots", () => {
+  it("peekSession returns null for v < 3", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 2,
+        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        ackedNotes: [],
+        replies: {},
+        detachedReplies: [],
+        drafts: {},
+      }),
     );
+    expect(peekSession()).toBeNull();
+  });
+
+  it("loadSession returns empty hydration for v > 3", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 999,
+        cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        interactions: {},
+        detachedInteractions: [],
+        drafts: {},
+      }),
+    );
+    expect(loadSession([])).toEqual({ state: null, drafts: {} });
+  });
+
+  it("loadSession returns empty hydration for malformed JSON", () => {
+    localStorage.setItem(STORAGE_KEY, "{ not json");
+    expect(loadSession([])).toEqual({ state: null, drafts: {} });
+  });
+});
+
+describe("persist v3 — hunk-validity filtering", () => {
+  it("drops Interactions whose hunkId no longer exists in the loaded changeset", () => {
+    const cs = makeChangeset();
+    const valid = lineNoteReplyKey("cs1/f1#h1", 0);
+    const stale = lineNoteReplyKey("cs1/f1#deleted", 0);
+    const state = {
+      ...initialState([cs]),
+      interactions: {
+        [valid]: [userIx({ id: "keep", threadKey: valid })],
+        [stale]: [userIx({ id: "drop", threadKey: stale })],
+      },
+    };
+    saveSession(state, {});
+
     const hydrated = loadSession([cs]);
-    expect(hydrated.state).not.toBeNull();
-    expect(hydrated.state!.replies[key] ?? []).toEqual([]);
+    expect(Object.keys(hydrated.state!.interactions)).toEqual([valid]);
+  });
+
+  it("keeps detached entries even when their hunk is gone (the whole point of detached)", () => {
+    const cs = makeChangeset();
+    const detached: DetachedInteraction = {
+      interaction: userIx({
+        id: "r-d",
+        threadKey: "user:cs1/f1#deleted:0",
+        anchorPath: "cs1/gone.ts",
+      }),
+      threadKey: "user:cs1/f1#deleted:0",
+    };
+    const state = { ...initialState([cs]), detachedInteractions: [detached] };
+    saveSession(state, {});
+
+    const hydrated = loadSession([cs]);
+    expect(hydrated.state!.detachedInteractions).toEqual([detached]);
   });
 });

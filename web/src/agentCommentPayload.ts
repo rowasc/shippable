@@ -1,86 +1,94 @@
-// Map a reply-target key + the active ChangeSet onto the {kind, file, lines}
-// triple that /api/agent/enqueue expects. Lives in its own module so the
-// derivation is unit-testable without standing up the App. See
-// docs/plans/share-review-comments.md § Format the agent sees for the wire
-// shape — `lines` is a string of file line numbers, not array indices.
+// Resolve a reply-target key + the active ChangeSet onto the {target, file,
+// lines} triple the /api/agent/enqueue endpoint expects. Lives in its own
+// module so the derivation is unit-testable without standing up the App.
+// See docs/plans/share-review-comments.md § Format the agent sees for the
+// wire shape — `lines` is a string of file line numbers, not array indices.
+// The caller fills in `intent`, `author`, `authorRole`; this helper only
+// resolves topology.
 
-import type { AgentComment, ChangeSet, CommentKind } from "./types";
-import { parseReplyKey } from "./types";
+import type { ChangeSet, InteractionTarget } from "./types";
 
 export interface DerivedCommentPayload {
-  kind: CommentKind;
+  target: InteractionTarget;
   /** Repo-relative file path. */
   file: string;
   /** `"118"` for a single line; `"72-79"` for a range. Omitted for thread
-   *  kinds where line context isn't meaningful (hunkSummary, teammate). */
+   *  targets where line context isn't meaningful (hunkSummary, teammate). */
   lines?: string;
-  /**
-   * Server-minted `AgentComment.id` for the parent. Set only when
-   * `kind === "reply-to-agent-comment"`. The enqueue endpoint requires it.
-   */
-  parentAgentCommentId?: string;
 }
 
 /**
- * Returns null when the targetKey can't be resolved (stale hunk, missing
- * agent-comment, etc.). Caller should skip enqueueing in that case rather
- * than sending a malformed payload.
- *
- * Agent-comment threads are looked up by id in the `agentComments` slot
- * rather than by hunk position in the changeset. Pass that slot in so the
- * function can resolve the anchor `file` and `lines`.
+ * Returns null when the targetKey can't be resolved against the changeset
+ * (stale hunk, etc.). Caller should skip enqueueing in that case rather than
+ * sending a malformed payload.
  */
 export function deriveCommentPayload(
   targetKey: string,
   cs: ChangeSet,
-  agentComments: AgentComment[] = [],
 ): DerivedCommentPayload | null {
-  const parsed = parseReplyKey(targetKey);
-  if (!parsed) return null;
+  const colon = targetKey.indexOf(":");
+  if (colon < 0) return null;
+  const prefix = targetKey.slice(0, colon);
+  const rest = targetKey.slice(colon + 1);
 
-  if (parsed.kind === "agentComment") {
-    const parent = agentComments.find((c) => c.id === parsed.agentCommentId);
-    if (!parent || !parent.anchor) return null;
-    return {
-      kind: "reply-to-agent-comment",
-      file: parent.anchor.file,
-      lines: parent.anchor.lines,
-      parentAgentCommentId: parent.id,
-    };
-  }
-
-  const located = locateHunk(cs, parsed.hunkId);
-  if (!located) return null;
-
-  switch (parsed.kind) {
+  switch (prefix) {
     case "note":
     case "user": {
-      const line = located.hunk.lines[parsed.lineIdx];
+      // `note:hunkId:lineIdx` / `user:hunkId:lineIdx` — last colon splits
+      // hunkId from lineIdx (hunk ids may contain `/` and `#`, but no `:`).
+      const lastColon = rest.lastIndexOf(":");
+      if (lastColon < 0) return null;
+      const hunkId = rest.slice(0, lastColon);
+      const lineIdx = Number(rest.slice(lastColon + 1));
+      if (!Number.isFinite(lineIdx)) return null;
+      const located = locateHunk(cs, hunkId);
+      if (!located) return null;
+      const line = located.hunk.lines[lineIdx];
       const lineNo = line?.newNo ?? line?.oldNo;
-      const kind: CommentKind =
-        parsed.kind === "note" ? "reply-to-ai-note" : "line";
-      const out: DerivedCommentPayload = { kind, file: located.file.path };
-      if (typeof lineNo === "number") out.lines = String(lineNo);
-      return out;
+      // Note/user payloads are line-scoped; a target+file without `lines`
+      // would be wire-malformed. Treat out-of-bounds lineIdx the same as a
+      // stale hunk: caller should skip enqueueing.
+      if (typeof lineNo !== "number") return null;
+      const target: InteractionTarget =
+        prefix === "note" ? "reply-to-ai-note" : "line";
+      return { target, file: located.file.path, lines: String(lineNo) };
     }
     case "block": {
-      const loLine = located.hunk.lines[parsed.lo];
-      const hiLine = located.hunk.lines[parsed.hi];
+      // `block:hunkId:lo-hi` — array indices into the hunk's lines.
+      const lastColon = rest.lastIndexOf(":");
+      if (lastColon < 0) return null;
+      const hunkId = rest.slice(0, lastColon);
+      const range = rest.slice(lastColon + 1);
+      const dash = range.indexOf("-");
+      if (dash < 0) return null;
+      const lo = Number(range.slice(0, dash));
+      const hi = Number(range.slice(dash + 1));
+      if (!Number.isFinite(lo) || !Number.isFinite(hi)) return null;
+      const located = locateHunk(cs, hunkId);
+      if (!located) return null;
+      const loLine = located.hunk.lines[lo];
+      const hiLine = located.hunk.lines[hi];
       const loNo = loLine?.newNo ?? loLine?.oldNo;
       const hiNo = hiLine?.newNo ?? hiLine?.oldNo;
-      const out: DerivedCommentPayload = {
-        kind: "block",
+      if (typeof loNo !== "number" || typeof hiNo !== "number") return null;
+      return {
+        target: "block",
         file: located.file.path,
+        lines: loNo === hiNo ? String(loNo) : `${loNo}-${hiNo}`,
       };
-      if (typeof loNo === "number" && typeof hiNo === "number") {
-        out.lines = loNo === hiNo ? String(loNo) : `${loNo}-${hiNo}`;
-      }
-      return out;
     }
-    case "hunkSummary":
-      return { kind: "reply-to-hunk-summary", file: located.file.path };
-    case "teammate":
-      return { kind: "reply-to-teammate", file: located.file.path };
+    case "hunkSummary": {
+      const located = locateHunk(cs, rest);
+      if (!located) return null;
+      return { target: "reply-to-hunk-summary", file: located.file.path };
+    }
+    case "teammate": {
+      const located = locateHunk(cs, rest);
+      if (!located) return null;
+      return { target: "reply-to-teammate", file: located.file.path };
+    }
+    default:
+      return null;
   }
 }
 

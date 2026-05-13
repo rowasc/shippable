@@ -13,11 +13,10 @@
  */
 
 import type {
-  AgentComment,
   ChangeSet,
   Cursor,
-  DetachedReply,
-  Reply,
+  DetachedInteraction,
+  Interaction,
   ReviewState,
 } from "./types";
 
@@ -66,12 +65,10 @@ export function setLiveReloadEnabled(
   }
 }
 
-/**
- * Head schema version. To bump it: add a `migrations[N]` entry below in
- * the same change. Old blobs in users' localStorage are migrated forward
- * on load; we never write old shapes back.
- */
-const CURRENT_VERSION = 3;
+// Head schema version is 3. There is no v2 → v3 migration: snapshots
+// whose `v` isn't exactly 3 are rejected at load and the store boots
+// empty. The prototype has no users to migrate, so the cost is wiping our
+// own dev/test state — which is fine.
 
 /** What we actually serialize — Sets become arrays, ephemeral fields drop. */
 interface PersistedSnapshot {
@@ -81,93 +78,32 @@ interface PersistedSnapshot {
   readLines: Record<string, number[]>;
   reviewedFiles: string[];
   dismissedGuides: string[];
-  ackedNotes: string[];
-  replies: Record<string, Reply[]>;
+  /**
+   * Per-thread Interaction store. Persisted entries are user-authored only;
+   * ingest-sourced entries (authorRole !== "user") regenerate from ingest
+   * on reload, and PR-imported entries (external.source === "pr") re-arrive
+   * with the next PR fetch — both are filtered out at save time.
+   */
+  interactions: Record<string, Interaction[]>;
+  /**
+   * Interactions whose anchor didn't match anywhere in the latest reload
+   * of their changeset. Same user-authored-only filter as `interactions`.
+   */
+  detachedInteractions: DetachedInteraction[];
   drafts: Record<string, string>;
-  /**
-   * Replies that detached during a reload pass. Carry their original
-   * threadKey so the persisted shape stays interpretable. New in v2.
-   */
-  detachedReplies: DetachedReply[];
-  /**
-   * Top-level agent comments for the active worktree (anchor-shaped). New
-   * in v3. Reply-shaped agent entries nest under `Reply.agentReplies[]` and
-   * are persisted there; this slot is only for the new top-level roots.
-   * See `docs/sdd/agent-comments/spec.md`.
-   */
-  agentComments: AgentComment[];
-}
-
-/**
- * Forward-only migration table. `migrations[N]` takes a snapshot at version
- * N-1 and returns one at version N. The loader walks from the stored
- * snapshot's `v` up to `CURRENT_VERSION`; a missing step (gap in the table
- * or unknown future version) is the fail-closed signal.
- *
- * Keys must be contiguous and end at `CURRENT_VERSION`. To bump to v: 2:
- *   2: (v1) => ({ ...(v1 as PersistedSnapshot), v: 2, /* new fields *\/ }),
- *
- * No backwards migrations — once written, `v: N` blobs only travel forward.
- */
-const migrations: Record<number, (prev: unknown) => unknown> = {
-  // v: 2 added the detachedReplies array and per-reply anchor fields. Old
-  // replies have no anchor info; the reload pass falls back to in-place
-  // hashing for them, so they degrade rather than break.
-  2: (v1) => ({
-    ...(v1 as PersistedSnapshot),
-    v: 2,
-    detachedReplies: [],
-  }),
-  // v: 3 added the agentComments slot for top-level agent-authored comments.
-  // Older snapshots had no such concept — start with an empty list; the
-  // next poll of /api/agent/comments rehydrates it from the server.
-  3: (v2) => ({
-    ...(v2 as PersistedSnapshot),
-    v: 3,
-    agentComments: [],
-  }),
-};
-
-/**
- * Walk the migration table from the parsed blob's `v` up to CURRENT_VERSION.
- * Returns null if the blob isn't a versioned object, the version is unknown
- * (future, or a gap in the table), or any migration throws. Callers treat
- * null as "no useful snapshot" — the existing failure mode for malformed
- * data — so old clients seeing a future version skip rather than corrupt.
- */
-function migrateToHead(parsed: unknown): unknown | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  const v = (parsed as { v?: unknown }).v;
-  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) return null;
-  if (v > CURRENT_VERSION) return null;
-  let cur: unknown = parsed;
-  for (let target = v + 1; target <= CURRENT_VERSION; target++) {
-    const step = migrations[target];
-    if (!step) return null;
-    try {
-      cur = step(cur);
-    } catch {
-      return null;
-    }
-  }
-  return cur;
 }
 
 /** What hydration returns after validation. Both fields default to "no
  *  change from blank slate" when the snapshot is missing or invalid. */
 export interface HydratedSession {
-  /** Partial state to overlay onto initialState, or null if no useful data. */
-  state: Pick<
-    ReviewState,
-    | "cursor"
-    | "readLines"
-    | "reviewedFiles"
-    | "dismissedGuides"
-    | "ackedNotes"
-    | "replies"
-    | "detachedReplies"
-    | "agentComments"
-  > | null;
+  state: {
+    cursor: Cursor;
+    readLines: Record<string, Set<number>>;
+    reviewedFiles: Set<string>;
+    dismissedGuides: Set<string>;
+    interactions: Record<string, Interaction[]>;
+    detachedInteractions: DetachedInteraction[];
+  } | null;
   drafts: Record<string, string>;
 }
 
@@ -184,16 +120,16 @@ export function buildSnapshot(
     if (set.size === 0) continue;
     readLines[hunkId] = Array.from(set).sort((a, b) => a - b);
   }
-  // Externally-sourced replies (today: GitHub PR comments) are never persisted —
-  // they re-arrive with the next pr/load. Persisting them would accumulate stale
-  // upstream state and create rehydration ordering questions.
-  const replies: Record<string, typeof state.replies[string]> = {};
-  for (const [key, list] of Object.entries(state.replies)) {
-    const filtered = list.filter((r) => !r.external);
-    if (filtered.length > 0) replies[key] = filtered;
+  // Strip ingest-sourced + PR-imported entries — those regenerate from
+  // their source pipelines on reload, so persisting them would either
+  // duplicate or stale.
+  const interactions: Record<string, Interaction[]> = {};
+  for (const [key, list] of Object.entries(state.interactions)) {
+    const kept = list.filter(isPersistable);
+    if (kept.length > 0) interactions[key] = kept;
   }
-  const detachedReplies = state.detachedReplies.filter(
-    (d) => !d.reply.external,
+  const detachedInteractions = state.detachedInteractions.filter((d) =>
+    isPersistable(d.interaction),
   );
   return {
     v: 3,
@@ -201,12 +137,16 @@ export function buildSnapshot(
     readLines,
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
     dismissedGuides: Array.from(state.dismissedGuides).sort(),
-    ackedNotes: Array.from(state.ackedNotes).sort(),
-    replies,
+    interactions,
+    detachedInteractions,
     drafts,
-    detachedReplies,
-    agentComments: state.agentComments,
   };
+}
+
+function isPersistable(ix: Interaction): boolean {
+  if (ix.authorRole !== "user") return false;
+  if (ix.external) return false;
+  return true;
 }
 
 /** Best-effort save. Swallows storage errors (private mode, quota) silently. */
@@ -250,8 +190,7 @@ export function peekSession(): PersistedSnapshot | null {
   } catch {
     return null;
   }
-  const migrated = migrateToHead(parsed);
-  return isPersistedSnapshot(migrated) ? migrated : null;
+  return isPersistedSnapshot(parsed) ? parsed : null;
 }
 
 /**
@@ -262,18 +201,17 @@ export function peekSession(): PersistedSnapshot | null {
  */
 export function hasProgress(s: PersistedSnapshot): boolean {
   if (s.reviewedFiles.length > 0) return true;
-  if (s.ackedNotes.length > 0) return true;
   for (const arr of Object.values(s.readLines)) {
     if (arr.length > 1) return true;
   }
   for (const v of Object.values(s.drafts)) {
     if (v && v.trim()) return true;
   }
-  // Replies: any reply whose author isn't a seeded teammate. Hard to
-  // detect precisely from this layer, but presence of replies on a
-  // userCommentKey-prefixed key is a strong "user did this" signal.
-  for (const key of Object.keys(s.replies)) {
-    if (key.startsWith("user:") || key.startsWith("block:")) return true;
+  // Any user-authored Interaction is "user did this" — user comments,
+  // block ranges, replies, ack/unack/accept/reject. Empty arrays don't
+  // count (the persist filter would have dropped them).
+  for (const list of Object.values(s.interactions)) {
+    if (list.length > 0) return true;
   }
   return false;
 }
@@ -300,8 +238,8 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
   } catch {
     return empty;
   }
-  const snapshot = migrateToHead(parsed);
-  if (!isPersistedSnapshot(snapshot)) return empty;
+  if (!isPersistedSnapshot(parsed)) return empty;
+  const snapshot = parsed;
 
   // Validate the cursor against current changesets — fixtures change
   // between runs (or the user loaded an entirely different set).
@@ -330,15 +268,10 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
       readLines,
       reviewedFiles: new Set(snapshot.reviewedFiles.filter((id) => validFileIds.has(id))),
       dismissedGuides: new Set(snapshot.dismissedGuides),
-      ackedNotes: new Set(snapshot.ackedNotes),
-      replies: filterRepliesByHunk(snapshot.replies, validHunkIds),
+      interactions: filterInteractionsByHunk(snapshot.interactions, validHunkIds),
       // Detached entries don't reference live hunk ids — they survive even
       // when the originating hunk is gone, by definition. Keep them all.
-      detachedReplies: snapshot.detachedReplies,
-      // Agent comments are addressed by id, not by hunk, so they survive
-      // changeset switches unconditionally. The next poll of
-      // /api/agent/comments will reconcile against the live store.
-      agentComments: snapshot.agentComments,
+      detachedInteractions: snapshot.detachedInteractions,
     },
     drafts: filterDraftsByHunk(snapshot.drafts, validHunkIds),
   };
@@ -355,11 +288,9 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
     typeof o.readLines === "object" &&
     Array.isArray(o.reviewedFiles) &&
     Array.isArray(o.dismissedGuides) &&
-    Array.isArray(o.ackedNotes) &&
-    typeof o.replies === "object" &&
-    typeof o.drafts === "object" &&
-    Array.isArray(o.detachedReplies) &&
-    Array.isArray(o.agentComments)
+    typeof o.interactions === "object" &&
+    Array.isArray(o.detachedInteractions) &&
+    typeof o.drafts === "object"
   );
 }
 
@@ -407,28 +338,16 @@ function collectFileIds(changesets: ChangeSet[]): Set<string> {
   return out;
 }
 
-/** Reply keys embed a hunkId — drop ones whose hunk no longer exists. */
-function filterRepliesByHunk(
-  replies: Record<string, Reply[]>,
+/** Thread-key keys embed a hunkId — drop ones whose hunk no longer exists. */
+function filterInteractionsByHunk(
+  interactions: Record<string, Interaction[]>,
   validHunkIds: Set<string>,
-): Record<string, Reply[]> {
-  const out: Record<string, Reply[]> = {};
-  for (const [key, list] of Object.entries(replies)) {
+): Record<string, Interaction[]> {
+  const out: Record<string, Interaction[]> = {};
+  for (const [key, list] of Object.entries(interactions)) {
     if (!list || list.length === 0) continue;
     if (replyKeyTargetsValidHunk(key, validHunkIds)) {
-      // Normalize legacy/pre-queue replies missing the enqueuedCommentId
-      // field — slice 2 added it; older snapshots rehydrate to `null`.
-      // Same forward-fill for `agentReplies` — added by the agent-reply
-      // feature; legacy snapshots default to `[]`.
-      out[key] = list.map((r) => {
-        const next: Reply =
-          r.enqueuedCommentId === undefined
-            ? { ...r, enqueuedCommentId: null }
-            : r;
-        return next.agentReplies === undefined
-          ? { ...next, agentReplies: [] }
-          : next;
-      });
+      out[key] = list;
     }
   }
   return out;
@@ -450,7 +369,6 @@ function filterDraftsByHunk(
  * Reply-key shapes (see types.ts):
  *   note:hunkId:lineIdx · user:hunkId:lineIdx · block:hunkId:lo-hi
  *   hunkSummary:hunkId  · teammate:hunkId
- *   agentComment:<id>   (id is server-minted; never a hunk reference)
  * The hunkId can contain `/` and `#`, so we split on the first colon to
  * get the prefix and treat the remainder accordingly.
  */
@@ -463,12 +381,6 @@ function replyKeyTargetsValidHunk(
   const prefix = key.slice(0, colon);
   const rest = key.slice(colon + 1);
   switch (prefix) {
-    case "agentComment":
-      // Agent-comment threads are addressed by id, not by hunk. The live
-      // poll reconciles whether the parent agent comment still exists; if
-      // it doesn't, the renderer treats the thread as orphaned. Accept all
-      // non-empty ids on rehydrate.
-      return rest.length > 0;
     case "hunkSummary":
     case "teammate":
       return validHunkIds.has(rest);

@@ -6,11 +6,39 @@
  * and render it without computing anything.
  */
 
-import type { DiffFile, DiffLine, AiNote, LineKind, Cursor, DetachedReply, FileStatus, LineSelection, Reply, AiNoteSeverity } from "./types";
-import { noteKey, lineNoteReplyKey, hunkSummaryReplyKey, teammateReplyKey, userCommentKey, blockCommentKey, parseReplyKey } from "./types";
+import type {
+  DiffFile,
+  DiffLine,
+  LineKind,
+  Cursor,
+  DetachedInteraction,
+  FileStatus,
+  Interaction,
+  LineSelection,
+} from "./types";
+import {
+  lineNoteReplyKey,
+  hunkSummaryReplyKey,
+  teammateReplyKey,
+  userCommentKey,
+  blockCommentKey,
+  parseReplyKey,
+} from "./types";
 import { hunkCoverage, fileCoverage } from "./state";
+import type { IngestSignals } from "./interactions";
 import type { GuideSuggestion } from "./guide";
 import type { SymbolIndex } from "./symbols";
+
+// View-layer projection of an AI per-line note. Source-of-truth lives in
+// state.interactions; the view model carries just the bits the renderer
+// needs (severity glyph, summary headline, optional detail / runRecipe).
+export type AiNoteSeverity = "info" | "question" | "warning";
+export interface AiNote {
+  severity: AiNoteSeverity;
+  summary: string;
+  detail?: string;
+  runRecipe?: { source: string; inputs: Record<string, string> };
+}
 
 // ─── Line-level view model ────────────────────────────────────────────────────
 
@@ -26,7 +54,8 @@ export interface DiffLineViewModel {
   isRead: boolean;
   /** True when this line falls inside the active shift-extended selection. */
   isSelected: boolean;
-  /** The AI note attached to this line, or undefined. */
+  /** The AI note attached to this line, or undefined. Built by view.ts from
+   *  the seam's `aiNoteByLine` lookup — the diff itself no longer carries it. */
   aiNote?: AiNote;
   /** True when the AI note has been acknowledged. */
   isAcked: boolean;
@@ -156,6 +185,12 @@ export interface BuildDiffViewModelArgs {
   imageAssets?: Record<string, string>;
   /** Active shift-extended selection, or null. */
   selection?: LineSelection | null;
+  /**
+   * Per-line / per-hunk AI + teammate signals. Built once by the caller via
+   * `selectIngestSignals(state)`; the view model reads from these lookups
+   * instead of inline fields on the diff structure.
+   */
+  signals?: IngestSignals;
 }
 
 export function buildDiffViewModel({
@@ -172,7 +207,11 @@ export function buildDiffViewModel({
   filePreviewing,
   imageAssets,
   selection,
+  signals,
 }: BuildDiffViewModelArgs): DiffViewModel {
+  const aiNoteByLine = signals?.aiNoteByLine ?? {};
+  const aiSummaryByHunk = signals?.aiSummaryByHunk ?? {};
+  const teammateByHunk = signals?.teammateByHunk ?? {};
   const canExpandFile = !!file.fullContent;
   const canPreview =
     file.language === "markdown" && (!!file.fullContent || !!file.postChangeText);
@@ -262,10 +301,11 @@ export function buildDiffViewModel({
 
         // Build per-line view models.
         const lines: DiffLineViewModel[] = hunk.lines.map((line, i) => {
-          const isAcked = acked.has(noteKey(hunk.id, i));
+          const isAcked = acked.has(`${hunk.id}:${i}`);
           const hasUserComment =
             (replies[userCommentKey(hunk.id, i)]?.length ?? 0) > 0;
-          const sev = line.aiNote?.severity;
+          const aiNote = aiNoteByLine[`${hunk.id}:${i}`];
+          const sev = aiNote?.severity;
 
           const aiGlyph = isAcked
             ? "✓"
@@ -287,7 +327,7 @@ export function buildDiffViewModel({
             isCursor: isCurrent && i === cursorLineIdx,
             isRead: readForHunk.has(i),
             isSelected: selForHunk !== null && i >= selLo && i <= selHi,
-            aiNote: line.aiNote,
+            aiNote,
             isAcked,
             hasUserComment,
             aiGlyph,
@@ -300,8 +340,8 @@ export function buildDiffViewModel({
           coverage,
           isCurrent,
           aiReviewed: hunk.aiReviewed ?? false,
-          aiSummary: hunk.aiSummary,
-          teammateReview: hunk.teammateReview,
+          aiSummary: aiSummaryByHunk[hunk.id],
+          teammateReview: teammateByHunk[hunk.id],
           definesSymbols: hunk.definesSymbols ?? [],
           referencesSymbols: hunk.referencesSymbols ?? [],
           expandAbove,
@@ -415,72 +455,78 @@ export interface BuildSidebarViewModelArgs {
   readLines: Record<string, Set<number>>;
   reviewedFiles: Set<string>;
   /**
-   * Reply threads, keyed as in `types.ts` (`user:HUNK:LINE`, `block:HUNK:LO-HI`,
-   * `note:HUNK:LINE`, `hunkSummary:HUNK`, `teammate:HUNK`). Used to compute
-   * each file's comment count. Defaults to none.
+   * Interaction threads, keyed as in `types.ts` (`user:HUNK:LINE`,
+   * `block:HUNK:LO-HI`, `note:HUNK:LINE`, `hunkSummary:HUNK`,
+   * `teammate:HUNK`). Used to compute each file's comment count.
+   * Defaults to none.
    */
-  replies?: Record<string, Reply[]>;
+  interactions?: Record<string, Interaction[]>;
   /**
-   * Replies whose anchor didn't survive the latest reload. Grouped by
+   * Interactions whose anchor didn't survive the latest reload. Grouped by
    * file path in the output. Pass `[]` when nothing is detached.
    */
-  detachedReplies?: DetachedReply[];
+  detachedInteractions?: DetachedInteraction[];
 }
 
 /**
- * Count replies whose thread keys resolve to one of the files. Key parsing
- * lives in `parseReplyKey`; we just need the hunkId.
+ * Count Interactions whose thread keys resolve to one of the files.
+ * Skips ingest-sourced entries (AI / teammate) so the sidebar number
+ * tracks user-driven activity, not the always-on AI annotations.
  */
 function buildCommentCounts(
   files: BuildSidebarViewModelArgs["files"],
-  replies: Record<string, Reply[]>,
+  interactions: Record<string, Interaction[]>,
 ): Map<string, number> {
   const hunkToFile = new Map<string, string>();
   for (const f of files) for (const h of f.hunks) hunkToFile.set(h.id, f.id);
   const counts = new Map<string, number>();
-  for (const [key, list] of Object.entries(replies)) {
+  for (const [key, list] of Object.entries(interactions)) {
     const parsed = parseReplyKey(key);
     if (!parsed) continue;
-    // Agent-comment threads are addressed by the AgentComment's id, not
-    // by a hunk, so the hunk-based counter skips them. A file-level
-    // counter that includes state.agentComments is a follow-up.
+    // Agent-comment threads aren't hunk-anchored; skip them in the
+    // hunk-based counter.
     if (parsed.kind === "agentComment") continue;
     const fileId = hunkToFile.get(parsed.hunkId);
     if (!fileId) continue;
-    counts.set(fileId, (counts.get(fileId) ?? 0) + list.length);
+    const userish = list.filter(
+      (ix) => ix.authorRole === "user" || ix.authorRole === "agent",
+    ).length;
+    if (userish === 0) continue;
+    counts.set(fileId, (counts.get(fileId) ?? 0) + userish);
   }
   return counts;
 }
 
 function buildDetachedGroups(
-  detached: DetachedReply[],
+  detached: DetachedInteraction[],
 ): SidebarDetachedFile[] {
   if (detached.length === 0) return [];
   const groups = new Map<string, SidebarDetachedEntry[]>();
   for (const d of detached) {
-    const path = d.reply.anchorPath ?? "(unknown file)";
+    const ix = d.interaction;
+    const path = ix.anchorPath ?? "(unknown file)";
     let arr = groups.get(path);
     if (!arr) {
       arr = [];
       groups.set(path, arr);
     }
-    const t = new Date(d.reply.createdAt);
+    const t = new Date(ix.createdAt);
     const hh = String(t.getHours()).padStart(2, "0");
     const mm = String(t.getMinutes()).padStart(2, "0");
-    const snippetLines = (d.reply.anchorContext ?? []).map((l) => ({
+    const snippetLines = (ix.anchorContext ?? []).map((l) => ({
       kind: l.kind,
       text: l.text,
       sign: l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ",
     }));
     arr.push({
-      id: `${d.threadKey}::${d.reply.id}`,
-      body: d.reply.body,
+      id: `${d.threadKey}::${ix.id}`,
+      body: ix.body,
       authoredHHMM: `${hh}:${mm}`,
-      originType: d.reply.originType ?? "committed",
-      originSha7: d.reply.originSha ? d.reply.originSha.slice(0, 7) : "",
-      originSha: d.reply.originSha ?? "",
-      anchorPath: d.reply.anchorPath ?? "",
-      anchorLineNo: d.reply.anchorLineNo,
+      originType: ix.originType ?? "committed",
+      originSha7: ix.originSha ? ix.originSha.slice(0, 7) : "",
+      originSha: ix.originSha ?? "",
+      anchorPath: ix.anchorPath ?? "",
+      anchorLineNo: ix.anchorLineNo,
       snippetLines,
     });
   }
@@ -494,10 +540,10 @@ export function buildSidebarViewModel({
   currentFileId,
   readLines,
   reviewedFiles,
-  replies = {},
-  detachedReplies = [],
+  interactions = {},
+  detachedInteractions = [],
 }: BuildSidebarViewModelArgs): SidebarViewModel {
-  const commentCounts = buildCommentCounts(files, replies);
+  const commentCounts = buildCommentCounts(files, interactions);
   const fileItems: SidebarFileItem[] = files.map((f) => {
     const readCoverage = fileCoverage(f, readLines);
     const readPct = Math.round(readCoverage * 100);
@@ -521,7 +567,7 @@ export function buildSidebarViewModel({
 
   return {
     files: fileItems,
-    detached: buildDetachedGroups(detachedReplies),
+    detached: buildDetachedGroups(detachedInteractions),
   };
 }
 
@@ -741,7 +787,7 @@ export interface AiNoteRowItem {
   /** Reply-thread key for this note (passed to onStartDraft / onSubmitReply). */
   replyKey: string;
   /** Existing replies on this note's thread. */
-  replies: Reply[];
+  replies: Interaction[];
   /** True when the draft composer is open for this note. */
   isDrafting: boolean;
   /** Jump target that lands on this note's line. */
@@ -769,7 +815,7 @@ export interface UserCommentRowItem {
   rangeHiLineNo?: number;
   /** Reply-thread key for this user comment. */
   threadKey: string;
-  replies: Reply[];
+  replies: Interaction[];
   isDrafting: boolean;
   /** True when the cursor is on (or within, for block threads) this row. */
   isCurrent: boolean;
@@ -806,7 +852,7 @@ export interface InspectorViewModel {
   aiSummary: string | null;
   /** Reply key for the hunk summary thread. */
   aiSummaryReplyKey: string | null;
-  aiSummaryReplies: Reply[];
+  aiSummaryReplies: Interaction[];
   aiSummaryIsDrafting: boolean;
   /** Jump target for "click to jump to the top of this hunk". */
   aiSummaryJumpTarget: Cursor | null;
@@ -819,7 +865,7 @@ export interface InspectorViewModel {
     note?: string;
     verdictClass: string;
     replyKey: string;
-    replies: Reply[];
+    replies: Interaction[];
     isDrafting: boolean;
     jumpTarget: Cursor;
   } | null;
@@ -842,7 +888,7 @@ export interface BuildInspectorViewModelArgs {
   /** The file the cursor is in. */
   file: DiffFile;
   /** The hunk the cursor is in. */
-  hunk: { id: string; lines: DiffLine[]; aiSummary?: string; teammateReview?: { user: string; verdict: "approve" | "comment"; note?: string } };
+  hunk: { id: string; lines: DiffLine[] };
   /** The line at the cursor position. */
   line: DiffLine;
   /** Full cursor (needed to build jump targets). */
@@ -851,10 +897,17 @@ export interface BuildInspectorViewModelArgs {
   symbols: SymbolIndex;
   /** Set of acked note keys (format: `${hunkId}:${lineIdx}`). */
   acked: Set<string>;
-  /** All reply threads keyed by reply-target key. */
-  replies: Record<string, Reply[]>;
+  /** All interaction threads keyed by reply-target key. */
+  replies: Record<string, Interaction[]>;
   /** The reply key currently being drafted, or null. */
   draftingKey: string | null;
+  /**
+   * AI per-line / per-hunk + teammate signals, built by
+   * `selectIngestSignals(state)`. Defaults to empty when callers haven't
+   * threaded a state through (transitional — tests and a couple of demo
+   * harnesses still pass {}).
+   */
+  signals?: IngestSignals;
 }
 
 export function buildInspectorViewModel({
@@ -865,7 +918,11 @@ export function buildInspectorViewModel({
   acked,
   replies,
   draftingKey,
+  signals,
 }: BuildInspectorViewModelArgs): InspectorViewModel {
+  const aiNoteByLine = signals?.aiNoteByLine ?? {};
+  const aiSummaryByHunk = signals?.aiSummaryByHunk ?? {};
+  const teammateByHunk = signals?.teammateByHunk ?? {};
   // ── Location ────────────────────────────────────────────────────────────
   const lineNo = line.newNo ?? line.oldNo;
   const locationLabel = lineNo ? `${file.path}:${lineNo}` : file.path;
@@ -873,15 +930,13 @@ export function buildInspectorViewModel({
 
   // ── AI note rows ────────────────────────────────────────────────────────
   const noteLinesWithIdx = hunk.lines
-    .map((l, i) => ({ l, i }))
-    .filter(({ l }) => !!l.aiNote);
+    .map((l, i) => ({ l, i, note: aiNoteByLine[`${hunk.id}:${i}`] }))
+    .filter((entry): entry is { l: DiffLine; i: number; note: AiNote } => !!entry.note);
 
-  const aiNoteRows: AiNoteRowItem[] = noteLinesWithIdx.map(({ l, i }) => {
-    const note = l.aiNote!;
+  const aiNoteRows: AiNoteRowItem[] = noteLinesWithIdx.map(({ l, i, note }) => {
     const rkey = lineNoteReplyKey(hunk.id, i);
-    const noteLine = l;
-    const noteLineNo = noteLine.newNo ?? noteLine.oldNo ?? i + 1;
-    const isAcked = acked.has(noteKey(hunk.id, i));
+    const noteLineNo = l.newNo ?? l.oldNo ?? i + 1;
+    const isAcked = acked.has(`${hunk.id}:${i}`);
     const glyph =
       note.severity === "warning" ? "!" :
       note.severity === "question" ? "?" : "i";
@@ -931,21 +986,22 @@ export function buildInspectorViewModel({
 
   // ── AI hunk summary ─────────────────────────────────────────────────────
   const summaryReplyKey = hunkSummaryReplyKey(hunk.id);
-  const aiSummary = hunk.aiSummary ?? null;
+  const aiSummary = aiSummaryByHunk[hunk.id] ?? null;
   const aiSummaryJumpTarget: Cursor | null = aiSummary
     ? { ...cursor, hunkId: hunk.id, lineIdx: 0 }
     : null;
 
   // ── Teammate ────────────────────────────────────────────────────────────
   const trKey = teammateReplyKey(hunk.id);
-  const teammate: InspectorViewModel["teammate"] = hunk.teammateReview
+  const teammateSignal = teammateByHunk[hunk.id];
+  const teammate: InspectorViewModel["teammate"] = teammateSignal
     ? {
-        user: hunk.teammateReview.user,
-        verdict: hunk.teammateReview.verdict,
-        verdictGlyph: hunk.teammateReview.verdict === "approve" ? "✓" : "💬",
-        note: hunk.teammateReview.note,
+        user: teammateSignal.user,
+        verdict: teammateSignal.verdict,
+        verdictGlyph: teammateSignal.verdict === "approve" ? "✓" : "💬",
+        note: teammateSignal.note,
         verdictClass:
-          hunk.teammateReview.verdict === "approve" ? "info" : "question",
+          teammateSignal.verdict === "approve" ? "info" : "question",
         replyKey: trKey,
         replies: replies[trKey] ?? [],
         isDrafting: draftingKey === trKey,

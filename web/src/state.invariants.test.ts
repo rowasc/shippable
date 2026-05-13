@@ -179,17 +179,26 @@ function nextAction(rand: () => number, state: ReviewState): Action {
     return { type: "DISMISS_GUIDE", guideId: pick(rand, GUIDE_IDS) };
   if (r < 0.8) {
     const targetKey = pick(rand, REPLY_KEYS);
-    const replyId = `r${int(rand, 0, 9)}`;
+    const interactionId = `r${int(rand, 0, 9)}`;
     return {
-      type: "ADD_REPLY",
+      type: "ADD_INTERACTION",
       targetKey,
-      reply: { id: replyId, author: "a", body: "x", createdAt: "t" },
+      interaction: {
+        id: interactionId,
+        threadKey: targetKey,
+        target: "reply-to-user",
+        intent: "comment",
+        author: "a",
+        authorRole: "user",
+        body: "x",
+        createdAt: "t",
+      },
     };
   }
   if (r < 0.84) {
     const targetKey = pick(rand, REPLY_KEYS);
-    const replyId = `r${int(rand, 0, 9)}`;
-    return { type: "DELETE_REPLY", targetKey, replyId };
+    const interactionId = `r${int(rand, 0, 9)}`;
+    return { type: "DELETE_INTERACTION", targetKey, interactionId };
   }
   if (r < 0.9) {
     const ref = randomHunkRef(rand, state);
@@ -342,15 +351,15 @@ describe("invariant: expand levels are never negative", () => {
   }
 });
 
-describe("invariant: replies has no empty thread arrays", () => {
+describe("invariant: interactions has no empty thread arrays", () => {
   // Silently breaks: persisted snapshots accumulate junk targetKeys forever
   // and the inspector renders empty "0 replies" placeholders instead of
   // falling through to its empty state.
   for (const seed of SEEDS) {
     it(`seed ${seed}`, () => {
       walk(seed, 400, ({ next }) => {
-        for (const [key, list] of Object.entries(next.replies)) {
-          expect(list.length, `replies[${key}] non-empty`).toBeGreaterThan(0);
+        for (const [key, list] of Object.entries(next.interactions)) {
+          expect(list.length, `interactions[${key}] non-empty`).toBeGreaterThan(0);
         }
       });
     });
@@ -384,11 +393,20 @@ describe("invariant: welcome mode (no changesets) ignores everything except LOAD
     { type: "DISMISS_GUIDE", guideId: "g1" },
     { type: "TOGGLE_ACK", hunkId: someHunk, lineIdx: 0 },
     {
-      type: "ADD_REPLY",
+      type: "ADD_INTERACTION",
       targetKey: "k",
-      reply: { id: "r", author: "a", body: "b", createdAt: "t" },
+      interaction: {
+        id: "r",
+        threadKey: "k",
+        target: "reply-to-user",
+        intent: "comment",
+        author: "a",
+        authorRole: "user",
+        body: "b",
+        createdAt: "t",
+      },
     },
-    { type: "DELETE_REPLY", targetKey: "k", replyId: "r" },
+    { type: "DELETE_INTERACTION", targetKey: "k", interactionId: "r" },
     { type: "SET_EXPAND_LEVEL", hunkId: someHunk, dir: "above", level: 2 },
     { type: "TOGGLE_EXPAND_FILE", fileId: someFile },
     { type: "TOGGLE_PREVIEW_FILE", fileId: someFile },
