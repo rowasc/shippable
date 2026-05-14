@@ -8,7 +8,9 @@
   },
   "runArgs": [
     "--cap-add=NET_ADMIN",
-    "--cap-add=NET_RAW"
+    "--cap-add=NET_RAW",
+    "--memory=4g",
+    "--memory-swap=4g"
   ],
   "remoteUser": "node",
   "mounts": [
