@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Shippable — A review surface for code you sign off on</title>
-  <meta name="description" content="Shippable is a review surface for everything you sign off on, typed or generated. Agents make diffs cheap; the human reviewing them is the bottleneck.">
-  <meta property="og:title" content="Shippable — A review surface for code you sign off on">
-  <meta property="og:description" content="Agents help. You sign your name. Shippable is the part in between.">
+  <title>Shippable — Less of the diff in your head</title>
+  <meta name="description" content="Working with agents, dozens of meaningful diffs a day is normal. Reading them is harder than writing them was. Shippable is local-first review, built around making each pass take less out of you.">
+  <meta property="og:title" content="Shippable — Less of the diff in your head">
+  <meta property="og:description" content="Local-first review for code written with agents. Shippable sits between you and the diff and tries to make each pass take less out of you.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://rowasc.github.io/shippable/">
   <style>
@@ -139,6 +139,26 @@ section + section { border-top: 1px solid var(--border); }
   color: var(--fg);
 }
 .principle p { color: var(--fg-dim); margin: 0; max-width: none; }
+.principle .sub {
+  font-family: ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  line-height: 1.4;
+  font-style: italic;
+  color: var(--fg);
+  margin: 0 0 14px;
+  letter-spacing: -0.005em;
+}
+.inline-quote {
+  margin: 28px 0;
+  padding: 4px 0 4px 20px;
+  border-left: 3px solid var(--accent);
+  font-family: ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif;
+  font-size: 19px;
+  line-height: 1.55;
+  color: var(--fg);
+  font-style: italic;
+  max-width: 62ch;
+}
 .principle code {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 13px;
@@ -183,13 +203,6 @@ section.pause + section { border-top: none; }
   color: var(--fg);
 }
 .pull-quote p { margin: 0 0 2px; }
-.pull-quote p:last-child { color: var(--fg-dim); font-weight: 400; }
-.pull-quote .coda-closer {
-  font-size: 18px;
-  line-height: 1.5;
-  letter-spacing: normal;
-  margin: 20px auto 0;
-}
 
 .landscape-list { margin-top: 28px; }
 .landscape-row {
@@ -258,10 +271,10 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
   <div class="container hero-grid">
     <div class="hero-copy">
       <div class="wordmark">Shippable</div>
-      <h1>Agents help.<br>You sign <span class="accent">your name.</span></h1>
-      <p class="tagline">A review surface for everything you sign off on, typed or generated.</p>
+      <h1>Less of the diff <span class="accent">in your head.</span></h1>
+      <p class="tagline">Local-first review for code written with agents.</p>
       <p class="lead muted">
-        Agents made diffs cheap. The person who signs the merge is still on the hook when it breaks.
+        Working with agents, dozens of meaningful diffs a day is normal. Reading them is harder than writing them was. Shippable is the review pass that tries to take less out of you — before the work disappears into a skimmed read, a PR thread, or another agent run.
       </p>
       <div class="cta-row">
         <a class="cta primary" href="https://github.com/rowasc/shippable/releases/latest/download/Shippable.dmg">Download for macOS</a>
@@ -277,25 +290,31 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
   <section>
   <div class="container">
     <p class="eyebrow">The shift</p>
-    <h2>Most of the code you review wasn't typed by anyone you know.</h2>
+    <h2>Writing isn't the bottleneck. Reading is.</h2>
     <p class="lead">
-      Some of it was written by your team. More of it was written by their agents. A growing share was written by your <em>own</em> agent — code you specced and never typed, now sitting in a 1,500-line diff you have to read like a stranger's.
+      You scope something out, watch an agent build it, and the result is a 1,500-line diff that came together in twenty minutes. Same thing's happening on your teammates' machines, and inside the agents you've handed work off to. The queue grows fast.
     </p>
+    <p>What it actually feels like, in our own sessions:</p>
+    <blockquote class="inline-quote">
+      "I get overwhelmed. I don't know where to start. I lose track, come back, and it's starting again. Or I push to GitHub half-reviewed, just to have the review state stick somewhere."
+    </blockquote>
     <p>
-      Reviewer bots help with some of that. They surface real issues, shorten loops, do their work. But a bot doesn't change the fact that a human still has to read the diff, decide what to trust, and put their name on the merge. So we built Shippable around a few opinions about what review should be.
+      Reviewer bots add to that queue. Agentic review workflows hand you more findings to validate. Neither of those is the same thing as making the actual read take less out of you. That's the part Shippable is for.
     </p>
   </div>
 </section>
 
   <section>
   <div class="container">
-    <p class="eyebrow">What it's built on</p>
-    <h2>Four opinions about what review is for.</h2>
+    <p class="eyebrow">How</p>
+    <h2>Understand it. Verify it. Then ship it.</h2>
+    <p class="muted">Five practices behind it.</p>
 
     <div class="principles">
       <div class="principle">
         <h3>Evidence over claims.</h3>
-        <p>An AI summary you can't check is just a vibe. Shippable's review plan ties every claim to a file, hunk, or symbol — click it, see the code, decide if you believe it. A rule-based plan lands first, so the page is never empty while the AI thinks.</p>
+        <p class="sub">Nothing in the review floats free of the diff.</p>
+        <p>An AI summary you can't check is a vibe. Shippable's review plan ties every claim to a file, hunk, or symbol — click it, see the code, decide if you believe it. A rule-based plan lands first, so the page is never empty while the model thinks.</p>
         <figure>
           <img src="screenshots/02-plan-diagram.png" alt="Shippable's review plan with evidence-backed claims and a typed-node structure map">
           <figcaption>Every claim points back at the code that justifies it.</figcaption>
@@ -304,12 +323,14 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
 
       <div class="principle">
         <h3>Reading is not approving.</h3>
-        <p>Most tools collapse "I looked at it" and "I approve it" into one button. Those are different facts. Shippable tracks the lines your cursor has passed over — the faded lines in the screenshot at the top of the page — separately from an explicit per-file sign-off, so you can't accidentally LGTM a file you never scrolled through. And the state is durable: each comment captures ten lines of context and a content hash, so when the agent amends or reshuffles its work, your thread re-anchors instead of vanishing.</p>
+        <p class="sub">Track what you understood, what you verified, and what still needs attention.</p>
+        <p>Most tools collapse "I looked at it" and "I approve it" into one button. Those are different facts, and so is "I ran it and it does what it claims." Shippable tracks three states, not two — lines your cursor has actually passed over (the faded ones), things you've explicitly signed off, and the parts you've left flagged for another pass. The state is durable: each comment captures ten lines of context and a content hash, so when the agent reshuffles its work, your thread re-anchors instead of vanishing. Close the laptop. Come back tomorrow. Pick up where you left off.</p>
       </div>
 
       <div class="principle">
         <h3>A claim you can run is a test.</h3>
-        <p>When a concern is about what code <em>does</em>, the fastest way to settle it is to run it — not argue in a comment thread. Select a hunk or a block; the runner detects input slots, builds a form, and executes in a sandboxed worker — JavaScript, TypeScript, and PHP today. An AI concern can hand its snippet straight to the runner, so the concern becomes a verifier in one click.</p>
+        <p class="sub">Running beats arguing.</p>
+        <p>When a concern is about what code <em>does</em>, the fastest way to settle it is to run it — not litigate it in a comment thread. Select a hunk or a block; the runner detects input slots, builds a form, and executes in a sandboxed worker — JavaScript, TypeScript, and PHP today. An AI concern can hand its snippet straight to the runner, so the concern becomes a verifier in one click.</p>
         <figure>
           <img src="screenshots/04-code-runner.png" alt="A PHP hunk selected with the in-browser runner showing an auto-detected input form and the executed output">
           <figcaption>Verify the AI's claim in one click, not five.</figcaption>
@@ -317,12 +338,19 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
       </div>
 
       <div class="principle">
-        <h3>AI review belongs next to the code, not in another window.</h3>
-        <p>AI review shouldn't live in a chat transcript you alt-tab to. Through the <code>shippable</code> MCP integration, your agent posts review comments that land anchored to the lines they're about, right in the diff. You read them in context and reply in context; the agent pulls your replies on its next run.</p>
+        <h3>Review flows both ways.</h3>
+        <p class="sub">AI comments land in the diff. Your conclusions ship where you want them.</p>
+        <p>Incoming: through the <code>shippable</code> MCP integration, your agent's review comments land anchored to the lines they're about, right in the diff — no alt-tabbing to a chat transcript. Outgoing: when you're done, the review ships to whatever tool you'd use anyway. Keep it as local notes. Send it back to the agent through MCP for a second or fourth opinion. Push it to GitHub as PR comments for a colleague. Your call, not ours — we don't care what's downstream as long as your work doesn't get stranded in our app.</p>
         <figure>
           <img src="screenshots/03-agent-context.png" alt="Shippable showing an AI-posted review comment anchored to a line in the diff, with the agent terminal posting through the shippable MCP server">
-          <figcaption>AI review lands anchored in the diff — no jumping between a chat window and your editor.</figcaption>
+          <figcaption>The review pass connects to the agents and tools you already work in.</figcaption>
         </figure>
+      </div>
+
+      <div class="principle">
+        <h3>Worktree-native.</h3>
+        <p class="sub">Built for the way agent work actually happens.</p>
+        <p>The per-task agent pattern runs on git worktrees — a branch and folder per task, sometimes several agents in parallel. Shippable was built around them, not bolted on. Open any worktree, build a changeset at HEAD or across any SHA range, watch the diff refresh as the agent commits, pull the agent's session context inline. Most diff GUIs treat worktrees as an afterthought, or don't support them at all. We started here.</p>
       </div>
     </div>
   </div>
@@ -331,11 +359,10 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
 <section class="pause">
   <div class="container">
     <blockquote class="pull-quote">
-      <p>Evidence over claims.</p>
-      <p>Reading is not approving.</p>
-      <p>A claim you can run is a test.</p>
-      <p>AI review belongs where the code is.</p>
-      <p class="coda-closer">The human reads. The human signs off. Shippable makes that cheap to do well.</p>
+      <p>Shippable sits between you</p>
+      <p>and the diff,</p>
+      <p>and tries to make each review</p>
+      <p>take less out of you.</p>
     </blockquote>
   </div>
 </section>
@@ -367,15 +394,17 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
   <div class="container">
     <p class="eyebrow">Coming next</p>
     <h2>Coming next.</h2>
-    <p class="muted">Local-first today. Closing the obvious gaps in this order:</p>
+    <p class="muted">Local-first today. The bets we're spending the next few months on:</p>
 
     <ul class="coming-list">
+      <li>Quiz mode — helps you find out whether you actually understood it, not just whether you scrolled past it</li>
+      <li>More agent context inline — surface what the agent was thinking while it wrote a given block, not just the comments it left</li>
+      <li>UI composability — assemble your own review surface from sensible defaults, instead of taking ours</li>
       <li>Two-way GitHub — pull PRs in, push review conclusions back to PR threads <span class="coming-today">(read-only today)</span></li>
       <li>Bring-your-own-key for other AI providers <span class="coming-today">(Claude / Sonnet 4.6 only today)</span></li>
       <li>Shared, multi-user reviews on a hosted backend <span class="coming-today">(local-first in localStorage today)</span></li>
       <li>Linux and Windows builds; signed and notarized macOS <span class="coming-today">(macOS-only, unsigned today)</span></li>
       <li>GitLab and Bitbucket ingest</li>
-      <li>Reading-path suggestions across callers and dependencies</li>
       <li>Coverage markers combining human and AI review state</li>
     </ul>
   </div>
