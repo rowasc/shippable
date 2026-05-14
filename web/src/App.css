@@ -234,6 +234,12 @@ body,
 .main--wide-sidebar.main--with-inspector {
   grid-template-columns: 520px 1fr 340px;
 }
+.main--no-sidebar {
+  grid-template-columns: 1fr;
+}
+.main--no-sidebar.main--with-inspector {
+  grid-template-columns: 1fr 340px;
+}
 .reviewpane {
   min-width: 0;
   min-height: 0;

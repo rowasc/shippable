@@ -1267,6 +1267,7 @@ function WorkspaceStage({
   const [showInspector, setShowInspector] = useState(
     frame.showInspector ?? true,
   );
+  const [showSidebar, setShowSidebar] = useState(true);
 
   // Per-frame modal visibility. Initial values are seeded from the frame's
   // declared overlay. The user can dismiss them and toggle via keyboard
@@ -1522,6 +1523,9 @@ function WorkspaceStage({
         case "TOGGLE_INSPECTOR":
           setShowInspector((v) => !v);
           break;
+        case "TOGGLE_SIDEBAR":
+          setShowSidebar((v) => !v);
+          break;
         case "TOGGLE_PLAN":
           setShowPlan((v) => !v);
           break;
@@ -1676,51 +1680,53 @@ function WorkspaceStage({
 
       <div
         className={`main ${showInspector ? "main--with-inspector" : ""} ${
-          sidebarWide ? "main--wide-sidebar" : ""
+          showSidebar ? (sidebarWide ? "main--wide-sidebar" : "") : "main--no-sidebar"
         }`}
       >
-        <Sidebar
-          viewModel={buildSidebarViewModel({
-            files: cs.files,
-            currentFileId: state.cursor.fileId,
-            readLines: state.readLines,
-            reviewedFiles: state.reviewedFiles,
-            interactions: state.interactions,
-            detachedInteractions: state.detachedInteractions,
-          })}
-          onPickFile={(fileId) => {
-            const f = cs.files.find((ff) => ff.id === fileId);
-            if (!f) return;
-            dispatch({
-              type: "SET_CURSOR",
-              cursor: {
-                changesetId: cs.id,
-                fileId,
-                hunkId: f.hunks[0].id,
-                lineIdx: 0,
-              },
-            });
-          }}
-          onJumpToFirstComment={(fileId) => {
-            const stop = buildCommentStops(cs, state.interactions).find(
-              (s) => s.fileId === fileId,
-            );
-            if (!stop) return;
-            dispatch({
-              type: "SET_CURSOR",
-              cursor: {
-                changesetId: cs.id,
-                fileId: stop.fileId,
-                hunkId: stop.hunkId,
-                lineIdx: stop.lineIdx,
-              },
-            });
-          }}
-          runs={runs}
-          onCloseRun={closePromptRun}
-          wide={sidebarWide}
-          onToggleWide={() => setSidebarWide((v) => !v)}
-        />
+        {showSidebar && (
+          <Sidebar
+            viewModel={buildSidebarViewModel({
+              files: cs.files,
+              currentFileId: state.cursor.fileId,
+              readLines: state.readLines,
+              reviewedFiles: state.reviewedFiles,
+              interactions: state.interactions,
+              detachedInteractions: state.detachedInteractions,
+            })}
+            onPickFile={(fileId) => {
+              const f = cs.files.find((ff) => ff.id === fileId);
+              if (!f) return;
+              dispatch({
+                type: "SET_CURSOR",
+                cursor: {
+                  changesetId: cs.id,
+                  fileId,
+                  hunkId: f.hunks[0].id,
+                  lineIdx: 0,
+                },
+              });
+            }}
+            onJumpToFirstComment={(fileId) => {
+              const stop = buildCommentStops(cs, state.interactions).find(
+                (s) => s.fileId === fileId,
+              );
+              if (!stop) return;
+              dispatch({
+                type: "SET_CURSOR",
+                cursor: {
+                  changesetId: cs.id,
+                  fileId: stop.fileId,
+                  hunkId: stop.hunkId,
+                  lineIdx: stop.lineIdx,
+                },
+              });
+            }}
+            runs={runs}
+            onCloseRun={closePromptRun}
+            wide={sidebarWide}
+            onToggleWide={() => setSidebarWide((v) => !v)}
+          />
+        )}
         <DiffView
           viewModel={buildDiffViewModel({
             file,

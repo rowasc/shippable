@@ -20,6 +20,7 @@ export type ActionId =
   | "COLLAPSE_SELECTION"
   | "TOGGLE_HELP"
   | "TOGGLE_INSPECTOR"
+  | "TOGGLE_SIDEBAR"
   | "TOGGLE_PLAN"
   | "CLOSE_PLAN"
   | "TOGGLE_ACK"
@@ -112,6 +113,7 @@ export const KEYMAP: KeyEntry[] = [
   // ── ui ──────────────────────────────────────────────────────────────────────
   { key: "?",      label: "see keybindings",    group: "ui", action: "TOGGLE_HELP", palette: "global" },
   { key: "i",      label: "toggle AI inspector", group: "ui", action: "TOGGLE_INSPECTOR", palette: "global" },
+  { key: "f",      label: "toggle file list",    group: "ui", action: "TOGGLE_SIDEBAR",   palette: "global" },
   { key: "p",      label: "where to start (plan)", group: "ui", action: "TOGGLE_PLAN", palette: "global" },
   // Escape closes plan before falling through to help / guide Escape handlers.
   { key: "Escape", when: "hasPlan", label: "close plan", group: "ui", action: "CLOSE_PLAN" },
