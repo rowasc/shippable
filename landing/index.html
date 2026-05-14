@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shippable — Less of the diff in your head</title>
-  <meta name="description" content="Working with agents, dozens of meaningful diffs a day is normal. Reading them is harder than writing them was. Shippable is local-first review, built around making each pass take less out of you.">
+  <meta name="description" content="Local-first review for agent diffs and pull requests. Dozens of meaningful diffs a day is normal now — Shippable is built to make each pass take less out of you.">
   <meta property="og:title" content="Shippable — Less of the diff in your head">
-  <meta property="og:description" content="Local-first review for code written with agents. Shippable sits between you and the diff and tries to make each pass take less out of you.">
+  <meta property="og:description" content="Local-first review for agent diffs and pull requests. Shippable sits between you and the diff and tries to make each pass take less out of you.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://rowasc.github.io/shippable/">
   <style>
@@ -272,9 +272,9 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
     <div class="hero-copy">
       <div class="wordmark">Shippable</div>
       <h1>Less of the diff <span class="accent">in your head.</span></h1>
-      <p class="tagline">Local-first review for code written with agents.</p>
+      <p class="tagline">Local-first review for agent diffs and pull requests.</p>
       <p class="lead muted">
-        Working with agents, dozens of meaningful diffs a day is normal. Reading them is harder than writing them was. Shippable is the review pass that tries to take less out of you — before the work disappears into a skimmed read, a PR thread, or another agent run.
+        When working with agents, dozens of meaningful diffs a day is normal — on your machine, and in the pull requests they land in. Reading them is harder than writing the code ever was. Shippable is the review pass designed to take less out of you, before the work disappears into a skimmed read or another agent run.
       </p>
       <div class="cta-row">
         <a class="cta primary" href="https://github.com/rowasc/shippable/releases/latest/download/Shippable.dmg">Download for macOS</a>
@@ -296,7 +296,7 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
     </p>
     <p>What it actually feels like, in our own sessions:</p>
     <blockquote class="inline-quote">
-      "I get overwhelmed. I don't know where to start. I lose track, come back, and it's starting again. Or I push to GitHub half-reviewed, just to have the review state stick somewhere."
+      "I get overwhelmed. I don't know where to start. I lose track, come back, and the pile's grown again. Or I push to GitHub half-reviewed, just to have the review state stick somewhere."
     </blockquote>
     <p>
       Reviewer bots add to that queue. Agentic review workflows hand you more findings to validate. Neither of those is the same thing as making the actual read take less out of you. That's the part Shippable is for.
@@ -306,9 +306,9 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
 
   <section>
   <div class="container">
-    <p class="eyebrow">How</p>
+    <p class="eyebrow">How it works</p>
     <h2>Understand it. Verify it. Then ship it.</h2>
-    <p class="muted">Five practices behind it.</p>
+    <p class="muted">Five principles we built it on.</p>
 
     <div class="principles">
       <div class="principle">
@@ -323,7 +323,7 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
 
       <div class="principle">
         <h3>Reading is not approving.</h3>
-        <p class="sub">Track what you understood, what you verified, and what still needs attention.</p>
+        <p class="sub">Track what you've read, what you've signed off, and what still needs another look.</p>
         <p>Most tools collapse "I looked at it" and "I approve it" into one button. Those are different facts, and so is "I ran it and it does what it claims." Shippable tracks three states, not two — lines your cursor has actually passed over (the faded ones), things you've explicitly signed off, and the parts you've left flagged for another pass. The state is durable: each comment captures ten lines of context and a content hash, so when the agent reshuffles its work, your thread re-anchors instead of vanishing. Close the laptop. Come back tomorrow. Pick up where you left off.</p>
       </div>
 
@@ -340,7 +340,7 @@ footer .footer-links a:hover { color: var(--accent); border-bottom-color: var(--
       <div class="principle">
         <h3>Review flows both ways.</h3>
         <p class="sub">AI comments land in the diff. Your conclusions ship where you want them.</p>
-        <p>Incoming: through the <code>shippable</code> MCP integration, your agent's review comments land anchored to the lines they're about, right in the diff — no alt-tabbing to a chat transcript. Outgoing: when you're done, the review ships to whatever tool you'd use anyway. Keep it as local notes. Send it back to the agent through MCP for a second or fourth opinion. Push it to GitHub as PR comments for a colleague. Your call, not ours — we don't care what's downstream as long as your work doesn't get stranded in our app.</p>
+        <p>Incoming: through the <code>shippable</code> MCP integration, your agent's review comments land anchored to the lines they're about, right in the diff — no alt-tabbing to a chat transcript. Outgoing: when you're done, the review ships to whatever tool you'd use anyway. Keep it as local notes. Send it back to the agent through MCP for another opinion (or a fourth). Push it to GitHub as PR comments for a colleague — next on the roadmap. Your call, not ours — we don't care what's downstream as long as your work doesn't get stranded in our app.</p>
         <figure>
           <img src="screenshots/03-agent-context.png" alt="Shippable showing an AI-posted review comment anchored to a line in the diff, with the agent terminal posting through the shippable MCP server">
           <figcaption>The review pass connects to the agents and tools you already work in.</figcaption>
