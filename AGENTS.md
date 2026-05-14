@@ -33,6 +33,8 @@ Within each worktree, agents can explore, run things, make commits, test new fea
 - `npm run typecheck` in `server/`.
 - For UI work, open it in the browser. Don't claim a feature works because the build passed, test it end to end.
 
+Before writing or reviewing tests, read `docs/plans/test-strategy.md` — principles, the integration-tier pattern (real `createApp()` in-process), and the anti-pattern catalog with file:line examples.
+
 There is no CI yet.
 
 ## Code style
@@ -97,4 +99,5 @@ Features that depend on a particular workspace mode (worktree ingest needs disk;
 - `docs/architecture.md` — module map and data model.
 - `docs/ROADMAP.md` — what's next.
 - `docs/plans/` — design docs for bigger features.
+- `docs/plans/test-strategy.md` — testing principles, layers, anti-patterns. Read before writing or reviewing tests.
 - `docs/concepts/` — how the existing subsystems work.
