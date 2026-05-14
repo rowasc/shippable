@@ -103,6 +103,11 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
         });
         return;
       }
+      if (err.discriminator === "github_network") {
+        const base = GH_ERROR_MESSAGES.github_network;
+        setError(err.message ? `${base} (${err.message})` : base);
+        return;
+      }
       setError(GH_ERROR_MESSAGES[err.discriminator] ?? err.discriminator);
     }
   }

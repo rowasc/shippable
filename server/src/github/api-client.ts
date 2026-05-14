@@ -14,7 +14,11 @@ export type GithubError =
       hint: "rate-limit" | "scope" | "invalid-token";
     }
   | { kind: "github_pr_not_found" }
-  | { kind: "github_upstream"; status: number; message: string };
+  | { kind: "github_upstream"; status: number; message: string }
+  /** Transport-layer failure: the request never produced an HTTP response
+   *  (DNS, TCP, TLS, proxy connect, timeout). `detail` is best-effort and
+   *  shaped for an inline error message — corp-proxy setups depend on it. */
+  | { kind: "github_network"; host: string; detail: string };
 
 export class GithubApiError extends Error {
   constructor(public readonly error: GithubError) {
@@ -34,6 +38,27 @@ export interface FetchResult {
   headers: Headers;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   json: any;
+}
+
+/**
+ * Best-effort one-liner for a thrown `fetch()` error. undici wraps the real
+ * cause (DNS, TCP, TLS, proxy connect, timeout) as `err.cause` with a `code`
+ * like `UND_ERR_CONNECT_TIMEOUT` / `ECONNREFUSED` / `ENOTFOUND`. We surface
+ * both so a user staring at a corp-proxy outage sees something actionable.
+ */
+function describeFetchFailure(err: unknown): string {
+  const cause =
+    err && typeof err === "object" && "cause" in err
+      ? (err as { cause: unknown }).cause
+      : undefined;
+  const causeRecord =
+    cause && typeof cause === "object" ? (cause as Record<string, unknown>) : undefined;
+  const code = typeof causeRecord?.code === "string" ? causeRecord.code : undefined;
+  const causeMsg =
+    typeof causeRecord?.message === "string" ? causeRecord.message : undefined;
+  const topMsg = err instanceof Error ? err.message : String(err);
+  if (code && causeMsg) return `${code}: ${causeMsg}`;
+  return causeMsg ?? topMsg;
 }
 
 function throwNormalizedError(
@@ -105,7 +130,16 @@ export async function githubFetch(
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
     dispatcher: getDispatcher(host),
   } as unknown as RequestInit;
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    throw new GithubApiError({
+      kind: "github_network",
+      host,
+      detail: describeFetchFailure(err),
+    });
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let json: any;

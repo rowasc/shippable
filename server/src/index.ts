@@ -961,6 +961,17 @@ async function handleGithubPrLoad(
         );
         return;
       }
+      if (e.kind === "github_network") {
+        console.warn(
+          `[server] github_network: host=${e.host} detail=${e.detail}`,
+        );
+        writeCorsHeaders(res, origin);
+        res.writeHead(502, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({ error: e.kind, host: e.host, detail: e.detail }),
+        );
+        return;
+      }
     }
     throw err;
   }
@@ -1009,6 +1020,18 @@ async function handleGithubPrBranchLookup(
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ matched: result.matched }));
   } catch (err) {
+    if (err instanceof GithubApiError && err.error.kind === "github_network") {
+      const e = err.error;
+      console.warn(
+        `[server] github_network (branch-lookup): host=${e.host} detail=${e.detail}`,
+      );
+      writeCorsHeaders(res, origin);
+      res.writeHead(502, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({ error: e.kind, host: e.host, detail: e.detail }),
+      );
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });

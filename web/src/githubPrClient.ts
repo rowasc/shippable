@@ -19,6 +19,7 @@ export interface PrLoadResult {
 export const GH_ERROR_MESSAGES: Record<string, string> = {
   github_pr_not_found: "PR not found.",
   github_upstream: "GitHub returned an error. Try again.",
+  github_network: "Couldn't reach GitHub. Check your network or proxy.",
   invalid_pr_url: "That doesn't look like a valid PR URL.",
   unknown: "Something went wrong loading the PR.",
 };
@@ -79,18 +80,24 @@ export async function loadGithubPr(prUrl: string): Promise<PrLoadResult> {
       typeof json.error === "string" ? json.error : "unknown";
     const host = typeof json.host === "string" ? json.host : undefined;
     const hint = typeof json.hint === "string" ? json.hint : undefined;
+    const detail =
+      typeof json.detail === "string" ? json.detail : undefined;
 
     const knownDiscriminators = [
       "github_token_required",
       "github_auth_failed",
       "github_pr_not_found",
       "github_upstream",
+      "github_network",
       "invalid_pr_url",
     ];
 
+    // For github_network, pass the transport-layer detail as the Error
+    // message so the inline display can surface "ECONNREFUSED" / "Connect
+    // Timeout" instead of just the friendly fallback.
     throw new GithubFetchError(
       knownDiscriminators.includes(discriminator) ? discriminator : "unknown",
-      discriminator,
+      detail ?? discriminator,
       host,
       hint,
     );
