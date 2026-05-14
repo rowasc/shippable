@@ -59,14 +59,46 @@ test.describe("Journey 6 — cross-cutting", () => {
     // Type a non-github.com host — should land on the trust stage.
     const hostInput = page.locator(".creds__add input").first();
     await hostInput.fill("github.example.com");
-    // Confirm the host. The component's "next" button is whichever button is
-    // primary in the add row; search by role.
-    const nextBtn = page.locator(".creds__add").locator("button", { hasText: /^next$|continue|add/i }).first();
-    if (await nextBtn.count() > 0) await nextBtn.click();
+    // Advance from the host stage to the trust interstitial.
+    await page
+      .locator(".creds__add .creds__btn--primary", { hasText: "continue" })
+      .click();
 
     await expect(
       page.locator("button", { hasText: /I trust github\.example\.com/ }),
     ).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("comment nav: n / Shift+N jump the cursor between comment lines", async ({
+    page,
+  }) => {
+    // cs-42 ships with review comments and AI notes. `n` jumps the cursor to
+    // the next comment-bearing line; Shift+N returns to the previous one.
+    const cursor = page.locator(".line--cursor");
+    await page.keyboard.press("n");
+    const firstStop = await cursor.textContent();
+    await page.keyboard.press("n");
+    await expect.poll(() => cursor.textContent()).not.toBe(firstStop);
+    await page.keyboard.press("Shift+N");
+    await expect.poll(() => cursor.textContent()).toBe(firstStop);
+  });
+});
+
+test.describe("Journey 6 — standalone entry points", () => {
+  test("gallery.html renders the screen catalog", async ({ page, visit }) => {
+    await visit("/gallery.html");
+    await expect(page.locator(".gallery")).toBeVisible();
+    await expect(page.locator(".gallery__nav .gallery__item").first()).toBeVisible();
+  });
+
+  test("feature-docs.html renders the per-feature viewer", async ({
+    page,
+    visit,
+  }) => {
+    await visit("/feature-docs.html");
+    // The default view renders `.feature-docs__workspace`; other views render
+    // `.feature-docs` — match either.
+    await expect(page.locator('[class^="feature-docs"]').first()).toBeVisible();
   });
 });
 
@@ -88,7 +120,7 @@ test.describe("Journey 6 — Welcome recents", () => {
               title: "Friendlier greeting",
               files: [],
             },
-            replies: {},
+            interactions: {},
           },
         ],
       };

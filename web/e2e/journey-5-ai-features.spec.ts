@@ -4,7 +4,12 @@
 // library) is sketched here as fixmes. Each test names the mock surface
 // area it'll need.
 
-import { test, expect, expectWorkspaceLoaded } from "./_lib/fixtures";
+import {
+  test,
+  expect,
+  expectWorkspaceLoaded,
+  dismissPlanOverlay,
+} from "./_lib/fixtures";
 import { mockAuthList, mockPlanOk, mockReviewStream } from "./_lib/mocks";
 
 test.describe("Journey 5 — AI features", () => {
@@ -17,15 +22,33 @@ test.describe("Journey 5 — AI features", () => {
     await visit("/?cs=42");
     await expectWorkspaceLoaded(page);
 
-    // Plan overlay is open by default. Capture the rule-based headline,
-    // then click "Send to Claude" and assert the headline flips.
-    await expect(page.locator(".plan__headline")).toBeVisible();
+    // Plan overlay is open by default with the rule-based headline. Capture
+    // it, click "Send to Claude", and assert the headline flips — proving the
+    // swap happened, not just that the end state matches the mock.
+    const headline = page.locator(".plan__headline");
+    await expect(headline).toBeVisible();
+    const ruleBased = (await headline.textContent())?.trim() ?? "";
+    expect(ruleBased).not.toBe("Mocked AI plan headline");
     await page
       .locator(".plan__h-btn", { hasText: "Send to Claude" })
       .click();
-    await expect(page.locator(".plan__headline")).toContainText(
-      "Mocked AI plan headline",
-    );
+    await expect(headline).toContainText("Mocked AI plan headline");
+  });
+
+  test("free runner: Shift+R opens an empty one-off runner", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    await page.keyboard.press("Shift+R");
+    const runner = page.locator(".coderunner--free");
+    await expect(runner).toBeVisible();
+    await expect(runner.locator(".coderunner__shape")).toHaveText("free runner");
+    // Language picker offers the WASM-backed runtimes.
+    await expect(runner.locator(".coderunner__lang")).toBeVisible();
   });
 
   test.fixme("Inspector AI notes: a/r toggle ack and add reply", async () => {

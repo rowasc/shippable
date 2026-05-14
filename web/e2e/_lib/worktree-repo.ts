@@ -1,0 +1,89 @@
+// Builds a throwaway git repo on disk so the worktree-ingest journeys can run
+// against the real server's /api/worktrees/* endpoints instead of mocking
+// them. The server shells out to `git worktree list --porcelain`, `git diff`,
+// etc., so the fixture has to be a genuine repo — not a faked response.
+//
+// Layout matches `SAMPLE_WORKTREE` in docs/usability-test.md: a base commit on
+// `main`, a `feat/x` branch with one extra commit, plus tracked uncommitted
+// edits in two files and one untracked file. Files are intentionally
+// multi-line so the diff has real hunks to navigate and expand.
+
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export interface FixtureRepo {
+  /** Absolute path to the repo root — paste this into the scan input. */
+  path: string;
+  /** Remove the repo from disk. Call in afterAll/afterEach. */
+  cleanup: () => void;
+}
+
+const GREETING_BASE = `export function greet(name: string): string {
+  return \`hi, \${name}\`;
+}
+
+export function farewell(name: string): string {
+  return \`bye, \${name}\`;
+}
+
+export const DEFAULT_NAME = "world";
+
+export function greetDefault(): string {
+  return greet(DEFAULT_NAME);
+}
+`;
+
+const GREETING_COMMITTED = GREETING_BASE.replace(
+  "  return `hi, ${name}`;",
+  "  return `hello, ${name}`;",
+);
+
+const GREETING_UNCOMMITTED = GREETING_COMMITTED.replace(
+  '  return `bye, ${name}`;',
+  '  return `farewell, ${name}`;',
+).replace('export const DEFAULT_NAME = "world";', 'export const DEFAULT_NAME = "everyone";');
+
+const README_BASE = `# fixture
+
+A throwaway repo for e2e worktree tests.
+`;
+
+const README_UNCOMMITTED = `# fixture
+
+A throwaway repo for e2e worktree tests.
+
+Edited, uncommitted.
+`;
+
+export function createWorktreeRepo(): FixtureRepo {
+  const path = mkdtempSync(join(tmpdir(), "shippable-e2e-wt-"));
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: path, stdio: "pipe" });
+
+  git("init", "-b", "main");
+  git("config", "user.email", "e2e@shippable.test");
+  git("config", "user.name", "e2e");
+  git("config", "commit.gpgsign", "false");
+
+  writeFileSync(join(path, "greeting.ts"), GREETING_BASE);
+  writeFileSync(join(path, "README.md"), README_BASE);
+  git("add", ".");
+  git("commit", "-m", "base commit");
+
+  git("checkout", "-b", "feat/x");
+  writeFileSync(join(path, "greeting.ts"), GREETING_COMMITTED);
+  git("commit", "-am", "Friendlier greeting");
+
+  // Tracked uncommitted edits in two files + one untracked file, so the
+  // changeset shows committed + uncommitted + untracked work.
+  writeFileSync(join(path, "greeting.ts"), GREETING_UNCOMMITTED);
+  writeFileSync(join(path, "README.md"), README_UNCOMMITTED);
+  writeFileSync(join(path, "notes.txt"), "untracked scratch\n");
+
+  return {
+    path,
+    cleanup: () => rmSync(path, { recursive: true, force: true }),
+  };
+}

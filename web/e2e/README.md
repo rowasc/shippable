@@ -1,8 +1,11 @@
 # e2e tests
 
 Playwright Test conversion of the `[auto]` and `[mixed]` steps from
-`docs/usability-test.md`. Runs the same vite + stub-server stack the
-`scripts/smoke-*` files use, mocks `/api/*` per-test via `page.route()`.
+`docs/usability-test.md`. **Hybrid model**: the real `server/` runs behind
+the suite (keyless — health, auth, worktrees, prompts, and the rule-based
+plan all work without an Anthropic key), so those paths are exercised for
+real. Tests `page.route()`-mock only the genuinely external boundaries —
+GitHub and Anthropic — and hard-to-trigger failure modes.
 
 ## Running
 
@@ -25,22 +28,25 @@ PLAYWRIGHT_CHANNEL=chromium npm run test:e2e
 The `webServer` block boots two processes:
 
 - vite dev on **:5198** (so it doesn't collide with the default :5173).
-- `scripts/e2e-stub-server.mjs` on **:3001** — the same stub the smokes
-  point at. Returns 200 for `/api/health` + `/api/auth/list`; everything
-  else 503 unless a test overrides via `page.route()`.
+- the real `server/` (`npm start`) on **:3001**, which vite proxies
+  `/api/*` to. It's started with `SHIPPABLE_ALLOWED_ORIGINS` set to the
+  e2e vite host — the server origin-checks every POST, and vite forwards
+  the browser's `Origin` header through the proxy, so the e2e host has to
+  be on the allowlist or worktree/auth writes come back 403.
 
 ## Layout
 
 | File | Journey | Status |
 |---|---|---|
 | `journey-1-first-run.spec.ts` | Onboarding, boot gate, Settings | active |
-| `journey-2-worktree.spec.ts`  | Local worktree review | 1 active + fixmes |
+| `journey-2-worktree.spec.ts`  | Local worktree review (real server + fixture repo) | 3 active + fixmes |
 | `journey-3-github-pr.spec.ts` | GitHub PR review | fixmes (needs `/api/github/*` mocks) |
 | `journey-4-paste-url.spec.ts` | Paste / URL / file diff | active |
-| `journey-5-ai-features.spec.ts` | Plan, prompts, runner, Inspector | 1 active + fixmes |
-| `journey-6-cross-cutting.spec.ts` | Themes, palette, help, recents | active |
-| `_lib/fixtures.ts` | `test` extension w/ default mocks; `visit()` helper | — |
+| `journey-5-ai-features.spec.ts` | Plan, prompts, runner, Inspector | 2 active + fixmes |
+| `journey-6-cross-cutting.spec.ts` | Themes, palette, help, recents, standalone pages | active |
+| `_lib/fixtures.ts` | `test` extension w/ default mocks; `visit()` + `topbarBtn()` helpers | — |
 | `_lib/mocks.ts`    | Reusable `page.route()` handlers + sample diff | — |
+| `_lib/worktree-repo.ts` | builds a throwaway git repo for the worktree journeys | — |
 
 ## Adding a test
 
@@ -55,7 +61,13 @@ The `webServer` block boots two processes:
    route should call `page.unroute("**/api/...")` first.
 4. Use selectors matching `docs/usability-test.md`'s Expects (most BEM
    class names there are stable identifiers, e.g. `.boot-gate__h`,
-   `.plan__headline`, `.modal__wt-row`).
+   `.plan__headline`, `.modal__wt-row`). For topbar actions use the
+   `topbarBtn()` helper — `TopbarActions` keeps a hidden measurement clone
+   of every item, so a bare `.topbar__btn` locator matches two elements.
+5. Endpoints the real `server/` handles hermetically (worktrees, the
+   rule-based plan) are *not* mocked — let them hit the server. For
+   worktree journeys, `_lib/worktree-repo.ts` builds a real throwaway git
+   repo on disk; create it in `beforeAll`, clean it up in `afterAll`.
 
 ## Why not just keep extending `scripts/smoke-*.mjs`?
 

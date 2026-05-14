@@ -1,75 +1,107 @@
-// Journey 2 — Review a local worktree. The folder picker (macOS-only,
-// AppleScript) is [manual] and stays in the manual track. The "paste path
-// instead" affordance is testable; we already have a full version of that
-// flow in `scripts/smoke-boot-gate.mjs` step 6.
+// Journey 2 — Review a local worktree. These run against the REAL server:
+// a throwaway git repo is built on disk (see _lib/worktree-repo.ts) and the
+// server's /api/worktrees/* endpoints scan and diff it for real — no mocks.
 //
-// Steps below are stubs scoped to what we can mock without a real worktree
-// on disk: scan-via-paste, range picker UI presence, live-reload banner,
-// reachability banner on path-disappears. They're marked `test.fixme()`
-// until we wire each mock; remove the fixme one at a time as we cover them.
+// The folder picker (macOS-only, AppleScript) stays [manual]; we drive the
+// "paste path instead" affordance instead. Live-reload and unreachable-path
+// banners need timed polling and stay as fixmes for now.
 
 import { test, expect, expectWorkspaceLoaded, topbarBtn } from "./_lib/fixtures";
-import {
-  mockWorktreeList,
-  mockWorktreeChangeset,
-  SAMPLE_DIFF,
-} from "./_lib/mocks";
+import { createWorktreeRepo, type FixtureRepo } from "./_lib/worktree-repo";
+
+let repo: FixtureRepo;
+
+test.beforeAll(() => {
+  repo = createWorktreeRepo();
+});
+
+test.afterAll(() => {
+  repo?.cleanup();
+});
+
+/** Open LoadModal, paste the fixture repo path, scan, and pick its worktree. */
+async function loadFixtureWorktree(page: import("@playwright/test").Page) {
+  await page.keyboard.press("Escape").catch(() => {});
+  await topbarBtn(page, "+ load").click();
+  await page.locator(".modal__btn", { hasText: "paste path instead" }).click();
+  await page.locator(".modal__manual .modal__input").fill(repo.path);
+  await page.locator(".modal__manual .modal__btn", { hasText: "scan" }).click();
+  // A fresh `git init` repo has exactly one working tree, on `feat/x`.
+  const row = page.locator(".modal__wt-row");
+  await expect(row).toHaveCount(1);
+  await row.click();
+  await expectWorkspaceLoaded(page);
+}
 
 test.describe("Journey 2 — local worktree", () => {
-  test("scan + load via paste path (parallels smoke-boot-gate step 6)", async ({
+  test("scan + load surfaces the branch's cumulative diff", async ({
     visit,
     page,
   }) => {
-    await mockWorktreeList(page, [
-      {
-        path: "/fake/repo/main",
-        branch: "main",
-        head: "abcdef1234567890abcdef1234567890abcdef12",
-        isMain: true,
-      },
-      {
-        path: "/fake/repo/feat-x",
-        branch: "feat/x",
-        head: "1234567890abcdef1234567890abcdef12345678",
-        isMain: false,
-      },
-    ]);
-    await mockWorktreeChangeset(page, {
-      diff: SAMPLE_DIFF,
-      subject: "Friendlier greeting",
-      branch: "feat/x",
-    });
     await visit("/?cs=42");
     await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page);
 
-    // Open LoadModal and click "paste path instead" — the folder picker
-    // path needs a real macOS host so we can't exercise it headlessly.
-    await page.keyboard.press("Escape").catch(() => {});
-    await topbarBtn(page, "+ load").click();
-    await page.locator(".modal__btn", { hasText: "paste path instead" }).click();
-    await page.locator(".modal__manual .modal__input").fill("/fake/repo");
-    await page.locator(".modal__manual .modal__btn", { hasText: "scan" }).click();
-
-    await expect(page.locator(".modal__wt-row")).toHaveCount(2);
-    await page.locator(".modal__wt-row", { hasText: "feat/x" }).click();
-    await expect(page.locator(".topbar__title")).toContainText("Friendlier greeting");
+    // The changeset is the branch's cumulative work: the committed
+    // "Friendlier greeting" edit plus the tracked uncommitted edits and the
+    // untracked file. Every changed file shows in the sidebar.
+    await expect(page.getByText("greeting.ts").first()).toBeVisible();
+    await expect(page.getByText("README.md").first()).toBeVisible();
+    await expect(page.getByText("notes.txt").first()).toBeVisible();
   });
 
-  test.fixme("range picker narrows the diff to a chosen commit range", async () => {
-    // Needs /api/worktrees/commits mocked + /api/worktrees/changeset with a
-    // range body. Wire the commits endpoint with two fake commits, click
-    // "⇄ range", pick one, assert the diff changes.
+  test("keyboard navigation moves the cursor across lines and files", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page);
+    await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+
+    // Cursor starts on the first file's first line. `j` advances it — the
+    // highlighted line's text changes.
+    const cursor = page.locator(".line--cursor");
+    await expect(cursor).toHaveCount(1);
+    const beforeLine = await cursor.textContent();
+    await page.keyboard.press("j");
+    await expect.poll(() => cursor.textContent()).not.toBe(beforeLine);
+
+    // `]` jumps to the next file — the diff header path changes.
+    const path = page.locator(".diff__path");
+    const beforeFile = await path.textContent();
+    await page.keyboard.press("]");
+    await expect.poll(() => path.textContent()).not.toBe(beforeFile);
   });
 
-  test.fixme("live-reload banner renders when polling reports new commits", async () => {
-    // Needs /api/worktrees/poll mocked to flip from "no changes" to "new
-    // commit" between calls; assert `.live-reload-bar` appears with reload
-    // text; click reload; confirm the new changeset replaces the old.
+  test("Shift+M signs off the current file", async ({ visit, page }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page);
+    await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+
+    await page.keyboard.press("Shift+M");
+    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    // Toggling again clears it.
+    await page.keyboard.press("Shift+M");
+    await expect(page.locator(".row--file-reviewed")).toHaveCount(0);
   });
 
-  test.fixme("unreachable worktree shows banner and stops polling", async () => {
-    // After load, return 404 from /api/worktrees/poll; banner text matches
-    // the script's expected copy ("Worktree at <path> is no longer
-    // reachable. Live reload stopped.").
-  });
+  test.fixme(
+    "live-reload banner renders when polling reports new commits",
+    async () => {
+      // Needs the worktree poll to flip from "no changes" to "new commit"
+      // between calls; assert `.live-reload-bar` appears with reload text,
+      // click reload, confirm the new changeset replaces the old.
+    },
+  );
+
+  test.fixme(
+    "unreachable worktree shows banner and stops polling",
+    async () => {
+      // After load, rm the fixture repo mid-session; wait three poll cycles;
+      // assert the "no longer reachable. Live reload stopped." banner appears
+      // and polling stops.
+    },
+  );
 });

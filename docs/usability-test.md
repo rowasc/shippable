@@ -14,7 +14,7 @@ This is a **dual-track** script. Each step is tagged:
 
 ### Tracks
 
-- **Automated sweep (web)** — `cd web && npm run test:e2e`. The Playwright suite under `web/e2e/` covers the `[auto]` and `[mixed]` steps below as one spec file per journey; mock `/api/*` endpoints per-test via `page.route()` (see `web/e2e/README.md`). Steps still uncovered are stubbed as `test.fixme()` so the gaps are visible.
+- **Automated sweep (web)** — `cd web && npm run test:e2e`. The Playwright suite under `web/e2e/` covers the `[auto]` and `[mixed]` steps below as one spec file per journey; mock `/api/*` endpoints per-test via `page.route()` (see `web/e2e/README.md`). Coverage is partial and growing — some steps are live, others are stubbed as `test.fixme()`, and a few aren't represented yet; `web/e2e/README.md`'s per-journey table is the source of truth for what's actually covered.
 - **Manual pass (desktop)** — packaged DMG (`npm run tauri:build`) or `cargo tauri dev`. Run every `[manual]` and `[mixed]` step.
 
 Don't claim a release is good on the automated sweep alone — the Keychain, sidecar, native dialogs, FindBar, and webview zoom only exist in the desktop pass. The folder picker is **macOS-only** (the server uses `osascript`); Linux/Windows runners need to fall back to the "paste path instead" affordance.
@@ -133,7 +133,7 @@ LoadModal renders three loaders as stacked sections simultaneously (not tabs): *
 1. `[auto]` Press `Shift+L` and paste `SAMPLE_DIFF_URL` into the From URL field. Submit. **Expect:** Browser fetches the diff and parses it client-side; diff renders; status bar shows file count.
 2. `[auto]` In the **Upload a file** section, click to select `SAMPLE_DIFF_FILE`. (There is no drag-and-drop today — the input is a plain file picker.) **Expect:** File parses client-side; sidebar lists files.
 3. `[auto]` In the **Paste diff text** section, paste the contents of `SAMPLE_DIFF_FILE`. Submit. **Expect:** Same outcome as upload.
-4. `[auto]` Navigate (`j` / `k` / `]` / `[`), sign off a file (`Shift+M`), reload the page. **Expect:** State persists.
+4. `[auto]` Navigate (`j` / `k` / `]` / `[`), sign off a file (`Shift+M`), then reopen the app at the bare `/` path. **Expect:** The session resumes with cursor, read marks, and sign-offs intact. Note: an explicit `?cs=` URL always reloads the fixture *fresh* — persistence only applies when booting `/`, which resumes the last session via `peekSession`.
 5. `[auto]` Navigate to `?cs=cs-09`. **Expect:** Fixture changeset loads via URL shortcut without going through LoadModal.
 
 ### Failure branches
