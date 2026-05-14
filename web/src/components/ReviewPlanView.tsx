@@ -101,18 +101,14 @@ export function ReviewPlanView({
       />
       <MapSection
         map={plan.map}
+        entryPoints={plan.entryPoints}
+        onJumpToEntry={onJumpToEntry}
         onNavigate={onNavigate}
         showDiagram={showDiagram}
         onToggleDiagram={() => setShowDiagram((value) => !value)}
         diagram={diagram}
         includeMarkdown={includeMarkdown}
         onToggleMarkdown={() => setIncludeMarkdown((value) => !value)}
-      />
-      <EntrySection
-        entryPoints={plan.entryPoints}
-        files={plan.map.files}
-        onJumpToEntry={onJumpToEntry}
-        onNavigate={onNavigate}
       />
     </section>
   );
@@ -395,6 +391,8 @@ function ClaimRow({
 
 function MapSection({
   map,
+  entryPoints,
+  onJumpToEntry,
   onNavigate,
   showDiagram,
   onToggleDiagram,
@@ -403,6 +401,8 @@ function MapSection({
   onToggleMarkdown,
 }: {
   map: StructureMap;
+  entryPoints: EntryPoint[];
+  onJumpToEntry?: (entry: EntryPoint) => void;
   onNavigate?: (ev: EvidenceRef) => void;
   showDiagram: boolean;
   onToggleDiagram: () => void;
@@ -410,6 +410,9 @@ function MapSection({
   includeMarkdown: boolean;
   onToggleMarkdown: () => void;
 }) {
+  const entryFileIds = new Set(entryPoints.map((e) => e.fileId));
+  const otherFiles = map.files.filter((f) => !entryFileIds.has(f.fileId));
+
   return (
     <section className="plan__sec">
       <div className="plan__sec-head">
@@ -422,16 +425,45 @@ function MapSection({
           {showDiagram ? "hide diagram" : "generate diagram"}
         </button>
       </div>
-      <ul className="plan__files">
-        {map.files.map((f) => (
-          <FileRow
-            key={f.fileId}
-            file={f}
-            defines={symbolsDefinedIn(map, f.path)}
-            onNavigate={onNavigate}
-          />
-        ))}
-      </ul>
+      {entryPoints.length === 0 && (
+        <div className="plan__empty plan__map-empty">
+          No clear entry point — the diff is flat. Review files below in any
+          order.
+        </div>
+      )}
+      {entryPoints.length > 0 && (
+        <ul className="plan__files plan__files--priority">
+          {entryPoints.map((entry, i) => {
+            const file = map.files.find((x) => x.fileId === entry.fileId);
+            return (
+              <EntryFileRow
+                key={entry.fileId}
+                rank={i + 1}
+                entry={entry}
+                file={file}
+                defines={file ? symbolsDefinedIn(map, file.path) : []}
+                onJumpToEntry={onJumpToEntry}
+                onNavigate={onNavigate}
+              />
+            );
+          })}
+        </ul>
+      )}
+      {entryPoints.length > 0 && otherFiles.length > 0 && (
+        <div className="plan__files-divider">other changes</div>
+      )}
+      {otherFiles.length > 0 && (
+        <ul className="plan__files">
+          {otherFiles.map((f) => (
+            <FileRow
+              key={f.fileId}
+              file={f}
+              defines={symbolsDefinedIn(map, f.path)}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
       {map.symbols.length > 0 && (
         <ul className="plan__symbols">
           {map.symbols.map((s) => (
@@ -532,51 +564,63 @@ function statusGlyph(status: StructureMapFile["status"]): string {
   }
 }
 
-function EntrySection({
-  entryPoints,
-  files,
+function EntryFileRow({
+  rank,
+  entry,
+  file,
+  defines,
   onJumpToEntry,
   onNavigate,
 }: {
-  entryPoints: EntryPoint[];
-  files: StructureMapFile[];
+  rank: number;
+  entry: EntryPoint;
+  file: StructureMapFile | undefined;
+  defines: string[];
   onJumpToEntry?: (entry: EntryPoint) => void;
   onNavigate?: (ev: EvidenceRef) => void;
 }) {
   return (
-    <section className="plan__sec">
-      <div className="plan__sec-h">Start here</div>
-      {entryPoints.length === 0 ? (
-        <div className="plan__empty">
-          No clear entry point — the diff is flat. Open any file to begin.
-        </div>
-      ) : (
-        <ol className="plan__entries">
-          {entryPoints.map((e, i) => {
-            const f = files.find((x) => x.fileId === e.fileId);
-            return (
-              <li key={e.fileId} className="plan__entry">
-                <button
-                  className="plan__entry-btn"
-                  onClick={onJumpToEntry ? () => onJumpToEntry(e) : undefined}
-                  disabled={!onJumpToEntry}
-                >
-                  <span className="plan__entry-rank">{i + 1}</span>
-                  <span className="plan__entry-path">{f?.path ?? e.fileId}</span>
-                </button>
-                <div className="plan__entry-reason">
-                  <span className="plan__claim-text">{e.reason.text}</span>
-                  <span className="plan__claim-cites">
-                    {e.reason.evidence.map((ev, j) => (
-                      <Reference key={j} ev={ev} onNavigate={onNavigate} />
-                    ))}
-                  </span>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
+    <li className="plan__file plan__file--entry">
+      <span className="plan__entry-rank">{rank}</span>
+      <button
+        type="button"
+        className="plan__file-jump"
+        onClick={onJumpToEntry ? () => onJumpToEntry(entry) : undefined}
+        disabled={!onJumpToEntry}
+      >
+        {file?.path ?? entry.fileId}
+      </button>
+      {file && (
+        <>
+          <span className="plan__file-counts">
+            {file.added > 0 && <span className="plan__add">+{file.added}</span>}
+            {file.removed > 0 && (
+              <span className="plan__del">−{file.removed}</span>
+            )}
+          </span>
+          {file.isTest && <span className="plan__badge">test</span>}
+          {defines.length > 0 && (
+            <span className="plan__file-defs">
+              defines{" "}
+              {defines.map((name) => (
+                <Reference
+                  key={name}
+                  ev={{ kind: "symbol", name, definedIn: file.path }}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </span>
+          )}
+        </>
       )}
-    </section>
+      <div className="plan__entry-reason">
+        <span className="plan__claim-text">{entry.reason.text}</span>
+        <span className="plan__claim-cites">
+          {entry.reason.evidence.map((ev, j) => (
+            <Reference key={j} ev={ev} onNavigate={onNavigate} />
+          ))}
+        </span>
+      </div>
+    </li>
   );
 }
