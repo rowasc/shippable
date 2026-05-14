@@ -8,7 +8,7 @@
 # screenshots/ (pass filename like "screenshots/foo.png") so the whole
 # directory is untracked.
 .playwright-mcp/
-screenshots/
+/screenshots/
 
 # Project-level Claude Code MCP config — kept out for now; bring back if
 # we want the playwright MCP to be shared with collaborators.
@@ -16,6 +16,9 @@ screenshots/
 
 # Internal thinking / process docs. Not for public consumption; keep local.
 .meta/
+
+# Superpowers brainstorm scratch (mockups, state, server-info). Per-session.
+.superpowers/
 
 CLAUDE.local.md
 
