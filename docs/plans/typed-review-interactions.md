@@ -524,7 +524,23 @@ Inline marker shortcuts at the very start of the body auto-select intent (the pi
 
 ## Slices
 
-Each slice is independently shippable. Slice 0 is a hard precondition; the rest of the slices don't start until it lands and is re-reviewed.
+**Status snapshot (2026-05-13).** Roughly half the plan has shipped. The slice descriptions below remain useful as the spec for what each slice is and isn't, but read them as "what the slice was scoped to do" rather than "what still needs doing." Current state by slice:
+
+| slice | status | evidence |
+| ----- | ------ | -------- |
+| 0. Data-layer tests + refactor | ✅ shipped | `interactions.test.ts` (679 LOC), `state.test.ts` (2059 LOC), `persist.test.ts` (317 LOC), `state.invariants.test.ts` (428 LOC) |
+| 1. `Interaction` selector + types + revision tokens | ✅ shipped | `web/src/interactions.ts` (selector), `web/src/types.ts:491-547` (types), `persist.ts:68` (`CURRENT_VERSION = 3`) |
+| 2. Composer intent picker | ❌ not shipped | no `IntentPicker` / `setIntent` in `web/src` |
+| 3. Response intents as interactions | ⚠️ partial | `Interaction` model carries ack/accept/reject intents but `state.ackedNotes` still exists in `state.ts` and `gallery-fixtures.ts` — slice's "drop `ackedNotes`" step is incomplete |
+| 4. Ask evolution | ⚠️ unverified | needs deeper check of `currentAsk` / `originalAsk` consumers |
+| 5. Wire rename + intent passthrough | ✅ shipped | `<interaction>` element in `server/src/agent-queue.ts`, `InteractionTarget` / `InteractionAuthorRole` in `web/src/types.ts` |
+| 6. GitHub round-trip (sentinel + glyphs) | ❌ not shipped | no `sp:v1` markers in `web/` or `server/` |
+| 7. PR-comments-to-agent gesture | ⚠️ partial | `enqueueOptIn` field exists on `Interaction` (types.ts) but the changeset-header gesture / UI isn't confirmed |
+| 8. Cross-thread aggregation surface (inbox) | ❌ not shipped | out of scope of this plan, but flagging for completeness |
+
+The **target collapse** (`reply-to-*` → `reply`) and **role collapse** (`user` + `teammate` → `human`; `agent` stays distinct) proposed elsewhere in this doc are also not yet implemented in code — `web/src/types.ts:491-498` still has the 7-value `InteractionTarget`; `:511` still has the 4-value `InteractionAuthorRole`. Those collapses are forward-looking design notes, *not* a record of what landed.
+
+Each slice is independently shippable. Slice 0 was a hard precondition for the original sequence; that's been satisfied.
 
 0. **Data-layer tests + refactor (precondition; do this first, then re-review the plan).** Before any typed-interactions code lands, build coverage and clean up the existing data-layer foundations the rest of the slices stand on. Scope:
    - **Reply, state.replies, ackedNotes, detachedReplies.** Unit tests for the reducer cases (`ADD_REPLY`, `DELETE_REPLY`, `PATCH_REPLY_ENQUEUED_ID`, `TOGGLE_ACK`, the merge paths for `MERGE_PR_REPLIES` and `MERGE_AGENT_REPLIES`), plus tests exercising the threadKey conventions (`note:` / `user:` / `block:` / `hunkSummary:` / `teammate:`) end-to-end. Today these have thin coverage and the typed-interactions slices rewrite all of them.
