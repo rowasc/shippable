@@ -6,7 +6,7 @@
 // [manual] steps (FindBar, webview zoom, packaged-DMG behaviour) stay in the
 // manual track since they depend on Tauri / native menus.
 
-import { test, expect, expectWorkspaceLoaded, dismissPlanOverlay, topbarBtn } from "./_lib/fixtures";
+import { test, expect, expectWorkspaceLoaded, dismissPlanOverlay } from "./_lib/fixtures";
 
 test.describe("Journey 6 — cross-cutting", () => {
   test.beforeEach(async ({ visit, page }) => {
@@ -17,15 +17,18 @@ test.describe("Journey 6 — cross-cutting", () => {
 
   test("keyboard help: ? opens the help overlay; Escape closes", async ({ page }) => {
     await page.keyboard.press("?");
-    await expect(page.locator(".help__title", { hasText: /keybindings/i })).toBeVisible();
+    const help = page.getByRole("dialog", { name: "keybindings" });
+    await expect(help).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.locator(".help__box")).toHaveCount(0);
+    await expect(help).toHaveCount(0);
   });
 
   test("theme cycling: switching themes updates <html data-theme>", async ({ page }) => {
-    // Scope to the visible topbar — TopbarActions keeps a hidden measurement
-    // clone of its leading slot, so a bare `.theme-picker__select` matches two.
-    const themeSelect = page.locator(".topbar-actions > .theme-picker .theme-picker__select");
+    // getByRole ignores the aria-hidden TopbarActions measurement clone, so no
+    // scoping needed — it matches only the live theme picker.
+    const themeSelect = page.getByRole("combobox", {
+      name: "Select UI and code theme",
+    });
     // Default is dark — confirm baseline.
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
@@ -43,29 +46,28 @@ test.describe("Journey 6 — cross-cutting", () => {
   test("Cmd+K opens the command palette", async ({ page }) => {
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await page.keyboard.press(`${modifier}+KeyK`);
-    await expect(
-      page.locator(".modal__h-label", { hasText: "command palette" }),
-    ).toBeVisible();
-    await expect(page.locator(".picker__search")).toBeVisible();
+    const palette = page.getByRole("dialog", { name: "command palette" });
+    await expect(palette).toBeVisible();
+    await expect(palette.getByPlaceholder("search app actions…")).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(page.locator(".cmdpal__box")).toHaveCount(0);
+    await expect(palette).toHaveCount(0);
   });
 
   test("Settings → Add GitHub host shows the trust step before the token field", async ({ page }) => {
-    await topbarBtn(page, "settings").click();
-    await expect(page.locator(".modal__h-label", { hasText: "settings" })).toBeVisible();
+    await page.getByRole("button", { name: "settings" }).click();
+    const settings = page.getByRole("dialog", { name: "settings" });
+    await expect(settings).toBeVisible();
 
-    await page.locator(".creds__btn", { hasText: /Add GitHub host/ }).click();
+    await settings.getByRole("button", { name: /Add GitHub host/ }).click();
     // Type a non-github.com host — should land on the trust stage.
-    const hostInput = page.locator(".creds__add input").first();
-    await hostInput.fill("github.example.com");
+    await settings
+      .getByPlaceholder("host (e.g. ghe.example.com)")
+      .fill("github.example.com");
     // Advance from the host stage to the trust interstitial.
-    await page
-      .locator(".creds__add .creds__btn--primary", { hasText: "continue" })
-      .click();
+    await settings.getByRole("button", { name: "continue" }).click();
 
     await expect(
-      page.locator("button", { hasText: /I trust github\.example\.com/ }),
+      settings.getByRole("button", { name: /I trust github\.example\.com/ }),
     ).toBeVisible({ timeout: 5_000 });
   });
 
@@ -133,19 +135,18 @@ test.describe("Journey 6 — Welcome recents", () => {
     });
 
     await visit("/");
-    await expect(
-      page.locator(".welcome__recent-title", { hasText: "Friendlier greeting" }),
-    ).toBeVisible();
+    // The open button's name starts with the title; the forget button's
+    // starts with "forget" — anchor so we match only the open button.
+    const recent = page.getByRole("button", { name: /^Friendlier greeting/ });
+    await expect(recent).toBeVisible();
 
     // Dismissing the entry removes it; the empty state takes over.
-    await page.locator(".welcome__recent-x").first().click();
-    await expect(
-      page.locator(".welcome__recent-title", { hasText: "Friendlier greeting" }),
-    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "forget Friendlier greeting" })
+      .click();
+    await expect(recent).toHaveCount(0);
 
     await page.reload();
-    await expect(
-      page.locator(".welcome__recent-title", { hasText: "Friendlier greeting" }),
-    ).toHaveCount(0);
+    await expect(recent).toHaveCount(0);
   });
 });

@@ -2,7 +2,7 @@
 // it stubs the boot probes and exposes a `visit(path?)` helper that waits
 // for the gate to fall through (or to surface a deliberate failure mode).
 
-import { test as base, expect, type Locator, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { mockAuthList, mockHealthy, mockPromptsEmpty } from "./mocks";
 
 export interface AppFixture {
@@ -59,12 +59,11 @@ export const test = base.extend<
 
 export { expect };
 
-/** Wait for the boot CredentialsPanel to render — used by Journey 1. */
+/** Wait for the boot CredentialsPanel to render — used by Journey 1. The
+ *  anthropic key input (placeholder `sk-ant-...`) is only on-screen while the
+ *  boot panel is up, so it's a clean observable signal. */
 export async function expectBootCredentialsPanel(page: Page): Promise<void> {
-  await expect(page.locator(".boot-gate__box .creds")).toBeVisible();
-  await expect(
-    page.locator(".creds__title", { hasText: "anthropic" }),
-  ).toBeVisible();
+  await expect(page.getByPlaceholder("sk-ant-...")).toBeVisible();
 }
 
 /** Wait for the workspace to be loaded (diff visible). */
@@ -87,15 +86,6 @@ export async function dismissPlanOverlay(page: Page): Promise<void> {
   await overlay.waitFor({ state: "hidden" });
 }
 
-/** A visible topbar action button by label. `TopbarActions` keeps a hidden,
- *  aria-hidden measurement clone of every item in the DOM for its width
- *  calculation; scoping to direct children of `.topbar-actions` matches only
- *  the real button, not the clone. (Items collapsed into the overflow kebab
- *  won't match — open the kebab for those.) */
-export function topbarBtn(page: Page, label: string | RegExp): Locator {
-  return page.locator(".topbar-actions > .topbar__btn", { hasText: label });
-}
-
 /** Ensure the real server has an Anthropic key configured, then land in the
  *  workspace. The server's auth store is shared across the whole run, so a
  *  prior test may have already configured one — in that case the boot panel
@@ -108,15 +98,15 @@ export async function ensureAnthropicConfigured(
 ): Promise<void> {
   await page.unroute("**/api/auth/list").catch(() => {});
   await visit(path, { skipAnthropic: false });
-  const panel = page.locator(".boot-gate__box .creds");
+  const keyInput = page.getByPlaceholder("sk-ant-...");
   // The gate resolves to either the boot panel (no key) or the workspace.
   await Promise.race([
-    panel.waitFor({ state: "visible" }).catch(() => {}),
+    keyInput.waitFor({ state: "visible" }).catch(() => {}),
     page.locator(".diff").waitFor({ state: "visible" }).catch(() => {}),
   ]);
-  if (await panel.isVisible().catch(() => false)) {
-    await page.locator(".creds__input").fill("sk-ant-e2e-fake");
-    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
+  if (await keyInput.isVisible().catch(() => false)) {
+    await keyInput.fill("sk-ant-e2e-fake");
+    await page.getByRole("button", { name: "Save" }).click();
   }
   await expectWorkspaceLoaded(page);
 }

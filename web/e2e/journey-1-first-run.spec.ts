@@ -11,7 +11,6 @@ import {
   expect,
   expectBootCredentialsPanel,
   expectWorkspaceLoaded,
-  topbarBtn,
 } from "./_lib/fixtures";
 import {
   mockAuthList,
@@ -28,10 +27,8 @@ test.describe("Journey 1 — first-run setup", () => {
   }) => {
     await visit("/?cs=42", { skipAnthropic: false });
     await expectBootCredentialsPanel(page);
-    await expect(
-      page.locator(".creds__skip-btn", { hasText: /Skip/ }),
-    ).toBeVisible();
-    await expect(page.locator(".creds__input")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Skip/ })).toBeVisible();
+    await expect(page.getByPlaceholder("sk-ant-...")).toBeVisible();
     // Workspace should NOT have rendered yet — the gate is modal.
     await expect(page.locator(".diff")).toHaveCount(0);
   });
@@ -66,8 +63,8 @@ test.describe("Journey 1 — first-run setup", () => {
     await visit("/?cs=42", { skipAnthropic: false });
     await expectBootCredentialsPanel(page);
 
-    await page.locator(".creds__input").fill("sk-ant-fake-test-key");
-    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
+    await page.getByPlaceholder("sk-ant-...").fill("sk-ant-fake-test-key");
+    await page.getByRole("button", { name: "Save" }).click();
 
     // Gate falls through; workspace renders.
     await expectWorkspaceLoaded(page);
@@ -88,16 +85,15 @@ test.describe("Journey 1 — first-run setup", () => {
     await visit("/?cs=42", { skipAnthropic: false });
 
     await expect(
-      page.locator(".boot-gate__h", { hasText: "Server unreachable" }),
+      page.getByRole("heading", { name: "Server unreachable" }),
     ).toBeVisible();
-    await expect(
-      page.locator(".boot-gate__btn", { hasText: "Retry" }),
-    ).toBeVisible();
+    const retry = page.getByRole("button", { name: "Retry" });
+    await expect(retry).toBeVisible();
 
     // Retry once /api/health is healthy and confirm the gate falls through.
     await page.unroute("**/api/health");
     await mockHealthy(page);
-    await page.locator(".boot-gate__btn", { hasText: "Retry" }).click();
+    await retry.click();
     await expectBootCredentialsPanel(page);
   });
 
@@ -107,16 +103,16 @@ test.describe("Journey 1 — first-run setup", () => {
     await visit("/", { skipAnthropic: false });
     await expectBootCredentialsPanel(page);
 
-    await page.locator(".creds__skip-btn", { hasText: /Skip/ }).click();
+    await page.getByRole("button", { name: /Skip/ }).click();
 
     // Boot panel dismisses; Welcome surfaces the AI-off chip.
-    await expect(page.locator(".welcome__ai-off")).toBeVisible();
-    await expect(page.locator(".welcome__ai-off")).toContainText(/AI off/i);
+    const aiOff = page.getByRole("button", { name: /AI off/i });
+    await expect(aiOff).toBeVisible();
 
     // Skip persisted in localStorage — reload should NOT re-prompt.
     await page.reload();
-    await expect(page.locator(".welcome__ai-off")).toBeVisible();
-    await expect(page.locator(".boot-gate__box .creds")).toHaveCount(0);
+    await expect(aiOff).toBeVisible();
+    await expect(page.getByPlaceholder("sk-ant-...")).toHaveCount(0);
   });
 
   test("failure: invalid key — server rejects and surfaces the error", async ({
@@ -127,8 +123,8 @@ test.describe("Journey 1 — first-run setup", () => {
     await visit("/?cs=42", { skipAnthropic: false });
     await expectBootCredentialsPanel(page);
 
-    await page.locator(".creds__input").fill("garbage-key");
-    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
+    await page.getByPlaceholder("sk-ant-...").fill("garbage-key");
+    await page.getByRole("button", { name: "Save" }).click();
 
     await expect(page.locator(".creds__error")).toBeVisible();
     // Panel stays open until the user enters a valid key (or skips).
@@ -147,17 +143,20 @@ test.describe("Journey 1 — Settings credential management ([auto] step 5/6)", 
 
     // Open Settings via the topbar action.
     await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
-    await topbarBtn(page, "settings").click();
+    await page.getByRole("button", { name: "settings" }).click();
+    const settings = page.getByRole("dialog", { name: "settings" });
+    await expect(settings).toBeVisible();
+
+    // The anthropic row exposes rotate + clear (via aria-label).
     await expect(
-      page.locator(".modal__h-label", { hasText: "settings" }),
+      settings.getByRole("button", { name: "rotate anthropic" }),
+    ).toBeVisible();
+    await expect(
+      settings.getByRole("button", { name: "clear anthropic" }),
     ).toBeVisible();
 
-    // The anthropic row shows lowercase "rotate" and "clear" affordances.
-    const anthropicRow = page.locator(".creds__row", { hasText: "anthropic" });
-    await expect(anthropicRow.locator("button", { hasText: "rotate" })).toBeVisible();
-    await expect(anthropicRow.locator("button", { hasText: "clear" })).toBeVisible();
-
-    // Clearing flips the row back to "not set".
+    // Clearing flips the row back to unset: the clear button goes away and
+    // the rotate affordance becomes "set anthropic".
     let listAfterClear = false;
     await page.unroute("**/api/auth/list");
     await page.route("**/api/auth/list", (route) =>
@@ -176,10 +175,12 @@ test.describe("Journey 1 — Settings credential management ([auto] step 5/6)", 
       });
     });
 
-    await anthropicRow.locator("button", { hasText: "clear" }).click();
+    await settings.getByRole("button", { name: "clear anthropic" }).click();
     await expect(
-      page.locator(".creds__row", { hasText: "anthropic" })
-        .locator(".creds__row-state"),
-    ).toContainText("not set");
+      settings.getByRole("button", { name: "set anthropic" }),
+    ).toBeVisible();
+    await expect(
+      settings.getByRole("button", { name: "clear anthropic" }),
+    ).toHaveCount(0);
   });
 });

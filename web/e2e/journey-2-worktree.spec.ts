@@ -7,7 +7,7 @@
 // The folder picker (macOS-only, AppleScript) stays [manual]; we drive the
 // "paste path instead" affordance instead.
 
-import { test, expect, expectWorkspaceLoaded, topbarBtn } from "./_lib/fixtures";
+import { test, expect, expectWorkspaceLoaded } from "./_lib/fixtures";
 import {
   createWorktreeRepo,
   addCommit,
@@ -30,12 +30,15 @@ async function loadFixtureWorktree(
   repoPath: string,
 ) {
   await page.keyboard.press("Escape").catch(() => {});
-  await topbarBtn(page, "+ load").click();
-  await page.locator(".modal__btn", { hasText: "paste path instead" }).click();
-  await page.locator(".modal__manual .modal__input").fill(repoPath);
-  await page.locator(".modal__manual .modal__btn", { hasText: "scan" }).click();
+  await page.getByRole("button", { name: /\+ load/ }).click();
+  const modal = page.getByRole("dialog", { name: "load changeset" });
+  await modal.getByRole("button", { name: "paste path instead" }).click();
+  await modal
+    .getByPlaceholder("/Users/you/code/my-repo")
+    .fill(repoPath);
+  await modal.getByRole("button", { name: "scan", exact: true }).click();
   // A fresh `git init` repo has exactly one working tree, on `feat/x`.
-  const row = page.locator(".modal__wt-row");
+  const row = modal.getByRole("button", { name: /feat\/x/ });
   await expect(row).toHaveCount(1);
   await row.click();
   await expectWorkspaceLoaded(page);
@@ -89,10 +92,12 @@ test.describe("Journey 2 — local worktree", () => {
     await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
 
     await page.keyboard.press("Shift+M");
-    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
     // Toggling again clears it.
     await page.keyboard.press("Shift+M");
-    await expect(page.locator(".row--file-reviewed")).toHaveCount(0);
+    await expect(page.getByLabel("reviewed", { exact: true })).toHaveCount(0);
   });
 
   test("live-reload banner appears when a new commit lands", async ({

@@ -9,7 +9,6 @@ import {
   expect,
   expectWorkspaceLoaded,
   dismissPlanOverlay,
-  topbarBtn,
 } from "./_lib/fixtures";
 
 const PR_URL = "https://github.com/acme/widgets/pull/7";
@@ -17,13 +16,16 @@ const PR_URL = "https://github.com/acme/widgets/pull/7";
 /** Open LoadModal and submit `url` through the From-URL field. */
 async function submitUrl(page: import("@playwright/test").Page, url: string) {
   await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
-  await topbarBtn(page, "+ load").click();
-  const urlSection = page.locator(".modal__sec", { hasText: "From URL" });
-  await urlSection.locator(".modal__input").fill(url);
-  await urlSection.locator(".modal__btn", { hasText: /^load$/ }).click();
+  await page.getByRole("button", { name: /\+ load/ }).click();
+  const modal = page.getByRole("dialog", { name: "load changeset" });
+  await modal
+    .getByPlaceholder("https://github.com/owner/repo/pull/123")
+    .fill(url);
+  await modal.getByRole("button", { name: /^load$/ }).click();
 }
 
-/** The GitHub token modal, scoped by its header so it's unambiguous. */
+/** The GitHub token modal. It has no dialog role yet (pass-2 a11y), so it's
+ *  scoped by its `.modal__box` root + header text. */
 function tokenModal(page: import("@playwright/test").Page) {
   return page.locator(".modal__box", {
     has: page.locator(".modal__h-label", { hasText: "GitHub token required" }),
@@ -51,7 +53,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     await expect(modal).toContainText("github.com");
 
     await modal.getByLabel("Personal Access Token").fill("ghp_e2e_fake_token");
-    await modal.locator(".modal__btn--primary").click();
+    await modal.getByRole("button", { name: /Save token/ }).click();
 
     // Retry succeeds: the server calls the fake upstream, assembles the PR
     // changeset, and the topbar shows the fake PR's title.
@@ -73,7 +75,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     await expect(page.locator(".modal__hint--error, .modal__err")).toBeVisible();
     // The load modal stays open and no token modal appears.
     await expect(
-      page.locator(".modal__h-label", { hasText: "load changeset" }),
+      page.getByRole("dialog", { name: "load changeset" }),
     ).toBeVisible();
     await expect(tokenModal(page)).toHaveCount(0);
   });
@@ -111,7 +113,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     const modal = tokenModal(page);
     await expect(modal).toBeVisible();
     await modal.getByLabel("Personal Access Token").fill("ghp_will_be_rejected");
-    await modal.locator(".modal__btn--primary").click();
+    await modal.getByRole("button", { name: /Save token/ }).click();
 
     // The retry 401s. On the submit path the client surfaces a hardcoded
     // "Check the PAT scopes" message rather than the `reason: "rejected"`
@@ -127,7 +129,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     await submitUrl(page, PR_URL);
     const modal = tokenModal(page);
     await modal.getByLabel("Personal Access Token").fill("ghp_e2e_fake_token");
-    await modal.locator(".modal__btn--primary").click();
+    await modal.getByRole("button", { name: /Save token/ }).click();
     await expect(page.locator(".topbar__title")).toContainText(
       "Add preferences density toggle",
     );
@@ -135,13 +137,17 @@ test.describe("Journey 3 — GitHub PR", () => {
     // Sign off the current file, then refresh the PR from GitHub.
     await dismissPlanOverlay(page);
     await page.keyboard.press("Shift+M");
-    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
 
-    await page.locator(".topbar__btn", { hasText: "refresh" }).first().click();
+    await page.getByRole("button", { name: /refresh/ }).click();
     // The diff re-fetches but the sign-off (local review state) survives.
     await expect(page.locator(".topbar__title")).toContainText(
       "Add preferences density toggle",
     );
-    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
   });
 });

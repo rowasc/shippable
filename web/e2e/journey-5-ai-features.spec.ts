@@ -26,11 +26,11 @@ test.describe("Journey 5 — AI features", () => {
 
     // The rule-based plan is open by default; Send to Claude swaps in the AI
     // plan, whose intent claim carries the fake upstream's marker text.
-    await expect(page.locator(".plan__headline")).toBeVisible();
-    await page
-      .locator(".plan__h-btn", { hasText: "Send to Claude" })
-      .click();
-    await expect(page.locator(".planview-overlay")).toContainText("FAKE-PLAN:");
+    await expect(
+      page.getByRole("heading", { name: /Add user preferences panel/ }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Send to Claude" }).click();
+    await expect(page.getByText(/FAKE-PLAN:/)).toBeVisible();
   });
 
   test("free runner: Shift+R opens an empty one-off runner", async ({
@@ -71,7 +71,7 @@ test.describe("Journey 5 — AI features", () => {
 
     // `r` opens the reply composer in the Inspector.
     await page.keyboard.press("r");
-    await expect(page.locator(".inspector .composer__input")).toBeVisible();
+    await expect(page.getByPlaceholder("Write a reply…")).toBeVisible();
   });
 
   test("code runner: e opens the inline runner on a TS hunk", async ({
@@ -99,9 +99,9 @@ test.describe("Journey 5 — AI features", () => {
     await dismissPlanOverlay(page);
 
     await page.keyboard.press("/");
-    await expect(page.locator(".picker__search")).toBeVisible();
+    await expect(page.getByPlaceholder("search prompts…")).toBeVisible();
     await page.locator(".picker__item").first().click();
-    await page.locator(".modal__btn--primary", { hasText: "run" }).click();
+    await page.getByRole("button", { name: "run", exact: true }).click();
 
     // The run row appears and settles streaming… → done; expanding it shows
     // the fake upstream's streamed marker text.
@@ -109,7 +109,7 @@ test.describe("Journey 5 — AI features", () => {
     await expect(run.locator(".promptrun__status")).toHaveText("done", {
       timeout: 10_000,
     });
-    await run.locator(".promptrun__head").click();
+    await run.getByRole("button", { expanded: false }).click();
     await expect(run.locator(".promptrun__body")).toContainText("FAKE-REVIEW:");
   });
 
@@ -132,14 +132,14 @@ test.describe("Journey 5 — AI features", () => {
     await dismissPlanOverlay(page);
 
     await page.keyboard.press("/");
-    await expect(page.locator(".picker__search")).toBeVisible();
+    await expect(page.getByPlaceholder("search prompts…")).toBeVisible();
     await page.locator(".picker__item").first().click();
-    await page.locator(".modal__btn--primary", { hasText: "run" }).click();
+    await page.getByRole("button", { name: "run", exact: true }).click();
 
     const run = page.locator(".promptrun").first();
     await expect(run.locator(".promptrun__status--error")).toBeVisible();
     // The error detail lives in the expanded body.
-    await run.locator(".promptrun__head").click();
+    await run.getByRole("button", { expanded: false }).click();
     await expect(run.locator(".promptrun__err")).toContainText("429");
   });
 });

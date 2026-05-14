@@ -9,15 +9,27 @@
 // Failure branches: CORS-blocked URL, malformed paste text, empty-diff button
 // disabled, network drop on URL fetch.
 
-import { test, expect, expectWorkspaceLoaded, dismissPlanOverlay, topbarBtn } from "./_lib/fixtures";
+import {
+  test,
+  expect,
+  expectWorkspaceLoaded,
+  dismissPlanOverlay,
+} from "./_lib/fixtures";
 import { SAMPLE_DIFF } from "./_lib/mocks";
+import type { Locator, Page } from "@playwright/test";
 
 const FAKE_DIFF_URL = "https://example.com/sample.diff";
 
-async function openLoadModal(page: import("@playwright/test").Page) {
+/** The load-changeset dialog. */
+const loadModal = (page: Page): Locator =>
+  page.getByRole("dialog", { name: "load changeset" });
+
+async function openLoadModal(page: Page): Promise<Locator> {
   await dismissPlanOverlay(page);
-  await topbarBtn(page, "+ load").click();
-  await expect(page.locator(".modal__h-label", { hasText: "load changeset" })).toBeVisible();
+  await page.getByRole("button", { name: /\+ load/ }).click();
+  const modal = loadModal(page);
+  await expect(modal).toBeVisible();
+  return modal;
 }
 
 test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
@@ -27,30 +39,34 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
   });
 
   test("happy path: paste diff text renders a diff", async ({ page }) => {
-    await openLoadModal(page);
+    const modal = await openLoadModal(page);
 
-    const pasteSection = page.locator(".modal__sec", { hasText: "Paste diff text" });
-    await pasteSection.locator(".modal__textarea").fill(SAMPLE_DIFF);
-    await pasteSection.locator(".modal__btn", { hasText: "parse" }).click();
+    const pasteSection = modal.locator("section", {
+      hasText: "Paste diff text",
+    });
+    await pasteSection.getByRole("textbox").fill(SAMPLE_DIFF);
+    await pasteSection.getByRole("button", { name: "parse" }).click();
 
     // LoadModal closes; topbar reflects the loaded changeset.
-    await expect(page.locator(".modal__h-label")).toHaveCount(0);
+    await expect(loadModal(page)).toHaveCount(0);
     await expectWorkspaceLoaded(page);
     // greeting.ts is the file in SAMPLE_DIFF; sidebar should list it.
     await expect(page.getByText("greeting.ts").first()).toBeVisible();
   });
 
   test("happy path: file upload renders a diff", async ({ page }) => {
-    await openLoadModal(page);
+    const modal = await openLoadModal(page);
 
-    const fileInput = page.locator(".modal__file");
-    await fileInput.setInputFiles({
-      name: "sample.diff",
-      mimeType: "text/x-diff",
-      buffer: Buffer.from(SAMPLE_DIFF, "utf8"),
-    });
+    await modal
+      .locator("section", { hasText: "Upload a file" })
+      .locator('input[type="file"]')
+      .setInputFiles({
+        name: "sample.diff",
+        mimeType: "text/x-diff",
+        buffer: Buffer.from(SAMPLE_DIFF, "utf8"),
+      });
 
-    await expect(page.locator(".modal__h-label")).toHaveCount(0);
+    await expect(loadModal(page)).toHaveCount(0);
     await expect(page.getByText("greeting.ts").first()).toBeVisible();
   });
 
@@ -66,20 +82,20 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
       }),
     );
 
-    await openLoadModal(page);
-    const urlSection = page.locator(".modal__sec", { hasText: "From URL" });
-    await urlSection.locator(".modal__input").fill(FAKE_DIFF_URL);
-    await urlSection.locator(".modal__btn", { hasText: /^load$/ }).click();
+    const modal = await openLoadModal(page);
+    await modal
+      .getByPlaceholder("https://github.com/owner/repo/pull/123")
+      .fill(FAKE_DIFF_URL);
+    await modal.getByRole("button", { name: /^load$/ }).click();
 
-    await expect(page.locator(".modal__h-label")).toHaveCount(0);
+    await expect(loadModal(page)).toHaveCount(0);
     await expect(page.getByText("greeting.ts").first()).toBeVisible();
   });
 
   test("fixture URL shortcut: ?cs=cs-09 loads without LoadModal", async ({ visit, page }) => {
     await visit("/?cs=cs-09");
     await expectWorkspaceLoaded(page);
-    // cs-09 is the PHP helpers fixture — topbar title reflects the fixture
-    // changeset id.
+    // cs-09 is the PHP helpers fixture — topbar id reflects the fixture id.
     await expect(page.locator(".topbar__id", { hasText: "cs-09" })).toBeVisible();
   });
 
@@ -88,8 +104,9 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
     // Sign off the current file. The keymap handler is on `window`, so no
     // element focus is needed — the plan overlay just had to be cleared first.
     await page.keyboard.press("Shift+M");
-    // file-reviewed class lands on the sidebar row for the current file.
-    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
 
     // The session save is debounced 300ms (App.tsx). Wait for it to actually
     // land in localStorage before re-navigating — otherwise the pending timer
@@ -111,27 +128,32 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
     await visit("/");
     await expectWorkspaceLoaded(page);
     await dismissPlanOverlay(page);
-    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
   });
 
   test("failure: malformed paste text surfaces a clear error", async ({ page }) => {
-    await openLoadModal(page);
-    const pasteSection = page.locator(".modal__sec", { hasText: "Paste diff text" });
-    await pasteSection.locator(".modal__textarea").fill("this is not a diff");
-    await pasteSection.locator(".modal__btn", { hasText: "parse" }).click();
+    const modal = await openLoadModal(page);
+    const pasteSection = modal.locator("section", {
+      hasText: "Paste diff text",
+    });
+    await pasteSection.getByRole("textbox").fill("this is not a diff");
+    await pasteSection.getByRole("button", { name: "parse" }).click();
 
     await expect(
       page.locator(".modal__err .errrow__msg"),
     ).toContainText("No files parsed from that diff");
     // Modal stays open so the user can correct.
-    await expect(page.locator(".modal__h-label")).toBeVisible();
+    await expect(loadModal(page)).toBeVisible();
   });
 
   test("failure: empty paste leaves the parse button disabled", async ({ page }) => {
-    await openLoadModal(page);
-    const pasteSection = page.locator(".modal__sec", { hasText: "Paste diff text" });
+    const modal = await openLoadModal(page);
     await expect(
-      pasteSection.locator(".modal__btn", { hasText: "parse" }),
+      modal
+        .locator("section", { hasText: "Paste diff text" })
+        .getByRole("button", { name: "parse" }),
     ).toBeDisabled();
   });
 
@@ -141,10 +163,11 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
     // formats a hint mentioning "CORS rejection".
     await page.route(FAKE_DIFF_URL, (route) => route.abort("failed"));
 
-    await openLoadModal(page);
-    const urlSection = page.locator(".modal__sec", { hasText: "From URL" });
-    await urlSection.locator(".modal__input").fill(FAKE_DIFF_URL);
-    await urlSection.locator(".modal__btn", { hasText: /^load$/ }).click();
+    const modal = await openLoadModal(page);
+    await modal
+      .getByPlaceholder("https://github.com/owner/repo/pull/123")
+      .fill(FAKE_DIFF_URL);
+    await modal.getByRole("button", { name: /^load$/ }).click();
 
     // The error renders either inline in the URL section or in the modal's
     // bottom error slot — accept either, just require the text.
