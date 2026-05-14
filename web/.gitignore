@@ -25,3 +25,7 @@ dist-ssr
 
 # Vite specific ignores
 .vite/
+
+# Playwright e2e run artifacts (traces, screenshots, html report)
+test-results/
+playwright-report/

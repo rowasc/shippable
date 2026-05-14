@@ -20,4 +20,17 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Playwright e2e specs. `use` is the fixture-callback parameter name in
+    // @playwright/test, not a React hook; empty catches are intentional
+    // (localStorage may be denied in the test browser).
+    files: ['e2e/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+    rules: {
+      'react-hooks/rules-of-hooks': 'off',
+      'no-empty': ['error', { allowEmptyCatch: true }],
+    },
+  },
 ])
