@@ -72,7 +72,7 @@ const MAIN_GROUPS: KeyGroup[] = ["navigation", "review", "guide", "ui"];
 
 function renderChord(chord: string) {
   return chord.split("/").map((part, i) => (
-    <span key={part}>
+    <span key={i}>
       {i > 0 && "/"}
       <kbd>{part}</kbd>
     </span>
