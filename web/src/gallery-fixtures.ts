@@ -224,7 +224,7 @@ export const fixtureAiSaturated: GalleryFixture = {
             {
               id: "g-r1",
               threadKey: lineNoteReplyKey(prefH1.id, 26),
-              target: "reply-to-ai-note",
+              target: "reply",
               intent: "comment",
               author: "romina",
               authorRole: "user",
@@ -274,7 +274,7 @@ export const fixtureTeammateEndorsed: GalleryFixture = {
         {
           id: "te-r1",
           threadKey: teammateReplyKey(authH2.id),
-          target: "reply-to-teammate",
+          target: "reply",
           intent: "comment",
           author: "dan",
           authorRole: "user",

@@ -10,7 +10,7 @@ import {
   initialState,
   mergeInteractionMaps,
   reducer,
-  replyTargetForKey,
+  replyTarget,
   reviewedFilesCount,
   selectAckedNotes,
 } from "../state";
@@ -519,7 +519,7 @@ function buildFrames(): Frame[] {
   const agentReplyLine1: Interaction = {
     id: "ar-1",
     threadKey: lineKey1,
-    target: "reply-to-user",
+    target: "reply",
     intent: "accept",
     author: "agent",
     authorRole: "agent",
@@ -529,7 +529,7 @@ function buildFrames(): Frame[] {
   const agentReplyLine2: Interaction = {
     id: "ar-2",
     threadKey: lineKey2,
-    target: "reply-to-user",
+    target: "reply",
     intent: "reject",
     author: "agent",
     authorRole: "agent",
@@ -708,7 +708,7 @@ function buildFrames(): Frame[] {
             {
               id: "demo-r1",
               threadKey: lineNote21,
-              target: "reply-to-ai-note",
+              target: "reply",
               intent: "comment",
               author: "you",
               authorRole: "user",
@@ -1784,7 +1784,7 @@ function WorkspaceStage({
               const interaction: Interaction = {
                 id: `r-${Date.now()}`,
                 threadKey: key,
-                target: isFirst ? firstTargetForKey(key) : replyTargetForKey(key),
+                target: isFirst ? firstTargetForKey(key) : replyTarget(),
                 intent: "comment",
                 author: "you",
                 authorRole: "user",

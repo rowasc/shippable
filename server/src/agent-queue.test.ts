@@ -373,7 +373,7 @@ describe("formatPayload", () => {
 
   it("emits htmlUrl when present (PR-imported interactions)", () => {
     const c = makeInteraction({
-      target: "reply-to-user",
+      target: "reply",
       intent: "comment",
       author: "external-reviewer",
       authorRole: "user",

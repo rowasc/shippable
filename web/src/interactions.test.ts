@@ -5,7 +5,7 @@ import {
   firstTargetForKey,
   initialState,
   mergeInteractionMaps,
-  replyTargetForKey,
+  replyTarget,
 } from "./state";
 import type {
   ChangeSet,
@@ -59,7 +59,7 @@ function userInteraction(
   return {
     id: literal.id,
     threadKey,
-    target: isFirst ? firstTargetForKey(threadKey) : replyTargetForKey(threadKey),
+    target: isFirst ? firstTargetForKey(threadKey) : replyTarget(),
     intent: "comment",
     author: literal.author,
     authorRole: "user",
@@ -90,7 +90,7 @@ function agentInteraction(
   return {
     id: literal.id,
     threadKey,
-    target: replyTargetForKey(threadKey),
+    target: replyTarget(),
     intent,
     author: literal.agentLabel ?? "agent",
     authorRole: "agent",
@@ -364,7 +364,7 @@ describe("selectInteractions — AI annotations", () => {
     expect(thread).toHaveLength(2);
     expect(thread[0].authorRole).toBe("ai");
     expect(thread[1].intent).toBe("ack");
-    expect(thread[1].target).toBe("reply-to-ai-note");
+    expect(thread[1].target).toBe("reply");
     expect(thread[1].authorRole).toBe("user");
     expect(thread[1].body).toBe("");
   });
@@ -433,7 +433,7 @@ describe("selectInteractions — user replies", () => {
     return { id, author: "you", body, createdAt };
   }
 
-  it("projects user reply to AI note with target reply-to-ai-note", () => {
+  it("projects user reply to AI note with target reply", () => {
     const note: AiNote = { severity: "info", summary: "fyi" };
     const hunk = makeHunk(HUNK_ID, 3);
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [hunk])]);
@@ -447,7 +447,7 @@ describe("selectInteractions — user replies", () => {
     expect(thread).toHaveLength(2);
     const [ai, user] = thread;
     expect(ai.authorRole).toBe("ai");
-    expect(user.target).toBe("reply-to-ai-note");
+    expect(user.target).toBe("reply");
     expect(user.authorRole).toBe("user");
   });
 
@@ -462,7 +462,7 @@ describe("selectInteractions — user replies", () => {
     expect(ix.authorRole).toBe("user");
   });
 
-  it("projects subsequent replies on a user thread as reply-to-user", () => {
+  it("projects subsequent replies on a user thread as reply", () => {
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [baseHunk()])]);
     const key = userCommentKey(HUNK_ID, 0);
     const state = withReplies(initialState([cs]), {
@@ -473,7 +473,7 @@ describe("selectInteractions — user replies", () => {
     });
     const thread = selectInteractions(state).byThreadKey[key];
     expect(thread[0].target).toBe("line");
-    expect(thread[1].target).toBe("reply-to-user");
+    expect(thread[1].target).toBe("reply");
   });
 
   it("projects block-thread head with target: block", () => {
@@ -532,7 +532,7 @@ describe("selectInteractions — agent replies", () => {
     const thread = selectInteractions(state).byThreadKey[key];
     const agent = thread.find((ix) => ix.authorRole === "agent");
     expect(agent?.intent).toBe("accept");
-    expect(agent?.target).toBe("reply-to-user");
+    expect(agent?.target).toBe("reply");
   });
 
   it("maps declined → reject, noted → ack", () => {

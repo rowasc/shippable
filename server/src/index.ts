@@ -845,11 +845,7 @@ async function handleWorktreesMcpStatus(
 const INTERACTION_TARGETS: readonly InteractionTarget[] = [
   "line",
   "block",
-  "reply-to-ai-note",
-  "reply-to-teammate",
-  "reply-to-hunk-summary",
-  "reply-to-user",
-  "reply-to-agent",
+  "reply",
 ];
 
 const ASK_INTENTS: readonly AskIntent[] = [

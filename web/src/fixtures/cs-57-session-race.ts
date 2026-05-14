@@ -217,7 +217,7 @@ export const INTERACTIONS_57: Record<string, Interaction[]> = {
     {
       id: "r3",
       threadKey: hunkSummaryReplyKey(SESSION_H2),
-      target: "reply-to-hunk-summary",
+      target: "reply",
       intent: "comment",
       author: "mina",
       authorRole: "user",

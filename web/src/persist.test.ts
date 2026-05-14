@@ -219,7 +219,7 @@ describe("persist v3 — strip non-user-authored entries on save", () => {
     const agentEntry: Interaction = {
       id: "ar1",
       threadKey: key,
-      target: "reply-to-user",
+      target: "reply",
       intent: "accept",
       author: "agent",
       authorRole: "agent",

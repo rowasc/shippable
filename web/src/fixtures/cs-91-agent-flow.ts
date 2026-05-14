@@ -118,7 +118,7 @@ const userLineInteraction: Interaction = {
 const agentReplyToUser: Interaction = {
   id: "ag-r-1",
   threadKey: userLineKey,
-  target: "reply-to-user",
+  target: "reply",
   intent: "accept",
   author: "agent",
   authorRole: "agent",

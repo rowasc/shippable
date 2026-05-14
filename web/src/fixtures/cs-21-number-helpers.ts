@@ -175,7 +175,7 @@ export const INTERACTIONS_21: Record<string, Interaction[]> = {
     {
       id: "r-21-1",
       threadKey: lineNoteReplyKey(H2_ID, 6),
-      target: "reply-to-ai-note",
+      target: "reply",
       intent: "comment",
       author: "yuki",
       authorRole: "user",

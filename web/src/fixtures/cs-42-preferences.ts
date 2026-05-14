@@ -286,7 +286,7 @@ export const INTERACTIONS_42: Record<string, Interaction[]> = {
     {
       id: "r1",
       threadKey: lineNoteReplyKey(STORAGE_H2, 6),
-      target: "reply-to-ai-note",
+      target: "reply",
       intent: "comment",
       author: "dan",
       authorRole: "user",
@@ -348,7 +348,7 @@ export const INTERACTIONS_42: Record<string, Interaction[]> = {
     {
       id: "r2",
       threadKey: teammateReplyKey(PANEL_H1),
-      target: "reply-to-teammate",
+      target: "reply",
       intent: "comment",
       author: "romina",
       authorRole: "user",
@@ -371,7 +371,7 @@ export const INTERACTIONS_42: Record<string, Interaction[]> = {
     {
       id: "u2",
       threadKey: userCommentKey(PANEL_H1, 7),
-      target: "reply-to-user",
+      target: "reply",
       intent: "comment",
       author: "romina",
       authorRole: "user",

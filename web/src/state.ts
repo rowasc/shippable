@@ -395,7 +395,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       const interaction: Interaction = {
         id: `${nextIntent}:${threadKey}:${Date.now()}`,
         threadKey,
-        target: "reply-to-ai-note",
+        target: "reply",
         intent: nextIntent,
         author,
         authorRole: "user",
@@ -1207,17 +1207,12 @@ function findLineIdxForLineNo(
 }
 
 /**
- * Target for a *reply* on the given thread (i.e. an interaction added
- * after the thread head). For the thread head itself, use
- * `firstTargetForKey`.
+ * Target for any reply (i.e. an interaction added after the thread head).
+ * Parent provenance is recoverable from the `threadKey` prefix, so the
+ * target itself is just `"reply"`.
  */
-export function replyTargetForKey(threadKey: string): InteractionTarget {
-  if (threadKey.startsWith("note:")) return "reply-to-ai-note";
-  if (threadKey.startsWith("user:")) return "reply-to-user";
-  if (threadKey.startsWith("block:")) return "reply-to-user";
-  if (threadKey.startsWith("hunkSummary:")) return "reply-to-hunk-summary";
-  if (threadKey.startsWith("teammate:")) return "reply-to-teammate";
-  return "reply-to-user";
+export function replyTarget(): InteractionTarget {
+  return "reply";
 }
 
 /**
@@ -1225,12 +1220,12 @@ export function replyTargetForKey(threadKey: string): InteractionTarget {
  * Interaction on a `user:`/`block:` key). For `note:`/`hunkSummary:`/
  * `teammate:` keys the head is supplied by ingest carriers, so any
  * user-stored entry is by definition a reply — those routes return
- * `replyTargetForKey` semantics.
+ * `replyTarget` semantics.
  */
 export function firstTargetForKey(threadKey: string): InteractionTarget {
   if (threadKey.startsWith("user:")) return "line";
   if (threadKey.startsWith("block:")) return "block";
-  return replyTargetForKey(threadKey);
+  return replyTarget();
 }
 
 function reconcileAgentInteractions(
@@ -1412,7 +1407,7 @@ export function ackedNotesToInteractions(
     const ack: Interaction = {
       id: `acked:${threadKey}:${user}`,
       threadKey,
-      target: "reply-to-ai-note",
+      target: "reply",
       intent: "ack",
       author: user,
       authorRole: "user",

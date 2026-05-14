@@ -186,7 +186,7 @@ function nextAction(rand: () => number, state: ReviewState): Action {
       interaction: {
         id: interactionId,
         threadKey: targetKey,
-        target: "reply-to-user",
+        target: "reply",
         intent: "comment",
         author: "a",
         authorRole: "user",
@@ -398,7 +398,7 @@ describe("invariant: welcome mode (no changesets) ignores everything except LOAD
       interaction: {
         id: "r",
         threadKey: "k",
-        target: "reply-to-user",
+        target: "reply",
         intent: "comment",
         author: "a",
         authorRole: "user",

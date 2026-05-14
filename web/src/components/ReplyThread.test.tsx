@@ -27,7 +27,7 @@ function agentIx(over: Partial<Interaction> = {}): Interaction {
   return {
     id: "ar1",
     threadKey: "user:cs/f#h:0",
-    target: "reply-to-user",
+    target: "reply",
     intent: "accept",
     author: "agent",
     authorRole: "agent",

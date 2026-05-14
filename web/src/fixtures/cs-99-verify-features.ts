@@ -445,7 +445,7 @@ export const INTERACTIONS_99: Record<string, Interaction[]> = {
     {
       id: "r-99-summary",
       threadKey: hunkSummaryReplyKey(AUTH_H1),
-      target: "reply-to-hunk-summary",
+      target: "reply",
       intent: "comment",
       author: "ines",
       authorRole: "user",
@@ -468,7 +468,7 @@ export const INTERACTIONS_99: Record<string, Interaction[]> = {
     {
       id: "r-99-teammate",
       threadKey: teammateReplyKey(AUTH_H1),
-      target: "reply-to-teammate",
+      target: "reply",
       intent: "comment",
       author: "qa-bot",
       authorRole: "user",
@@ -583,7 +583,7 @@ export const INTERACTIONS_99: Record<string, Interaction[]> = {
     {
       id: "r-99-line",
       threadKey: lineNoteReplyKey(STRINGS_H2, 5),
-      target: "reply-to-ai-note",
+      target: "reply",
       intent: "comment",
       author: "qa-bot",
       authorRole: "user",

@@ -487,15 +487,11 @@ export interface PrConversationItem {
 // every reviewer signal — local user comment, AI note, teammate verdict,
 // agent reply, agent-started top-level comment — in one shape.
 
-/** What the interaction attaches to. Topology, not intent. */
-export type InteractionTarget =
-  | "line"
-  | "block"
-  | "reply-to-ai-note"
-  | "reply-to-hunk-summary"
-  | "reply-to-teammate"
-  | "reply-to-user"
-  | "reply-to-agent";
+/** What the interaction attaches to. Topology, not intent.
+ *  `reply` covers replies to any parent — the parent's provenance is recoverable
+ *  from the `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` /
+ *  `block:`) and the head interaction's `authorRole`. */
+export type InteractionTarget = "line" | "block" | "reply";
 
 /** Asks start a thread on code, or restate the thread's ask in a reply. */
 export type AskIntent = "comment" | "question" | "request" | "blocker";
@@ -556,7 +552,7 @@ export function isResponseIntent(i: InteractionIntent): i is ResponseIntent {
 
 /**
  * Validity rule: response intents only ever attach to other interactions
- * (every `reply-to-*` target). Asks attach to code (`line`/`block`) or to
+ * (i.e. the `reply` target). Asks attach to code (`line`/`block`) or to
  * other interactions.
  */
 export function isValidInteractionPair(

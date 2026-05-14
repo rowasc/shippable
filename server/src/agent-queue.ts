@@ -6,14 +6,7 @@ import { randomUUID } from "node:crypto";
 // mirrors `web/src/types.ts#Interaction` minus the fields the wire doesn't
 // need (anchor*, runRecipe, queue bookkeeping).
 
-export type InteractionTarget =
-  | "line"
-  | "block"
-  | "reply-to-ai-note"
-  | "reply-to-teammate"
-  | "reply-to-hunk-summary"
-  | "reply-to-user"
-  | "reply-to-agent";
+export type InteractionTarget = "line" | "block" | "reply";
 
 export type AskIntent = "comment" | "question" | "request" | "blocker";
 export type ResponseIntent = "ack" | "unack" | "accept" | "reject";
@@ -150,18 +143,6 @@ export function listDelivered(worktreePath: string): DeliveredInteraction[] {
   return entry.delivered.slice();
 }
 
-/** Look up a delivered interaction's target (for inferring the reply's
- *  target on post). Returns null when the id isn't a delivered one. */
-export function lookupDeliveredTarget(
-  worktreePath: string,
-  id: string,
-): InteractionTarget | null {
-  const entry = queues.get(worktreePath);
-  if (!entry) return null;
-  const hit = entry.delivered.find((d) => d.id === id);
-  return hit?.target ?? null;
-}
-
 export function unenqueue(worktreePath: string, id: string): boolean {
   const entry = queues.get(worktreePath);
   if (!entry) return false;
@@ -275,32 +256,11 @@ export type AgentReplyWireItem =
       postedAt: string;
     };
 
-/** Derive the response's target from the parent interaction's target.
- *  Used both server-side (here) and client-side to keep targets uniform. */
-export function targetForReplyTo(parentTarget: InteractionTarget): InteractionTarget {
-  switch (parentTarget) {
-    case "line":
-    case "block":
-    case "reply-to-user":
-      return "reply-to-user";
-    case "reply-to-ai-note":
-      return "reply-to-ai-note";
-    case "reply-to-hunk-summary":
-      return "reply-to-hunk-summary";
-    case "reply-to-teammate":
-      return "reply-to-teammate";
-    case "reply-to-agent":
-      return "reply-to-agent";
-  }
-}
-
 export function listReplies(worktreePath: string): AgentReplyWireItem[] {
   const list = replyStore.get(worktreePath);
   if (!list) return [];
   return list.map((r): AgentReplyWireItem => {
     if ("parentId" in r) {
-      const parentTarget =
-        lookupDeliveredTarget(worktreePath, r.parentId) ?? "line";
       return {
         id: r.id,
         parentId: r.parentId,
@@ -308,7 +268,7 @@ export function listReplies(worktreePath: string): AgentReplyWireItem[] {
         intent: r.intent,
         author: r.agentLabel ?? "agent",
         authorRole: "agent",
-        target: targetForReplyTo(parentTarget),
+        target: "reply",
         postedAt: r.postedAt,
       };
     }

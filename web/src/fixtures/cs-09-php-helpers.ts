@@ -226,7 +226,7 @@ export const INTERACTIONS_09: Record<string, Interaction[]> = {
     {
       id: "r-09-1",
       threadKey: lineNoteReplyKey(H1_ID, 4),
-      target: "reply-to-ai-note",
+      target: "reply",
       intent: "comment",
       author: "marco",
       authorRole: "user",

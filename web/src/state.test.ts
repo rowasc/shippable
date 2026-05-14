@@ -8,7 +8,7 @@ import {
   initialState,
   mergeInteractionMaps,
   reducer,
-  replyTargetForKey,
+  replyTarget,
   reviewedFilesCount,
   selectAckedNotes,
 } from "./state";
@@ -56,7 +56,7 @@ function mkUserInteraction(
   return {
     id: literal.id,
     threadKey,
-    target: isFirst ? firstTargetForKey(threadKey) : replyTargetForKey(threadKey),
+    target: isFirst ? firstTargetForKey(threadKey) : replyTarget(),
     intent: "comment",
     author: literal.author,
     authorRole: "user",
@@ -1317,7 +1317,7 @@ describe("MERGE_AGENT_REPLIES", () => {
       intent,
       author: "agent",
       authorRole: "agent",
-      target: "reply-to-user",
+      target: "reply",
       postedAt: args.postedAt,
     };
   }

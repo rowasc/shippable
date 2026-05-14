@@ -50,7 +50,7 @@ export function deriveCommentPayload(
       // stale hunk: caller should skip enqueueing.
       if (typeof lineNo !== "number") return null;
       const target: InteractionTarget =
-        prefix === "note" ? "reply-to-ai-note" : "line";
+        prefix === "note" ? "reply" : "line";
       return { target, file: located.file.path, lines: String(lineNo) };
     }
     case "block": {
@@ -80,12 +80,12 @@ export function deriveCommentPayload(
     case "hunkSummary": {
       const located = locateHunk(cs, rest);
       if (!located) return null;
-      return { target: "reply-to-hunk-summary", file: located.file.path };
+      return { target: "reply", file: located.file.path };
     }
     case "teammate": {
       const located = locateHunk(cs, rest);
       if (!located) return null;
-      return { target: "reply-to-teammate", file: located.file.path };
+      return { target: "reply", file: located.file.path };
     }
     default:
       return null;

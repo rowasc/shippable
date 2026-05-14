@@ -159,7 +159,7 @@ describe("useDeliveredPolling — polling lifecycle", () => {
       intent: "accept",
       author: "agent",
       authorRole: "agent",
-      target: "reply-to-user",
+      target: "reply",
       postedAt,
     });
 
@@ -216,7 +216,7 @@ describe("useDeliveredPolling — polling lifecycle", () => {
           intent: "accept",
           author: "agent",
           authorRole: "agent",
-          target: "reply-to-user",
+          target: "reply",
           postedAt: "2026-05-06T12:01:00.000Z",
         },
       ])
@@ -252,7 +252,7 @@ describe("useDeliveredPolling — polling lifecycle", () => {
           intent: "accept",
           author: "agent",
           authorRole: "agent",
-          target: "reply-to-user",
+          target: "reply",
           postedAt: "2026-05-06T12:01:00.000Z",
         },
       ],

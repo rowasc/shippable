@@ -538,7 +538,7 @@ Inline marker shortcuts at the very start of the body auto-select intent (the pi
 | 7. PR-comments-to-agent gesture | ⚠️ partial | `enqueueOptIn` field exists on `Interaction` (types.ts) but the changeset-header gesture / UI isn't confirmed |
 | 8. Cross-thread aggregation surface (inbox) | ❌ not shipped | out of scope of this plan, but flagging for completeness |
 
-The **target collapse** (`reply-to-*` → `reply`) and **role collapse** (`user` + `teammate` → `human`; `agent` stays distinct) proposed elsewhere in this doc are also not yet implemented in code — `web/src/types.ts:491-498` still has the 7-value `InteractionTarget`; `:511` still has the 4-value `InteractionAuthorRole`. Those collapses are forward-looking design notes, *not* a record of what landed.
+The **target collapse** (`reply-to-*` → `reply`) has shipped — `InteractionTarget` in `web/src/types.ts` and `server/src/agent-queue.ts` is now the 3-value union `"line" | "block" | "reply"`, and consumers derive parent provenance from the `threadKey` prefix and the head's `authorRole` instead. The **role collapse** (`user` + `teammate` → `human`; `agent` stays distinct) is still a forward-looking design note — `InteractionAuthorRole` retains its current values in code.
 
 Each slice is independently shippable. Slice 0 was a hard precondition for the original sequence; that's been satisfied.
 

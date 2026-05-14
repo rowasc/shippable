@@ -6,7 +6,7 @@ import {
   fileCoverage,
   firstTargetForKey,
   isAckedByMe,
-  replyTargetForKey,
+  replyTarget,
   reviewedFilesCount,
   selectAckedNotes,
 } from "../state";
@@ -1331,7 +1331,7 @@ export function ReviewWorkspace({
               const interaction: Interaction = {
                 id: interactionId,
                 threadKey: key,
-                target: isFirst ? firstTargetForKey(key) : replyTargetForKey(key),
+                target: isFirst ? firstTargetForKey(key) : replyTarget(),
                 intent: "comment",
                 author: "you",
                 authorRole: "user",

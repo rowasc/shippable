@@ -48,10 +48,10 @@ const cs: ChangeSet = {
 };
 
 describe("deriveCommentPayload", () => {
-  it("note: → reply-to-ai-note + file:line", () => {
+  it("note: → reply + file:line", () => {
     const out = deriveCommentPayload(lineNoteReplyKey(HUNK_ID, 2), cs);
     expect(out).toEqual({
-      target: "reply-to-ai-note",
+      target: "reply",
       file: FILE_PATH,
       lines: "102",
     });
@@ -76,18 +76,18 @@ describe("deriveCommentPayload", () => {
     expect(out).toEqual({ target: "block", file: FILE_PATH, lines: "102" });
   });
 
-  it("hunkSummary: → reply-to-hunk-summary, no lines", () => {
+  it("hunkSummary: → reply, no lines", () => {
     const out = deriveCommentPayload(hunkSummaryReplyKey(HUNK_ID), cs);
     expect(out).toEqual({
-      target: "reply-to-hunk-summary",
+      target: "reply",
       file: FILE_PATH,
     });
     expect(out?.lines).toBeUndefined();
   });
 
-  it("teammate: → reply-to-teammate, no lines", () => {
+  it("teammate: → reply, no lines", () => {
     const out = deriveCommentPayload(teammateReplyKey(HUNK_ID), cs);
-    expect(out).toEqual({ target: "reply-to-teammate", file: FILE_PATH });
+    expect(out).toEqual({ target: "reply", file: FILE_PATH });
     expect(out?.lines).toBeUndefined();
   });
 
