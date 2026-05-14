@@ -52,6 +52,7 @@ import type {
   ChangeSet,
   Cursor,
   DetachedInteraction,
+  DiffFile,
   EvidenceRef,
   Interaction,
   PrSource,
@@ -80,6 +81,7 @@ import type { RecentSource } from "../recents";
 import { loadGithubPr, GithubFetchError } from "../githubPrClient";
 import { GitHubTokenModal } from "./GitHubTokenModal";
 import { isTauri, keychainGet } from "../keychain";
+import { fetchFileAt } from "../fileAt";
 import {
   buildDiffViewModel,
   buildSidebarViewModel,
@@ -170,10 +172,52 @@ export function ReviewWorkspace({
 
   const runControllersRef = useRef<Map<string, AbortController>>(new Map());
   const mouseTipTimeoutRef = useRef<number | null>(null);
+  // Per-(csId,fileId) in-flight hydration promises. Memoised across renders
+  // so racing clicks coalesce into one fetch instead of N.
+  const hydrationPromisesRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const cs = state.changesets.find((c) => c.id === state.cursor.changesetId)!;
   const file = cs.files.find((f) => f.id === state.cursor.fileId)!;
   const hunk = file.hunks.find((h) => h.id === state.cursor.hunkId)!;
+
+  // Lazy-fetch post-change source for files the worktree-changeset endpoint
+  // didn't ship content for (everything but `.md` today). The wt-source +
+  // non-deleted gates mirror the optimistic affordances the view model
+  // shows; without them this is a no-op.
+  async function ensureFileHydrated(target: DiffFile): Promise<void> {
+    if (target.fullContent) return;
+    if (target.status === "deleted") return;
+    const source = cs.worktreeSource;
+    if (!source) return;
+    const key = `${cs.id}:${target.id}`;
+    let p = hydrationPromisesRef.current.get(key);
+    if (!p) {
+      p = (async () => {
+        const content = await fetchFileAt({
+          worktreePath: source.worktreePath,
+          sha: source.commitSha,
+          file: target.path,
+        });
+        dispatch({
+          type: "HYDRATE_FILE",
+          changesetId: cs.id,
+          fileId: target.id,
+          postChangeText: content,
+        });
+      })().catch((err) => {
+        // Swallow — the optimistic bar will keep showing and the user can
+        // try again. Surfacing a banner here would be louder than the bug
+        // (a binary file being clicked on, say); a console line is enough.
+        console.warn(`[expand-hunks] hydration failed for ${target.path}:`, err);
+      }).finally(() => {
+        hydrationPromisesRef.current.delete(key);
+      });
+      hydrationPromisesRef.current.set(key, p);
+    }
+    await p;
+  }
+  const canHydrateExpansion =
+    !!cs.worktreeSource && file.status !== "deleted" && !file.fullContent;
   const line = hunk.lines[state.cursor.lineIdx];
   const symbolIndex = buildSymbolIndex(cs);
   const clickableSymbols = new Set(symbolIndex.keys());
@@ -1151,13 +1195,16 @@ export function ReviewWorkspace({
               imageAssets: cs.imageAssets,
               selection: state.selection,
               signals: ingestSignals,
+              canHydrateExpansion,
             })}
-            onSetExpandLevel={(hunkId, dir, level) =>
-              dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level })
-            }
-            onToggleExpandFile={(fileId) =>
-              dispatch({ type: "TOGGLE_EXPAND_FILE", fileId })
-            }
+            onSetExpandLevel={async (hunkId, dir, level) => {
+              await ensureFileHydrated(file);
+              dispatch({ type: "SET_EXPAND_LEVEL", hunkId, dir, level });
+            }}
+            onToggleExpandFile={async (fileId) => {
+              await ensureFileHydrated(file);
+              dispatch({ type: "TOGGLE_EXPAND_FILE", fileId });
+            }}
             onTogglePreviewFile={(fileId) =>
               dispatch({ type: "TOGGLE_PREVIEW_FILE", fileId })
             }

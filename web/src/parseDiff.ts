@@ -1,4 +1,5 @@
 import { buildDiffCodeGraph } from "./codeGraph";
+import { enrichWithFileContent } from "./expandContext";
 import type { ChangeSet, CodeGraph, DiffFile, DiffLine, FileStatus, Hunk } from "./types";
 
 /**
@@ -49,7 +50,8 @@ export function parseDiff(
       const { file, next } = parseFile(lines, i, meta.id);
       if (file) {
         const extra = meta.fileContents?.[file.path];
-        parsedFiles.push(extra ? { ...file, postChangeText: extra } : file);
+        const withText = extra ? { ...file, postChangeText: extra } : file;
+        parsedFiles.push(extra ? enrichWithFileContent(withText, extra) : withText);
       }
       i = next;
     } else {

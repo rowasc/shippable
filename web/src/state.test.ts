@@ -923,6 +923,95 @@ describe("RELOAD_CHANGESET", () => {
   });
 });
 
+// ── HYDRATE_FILE ───────────────────────────────────────────────────────────
+
+describe("HYDRATE_FILE", () => {
+  it("populates fullContent and per-hunk expand blocks from post-change text", () => {
+    const fileText = [
+      "// header",
+      "",
+      "function alpha() {",
+      "  return 1;",
+      "}",
+      "",
+      "function beta() {",
+      "  return 2;",
+      "}",
+      "",
+      "// footer",
+    ].join("\n");
+    // Hunk targets line 7-9 (`function beta() { ... }`); plenty of room
+    // above and below in the post-change file.
+    const cs: ChangeSet = makeChangeset("cs-h", [
+      {
+        id: "cs-h/x.ts",
+        path: "x.ts",
+        language: "ts",
+        status: "modified",
+        hunks: [
+          {
+            id: "cs-h/x.ts#h1",
+            header: "@@ -7,3 +7,3 @@",
+            oldStart: 7,
+            oldCount: 3,
+            newStart: 7,
+            newCount: 3,
+            lines: [
+              { kind: "context", text: "function beta() {", oldNo: 7, newNo: 7 },
+              { kind: "context", text: "  return 2;", oldNo: 8, newNo: 8 },
+              { kind: "context", text: "}", oldNo: 9, newNo: 9 },
+            ],
+          },
+        ],
+      },
+    ]);
+    const s = reducer(initialState([cs]), {
+      type: "HYDRATE_FILE",
+      changesetId: "cs-h",
+      fileId: "cs-h/x.ts",
+      postChangeText: fileText,
+    });
+    const f = s.changesets[0].files[0];
+    expect(f.fullContent).toBeDefined();
+    expect(f.fullContent!.length).toBeGreaterThan(0);
+    expect(f.hunks[0].expandAbove?.length ?? 0).toBeGreaterThan(0);
+    expect(f.hunks[0].expandBelow?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("is a no-op when the file already has fullContent", () => {
+    const cs = defaultChangeset();
+    cs.files[0].fullContent = [{ kind: "context", text: "x", oldNo: 1, newNo: 1 }];
+    const before = initialState([cs]);
+    const s = reducer(before, {
+      type: "HYDRATE_FILE",
+      changesetId: "cs1",
+      fileId: "cs1/f1",
+      postChangeText: "irrelevant",
+    });
+    expect(s).toBe(before);
+  });
+
+  it("is a no-op when the changeset id doesn't match", () => {
+    const s = reducer(s0, {
+      type: "HYDRATE_FILE",
+      changesetId: "no-such-cs",
+      fileId: "cs1/f1",
+      postChangeText: "irrelevant",
+    });
+    expect(s).toBe(s0);
+  });
+
+  it("is a no-op when the file id doesn't match", () => {
+    const s = reducer(s0, {
+      type: "HYDRATE_FILE",
+      changesetId: "cs1",
+      fileId: "cs1/no-such-file",
+      postChangeText: "irrelevant",
+    });
+    expect(s).toBe(s0);
+  });
+});
+
 // ── DISMISS_GUIDE ──────────────────────────────────────────────────────────
 
 describe("DISMISS_GUIDE", () => {

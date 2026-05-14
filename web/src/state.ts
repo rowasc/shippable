@@ -21,6 +21,7 @@ import {
   userCommentKey,
 } from "./types";
 import { findAnchorInFile, hashAnchorWindow } from "./anchor";
+import { enrichWithFileContent } from "./expandContext";
 
 /**
  * Wire shape returned by `GET /api/agent/replies` — one envelope serves
@@ -199,6 +200,17 @@ export type Action =
     }
   | { type: "SET_EXPAND_LEVEL"; hunkId: string; dir: "above" | "below"; level: number }
   | { type: "TOGGLE_EXPAND_FILE"; fileId: string }
+  | {
+      // Replace a file in the active changeset with one enriched from
+      // post-change source. Lazy-fetched on first expand-bar / Source-tab
+      // click for files the worktree-changeset endpoint didn't ship content
+      // for (everything but `.md` today). No-op if the file is already
+      // hydrated or not found — safe to dispatch from a racing fetch.
+      type: "HYDRATE_FILE";
+      changesetId: string;
+      fileId: string;
+      postChangeText: string;
+    }
   | { type: "TOGGLE_PREVIEW_FILE"; fileId: string }
   | { type: "TOGGLE_FILE_REVIEWED"; fileId: string }
   | {
@@ -481,6 +493,24 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
     }
     case "TOGGLE_FILE_REVIEWED":
       return { ...state, reviewedFiles: togglein(state.reviewedFiles, action.fileId) };
+    case "HYDRATE_FILE": {
+      const csIdx = state.changesets.findIndex((c) => c.id === action.changesetId);
+      if (csIdx < 0) return state;
+      const cs = state.changesets[csIdx];
+      const fIdx = cs.files.findIndex((f) => f.id === action.fileId);
+      if (fIdx < 0) return state;
+      const file = cs.files[fIdx];
+      if (file.fullContent) return state;
+      const enriched = enrichWithFileContent(
+        { ...file, postChangeText: action.postChangeText },
+        action.postChangeText,
+      );
+      const newFiles = [...cs.files];
+      newFiles[fIdx] = enriched;
+      const newChangesets = [...state.changesets];
+      newChangesets[csIdx] = { ...cs, files: newFiles };
+      return { ...state, changesets: newChangesets };
+    }
     case "SET_SELECTION_RANGE": {
       // Drag is per-hunk; ignore moves that drift to a different hunk.
       if (action.hunkId !== state.cursor.hunkId) return state;
