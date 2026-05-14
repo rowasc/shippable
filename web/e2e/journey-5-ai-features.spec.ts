@@ -1,38 +1,39 @@
-// Journey 5 — AI features inside a review. The plan-overlay AI swap is
-// already covered by `scripts/smoke-boot-gate.mjs` (steps 3–5); the rest of
-// the journey (plan diagram, Inspector AI notes, code runner, prompt
-// library) is sketched here as fixmes. Each test names the mock surface
-// area it'll need.
+// Journey 5 — AI features inside a review. The plan path runs end to end:
+// real boot panel → real /api/plan → fake upstream (_lib/scripts/fake-
+// upstream.mjs). The rest (Inspector AI notes, code runner, prompt library)
+// is sketched here as fixmes. Each test names the mock surface area it needs.
 
 import {
   test,
   expect,
   expectWorkspaceLoaded,
+  expectBootCredentialsPanel,
   dismissPlanOverlay,
 } from "./_lib/fixtures";
-import { mockAuthList, mockPlanOk, mockReviewStream } from "./_lib/mocks";
+import { mockReviewStream } from "./_lib/mocks";
 
 test.describe("Journey 5 — AI features", () => {
-  test("plan overlay: Send to Claude swaps the rule-based plan for the mocked AI plan", async ({
+  test("plan: Send to Claude runs /api/plan through to the fake upstream", async ({
     visit,
     page,
   }) => {
-    await mockAuthList(page, [{ kind: "anthropic" }]);
-    await mockPlanOk(page, { headline: "Mocked AI plan headline" });
-    await visit("/?cs=42");
+    // Real path: store a key in the server via the boot panel, then let
+    // "Send to Claude" hit the real /api/plan — which calls the fake upstream
+    // and feeds its structured output back through the server's assemblePlan.
+    await page.unroute("**/api/auth/list"); // use the real auth store
+    await visit("/?cs=42", { skipAnthropic: false });
+    await expectBootCredentialsPanel(page);
+    await page.locator(".creds__input").fill("sk-ant-e2e-fake");
+    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
     await expectWorkspaceLoaded(page);
 
-    // Plan overlay is open by default with the rule-based headline. Capture
-    // it, click "Send to Claude", and assert the headline flips — proving the
-    // swap happened, not just that the end state matches the mock.
-    const headline = page.locator(".plan__headline");
-    await expect(headline).toBeVisible();
-    const ruleBased = (await headline.textContent())?.trim() ?? "";
-    expect(ruleBased).not.toBe("Mocked AI plan headline");
+    // The rule-based plan is open by default; Send to Claude swaps in the AI
+    // plan, whose intent claim carries the fake upstream's marker text.
+    await expect(page.locator(".plan__headline")).toBeVisible();
     await page
       .locator(".plan__h-btn", { hasText: "Send to Claude" })
       .click();
-    await expect(headline).toContainText("Mocked AI plan headline");
+    await expect(page.locator(".planview-overlay")).toContainText("FAKE-PLAN:");
   });
 
   test("free runner: Shift+R opens an empty one-off runner", async ({

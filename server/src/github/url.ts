@@ -8,6 +8,11 @@ export interface PrCoords {
 }
 
 export function resolveApiBase(host: string): string {
+  // Test-only override: the e2e suite points this at a local fake upstream so
+  // PR ingest exercises the real browser→server→upstream path without hitting
+  // github.com. Unset in every shipped configuration.
+  const override = process.env.SHIPPABLE_GITHUB_API_BASE;
+  if (override) return override;
   return host === "github.com"
     ? "https://api.github.com"
     : `https://${host}/api/v3`;
