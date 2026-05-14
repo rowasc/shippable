@@ -34,7 +34,7 @@ What this does **not** try to do (yet):
 
 We've been overloading `kind` for two unrelated things. We need to separate them before adding the intent axis.
 
-**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`human` / `ai` / `agent`) further discriminates author category. The target axis adds no information that isn't already addressable through those.
+**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`user` / `ai` / `agent`) further discriminates author category. The target axis adds no information that isn't already addressable through those.
 
 **Proposal:** rename that dimension to **`target`** — "what the interaction targets / attaches to" — and collapse it to three values: `"line"`, `"block"`, `"reply"`. `line` and `block` are fresh-thread anchors on code; `reply` is a reply to anything else. Consumers that need to discriminate "reply to what kind of parent?" read the `threadKey` prefix or the projected thread's head `authorRole` (see § Cross-thread aggregation). The minor cost of `target` is that `targetKey` already exists in the `ADD_REPLY` action; that's a small overload but actually consistent with the new field's meaning.
 
@@ -44,7 +44,7 @@ The umbrella name for both dimensions together is **interaction**.
 
 `ai` and `agent` stay as distinct roles even though both are non-human, because the renderers genuinely need to tell them apart. Static AI annotations render once in the Inspector card and are skipped from the thread row list (`ReplyThread.tsx:70`); the dialogue agent gets a dedicated `<AgentRow>` render with live-conversation affordances (`ReplyThread.tsx:99`). Collapsing them would mean recovering that distinction from a separate field (e.g. `author`), and the rendering split is too clean to give up.
 
-`user` and `teammate` *do* collapse to `human`. They're both people; the distinction was "live local authoring vs static teammate ingest," which is provenance — the `teammate:` `threadKey` prefix and the absence of an authored anchor already discriminate them. The per-file activity counter in `view.ts:489` (which today groups `user + agent` to exclude teammate-ingest from the badge count) and the Inspector-dedupe filter in `ReplyThread.tsx:70` will read `threadKey.startsWith("teammate:")` instead. One extra field to check; mirrors the same provenance-not-role argument we made for `target`.
+`user` and `teammate` *do* collapse. They're both people; the distinction was "live local authoring vs static teammate ingest," which is provenance — the `teammate:` `threadKey` prefix already discriminates them. We keep the role name `"user"` (it predates this plan and renaming to `"human"` would have triggered ~70 literal-string edits across 22 files for no semantic gain). The per-file activity counter in `view.ts` and the Inspector-dedupe filter in `ReplyThread.tsx:70` now read the teammate-thread head structurally (`key.startsWith("teammate:") && ix.target !== "reply"`) instead of switching on the old `authorRole === "teammate"` value. Same provenance-not-role argument we made for `target`.
 
 So:
 
@@ -174,7 +174,7 @@ At the **render seam** (the view layer in `view.ts`), a uniform `Interaction[]` 
 interface Interaction {
   id: string;
   author: string;
-  authorRole: "human" | "ai" | "agent";
+  authorRole: "user" | "ai" | "agent";
   intent: InteractionIntent;
   target: InteractionTarget;
   threadKey: string;        // existing reply-key
@@ -212,7 +212,7 @@ function selectInteractions(state: ReviewState): {
   byThreadKey: Record<string, Interaction[]>;
   threads: Array<{
     threadKey: string;
-    headAuthorRole: "human" | "ai" | "agent";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
+    headAuthorRole: "user" | "ai" | "agent";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
     currentAsk: AskIntent;             // derived: latest ask-intent reply
     originalAsk: AskIntent;            // derived: interactions[0].intent (always an ask)
     currentResponse: Exclude<ResponseIntent, "unack"> | null;  // derived: thread-level rollup; `unack` cancels and resolves to null
@@ -377,7 +377,7 @@ Per-element attribute set:
 | `target`      | yes      | `InteractionTarget` (see Naming section)               | replaces the old `kind` attribute                                     |
 | `intent`      | yes      | `InteractionIntent` (see Naming section)               | new                                                                   |
 | `author`      | yes      | display name                                           | specific actor — local reviewer, PR reviewer, teammate ingest, static-AI pipeline, dialogue agent, etc. |
-| `authorRole`  | yes      | `"human" \| "ai" \| "agent"`                           | category of actor; local reviewers, PR-imported reviewers, and teammate-ingest reviews are all `human` (provenance lives in `threadKey` and `author`); `ai` is the static annotation pipeline; `agent` is the live dialogue agent |
+| `authorRole`  | yes      | `"user" \| "ai" \| "agent"`                            | category of actor; local reviewers, PR-imported reviewers, and teammate-ingest reviews are all `user` (provenance lives in `threadKey` and `author`); `ai` is the static annotation pipeline; `agent` is the live dialogue agent |
 | `file`        | yes      | repo-relative path                                     | (unchanged)                                                            |
 | `lines`       | when relevant | line or range as today                            | omitted for thread-level interactions where lines don't apply         |
 | `htmlUrl`     | when PR-sourced | `external.htmlUrl`                                | provenance link back to GitHub                                        |
@@ -387,33 +387,33 @@ Per-element attribute set:
 ```xml
 <reviewer-feedback from="shippable" commit="<sha>">
   <interaction id="cmt_3f7a91" target="block" intent="request"
-               author="@romina" authorRole="human"
+               author="@romina" authorRole="user"
                file="server/src/queue.ts" lines="72-79">
     The atomic-ish rename here only avoids torn reads, not concurrent
     writers…
   </interaction>
   <interaction id="cmt_b22c04" target="reply" intent="comment"
-               author="@romina" authorRole="human"
+               author="@romina" authorRole="user"
                file="web/src/state.ts" lines="118">
     AI note said this branch was unreachable. It's reachable from the
     keymap handler…
   </interaction>
   <interaction id="cmt_a91e02" target="reply" intent="ack"
-               author="@romina" authorRole="human"
+               author="@romina" authorRole="user"
                file="web/src/parseDiff.ts" lines="42" />
   <interaction id="cmt_d1e8f3" target="reply" intent="accept"
-               author="@romina" authorRole="human"
+               author="@romina" authorRole="user"
                file="server/src/queue.ts" lines="72-79">
     Good catch — switching to a write lock in 5b8a2c1.
   </interaction>
   <interaction id="cmt_pr_99f1" target="reply" intent="request"
-               author="external-reviewer" authorRole="human"
+               author="external-reviewer" authorRole="user"
                htmlUrl="https://github.com/org/repo/pull/123#discussion_r4242"
                file="server/src/queue.ts" lines="72-79">
     Same concern from the PR — please add a smoke test before merge.
   </interaction>
   <interaction id="cmt_e7f209" target="reply" intent="reject"
-               author="@romina" authorRole="human"
+               author="@romina" authorRole="user"
                file="web/src/state.ts" lines="118">
     Disagree — this branch is reachable from the keymap handler at line 240.
     See REPL transcript: <agentRunId>r_19f4</agentRunId>.
@@ -499,7 +499,7 @@ GitHub PR reviews carry a *review-level* verdict alongside per-thread comments: 
 
 `APPROVE` is reserved for an explicit reviewer action (a future affordance — single-button "approve PR" at the workspace level). The plan doesn't try to derive `APPROVE` from intent counts, because "all threads acked" and "all threads accepted" both seem to qualify but neither is necessarily a positive endorsement of the PR as a whole.
 
-This is push-only — local `currentAsk` does not change because someone clicked Approve on GitHub. PR-level verdict ingest goes the other way: ingested PR reviews surface as their own kind of interaction with `authorRole: "human"` and `target: "reply"`, body = the review summary text, intent derived from the GitHub verdict (approve → `accept` at PR level; request_changes → `blocker`; comment → `comment`).
+This is push-only — local `currentAsk` does not change because someone clicked Approve on GitHub. PR-level verdict ingest goes the other way: ingested PR reviews surface as their own kind of interaction with `authorRole: "user"` and `target: "reply"`, body = the review summary text, intent derived from the GitHub verdict (approve → `accept` at PR level; request_changes → `blocker`; comment → `comment`).
 
 ## Keybindings (best-practice revision)
 
@@ -538,7 +538,7 @@ Inline marker shortcuts at the very start of the body auto-select intent (the pi
 | 7. PR-comments-to-agent gesture | ⚠️ partial | `enqueueOptIn` field exists on `Interaction` (types.ts) but the changeset-header gesture / UI isn't confirmed |
 | 8. Cross-thread aggregation surface (inbox) | ❌ not shipped | out of scope of this plan, but flagging for completeness |
 
-The **target collapse** (`reply-to-*` → `reply`) has shipped — `InteractionTarget` in `web/src/types.ts` and `server/src/agent-queue.ts` is now the 3-value union `"line" | "block" | "reply"`, and consumers derive parent provenance from the `threadKey` prefix and the head's `authorRole` instead. The **role collapse** (`user` + `teammate` → `human`; `agent` stays distinct) is still a forward-looking design note — `InteractionAuthorRole` retains its current values in code.
+Both the **target collapse** (`reply-to-*` → `reply`) and the **role collapse** (drop `teammate`, fold into `user`) have shipped. `InteractionTarget` is now `"line" | "block" | "reply"` and `InteractionAuthorRole` is `"user" | "ai" | "agent"` across `web/src/types.ts` and `server/src/agent-queue.ts`. Consumers that previously switched on the old enum values now read the `threadKey` prefix and the head-vs-reply target — see `view.ts#buildCommentCounts` and `ReplyThread.tsx` for the canonical examples of the migration.
 
 Each slice is independently shippable. Slice 0 was a hard precondition for the original sequence; that's been satisfied.
 
@@ -585,7 +585,7 @@ Pinning these before any code:
 - **Selector cost.** The cross-thread aggregation walks every interaction on every render. Mitigation: memoize on `(changesetId, repliesRevision, ackedNotesRevision)`, with the two revision counters maintained by the reducer (added in slice 1; see § Cross-thread aggregation). Slice 1 ships with a benchmark on a 200-thread fixture; if it regresses re-render perf, we move the selector to `useMemo` per consumer.
 - **Wire rename is a breaking change for any in-flight agent session.** The MCP server is in-tree and updates atomically with the rest of the surface; existing in-memory queues are dropped on server restart anyway. The risk is small and we accept it.
 - **Render code that switched on the old `reply-to-*` variants** (badges differentiating ai-note vs hunk-summary vs teammate vs user threads) must switch to the projected thread's `headAuthorRole` or the `threadKey` prefix instead. The slice-0 reducer tests of the threadKey conventions (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) catch any seam that's still doing the old switch.
-- **Render code that switched on `authorRole === "teammate"`** has to drop to `threadKey.startsWith("teammate:")` instead. Concretely: `view.ts:489` (per-file activity counter, today `user || agent`, becomes "`agent` plus `human` whose threadKey isn't teammate-sourced") and `ReplyThread.tsx:70` (Inspector dedupe, today `ai || teammate`, becomes "`ai` or threadKey starts with `teammate:`"). The slice-0 reducer tests of the threadKey conventions catch any seam that misses the migration. `agent` stays as a distinct role; nothing changes there.
+- **Render code that switched on `authorRole === "teammate"`** has been migrated. `view.ts#buildCommentCounts` (per-file activity counter) now skips a `teammate:` thread's head structurally — `agent` always counts; `user` counts unless it's the non-reply head on a `teammate:` key. `ReplyThread.tsx:70` (Inspector dedupe) follows the same pattern. `agent` stays a distinct role; nothing changes there.
 
 ## Docs to update when implementation lands
 
