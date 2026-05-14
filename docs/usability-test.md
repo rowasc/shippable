@@ -14,7 +14,7 @@ This is a **dual-track** script. Each step is tagged:
 
 ### Tracks
 
-- **Automated sweep (web)** — `cd web && npm run test:e2e`. The Playwright suite under `web/e2e/` covers the `[auto]` and `[mixed]` steps below as one spec file per journey; mock `/api/*` endpoints per-test via `page.route()` (see `web/e2e/README.md`). Coverage is partial and growing — some steps are live, others are stubbed as `test.fixme()`, and a few aren't represented yet; `web/e2e/README.md`'s per-journey table is the source of truth for what's actually covered.
+- **Automated sweep (web)** — `cd web && npm run test:e2e`. The Playwright suite under `web/e2e/` covers the `[auto]` and `[mixed]` steps below as one spec file per journey. It runs the real `server/` with its Anthropic + GitHub calls pointed at a local fake upstream, so the browser→server→upstream path runs for real (see `web/e2e/README.md`). Coverage is partial — the suite hits the core of each journey, not every individual step — so treat it as a fast regression net, not a replacement for this script.
 - **Manual pass (desktop)** — packaged DMG (`npm run tauri:build`) or `cargo tauri dev`. Run every `[manual]` and `[mixed]` step.
 
 Don't claim a release is good on the automated sweep alone — the Keychain, sidecar, native dialogs, FindBar, and webview zoom only exist in the desktop pass. The folder picker is **macOS-only** (the server uses `osascript`); Linux/Windows runners need to fall back to the "paste path instead" affordance.

@@ -158,6 +158,10 @@ function handleGithub(req, res, url) {
   );
   if (pull) {
     const [, owner, repo, number, sub] = pull;
+    // Owner-keyed trigger: lets a test exercise the rejected-token path.
+    if (owner === "rejected-token") {
+      return json(res, 401, { message: "Bad credentials" });
+    }
     if (sub === "/files") {
       return json(res, 200, [
         { filename: "src/prefs.ts", status: "modified", patch: PR_PATCH },

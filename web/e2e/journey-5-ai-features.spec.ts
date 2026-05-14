@@ -1,31 +1,28 @@
-// Journey 5 — AI features inside a review. The plan path runs end to end:
-// real boot panel → real /api/plan → fake upstream (_lib/scripts/fake-
-// upstream.mjs). The rest (Inspector AI notes, code runner, prompt library)
-// is sketched here as fixmes. Each test names the mock surface area it needs.
+// Journey 5 — AI features inside a review. The plan + prompt-run paths run end
+// to end: real boot panel → real /api/plan + /api/review → fake upstream
+// (scripts/fake-upstream.mjs). Inspector notes and the code runner are
+// hermetic (cs-42 ships AI notes; the WASM runner is client-side). The
+// rate-limit branch page.route()s a 429 — a failure mode that's impractical to
+// trigger for real.
 
 import {
   test,
   expect,
   expectWorkspaceLoaded,
-  expectBootCredentialsPanel,
+  ensureAnthropicConfigured,
   dismissPlanOverlay,
 } from "./_lib/fixtures";
-import { mockReviewStream } from "./_lib/mocks";
+import { mockAuthList } from "./_lib/mocks";
 
 test.describe("Journey 5 — AI features", () => {
   test("plan: Send to Claude runs /api/plan through to the fake upstream", async ({
     visit,
     page,
   }) => {
-    // Real path: store a key in the server via the boot panel, then let
-    // "Send to Claude" hit the real /api/plan — which calls the fake upstream
-    // and feeds its structured output back through the server's assemblePlan.
-    await page.unroute("**/api/auth/list"); // use the real auth store
-    await visit("/?cs=42", { skipAnthropic: false });
-    await expectBootCredentialsPanel(page);
-    await page.locator(".creds__input").fill("sk-ant-e2e-fake");
-    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
-    await expectWorkspaceLoaded(page);
+    // Real path: a key in the server's auth store, then let "Send to Claude"
+    // hit the real /api/plan — which calls the fake upstream and feeds its
+    // structured output back through the server's assemblePlan.
+    await ensureAnthropicConfigured(page, visit);
 
     // The rule-based plan is open by default; Send to Claude swaps in the AI
     // plan, whose intent claim carries the fake upstream's marker text.
@@ -52,26 +49,97 @@ test.describe("Journey 5 — AI features", () => {
     await expect(runner.locator(".coderunner__lang")).toBeVisible();
   });
 
-  test.fixme("Inspector AI notes: a/r toggle ack and add reply", async () => {
-    // Needs /api/review or a server-side AI-notes endpoint mocked with at
-    // least one note keyed to a hunk in cs-42. Walk to the line, press `a`,
-    // assert ack state flips. Press `r`, type, submit, assert reply renders.
-    void mockReviewStream;
+  test("Inspector AI notes: a acks, r opens a reply composer", async ({
+    visit,
+    page,
+  }) => {
+    // cs-42 ships AI notes — no AI call needed. `n` jumps the cursor to the
+    // first note-bearing line; the a/r keymaps only fire on `lineHasAiNote`.
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    await page.keyboard.press("n");
+    const cursor = page.locator(".line--cursor");
+    await expect(cursor).toHaveClass(/line--ai-/);
+
+    // `a` toggles the note's ack state on the line; pressing it again clears.
+    await page.keyboard.press("a");
+    await expect(cursor).toHaveClass(/line--ai-acked/);
+    await page.keyboard.press("a");
+    await expect(cursor).not.toHaveClass(/line--ai-acked/);
+
+    // `r` opens the reply composer in the Inspector.
+    await page.keyboard.press("r");
+    await expect(page.locator(".inspector .composer__input")).toBeVisible();
   });
 
-  test.fixme("prompt picker: / opens; running a prompt streams via /api/review", async () => {
-    // Needs /api/prompts mocked to return ≥1 prompt. Press `/`, pick the
-    // first, assert a run row appears and transitions streaming → done.
+  test("code runner: e opens the inline runner on a TS hunk", async ({
+    visit,
+    page,
+  }) => {
+    // cs-42's first file is a .ts file; `e` runs the current hunk.
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    await page.keyboard.press("e");
+    const runner = page.locator(".coderunner--open");
+    await expect(runner).toBeVisible();
+    await expect(runner.locator(".coderunner__lang")).toBeVisible();
   });
 
-  test.fixme("code runner: e runs the current JS/TS hunk inline", async () => {
-    // Load cs-09-php or a TS fixture; press `e`; assert .runner appears
-    // pre-filled. (Sandbox crash failure-branch is covered by the existing
-    // coderunner-sandbox smoke.)
+  test("prompt picker: / opens it; running a prompt streams via /api/review", async ({
+    visit,
+    page,
+  }) => {
+    // Real path: a key configured, open the picker (real prompt library), run
+    // the first built-in prompt — /api/review streams from the fake upstream.
+    await ensureAnthropicConfigured(page, visit);
+    await dismissPlanOverlay(page);
+
+    await page.keyboard.press("/");
+    await expect(page.locator(".picker__search")).toBeVisible();
+    await page.locator(".picker__item").first().click();
+    await page.locator(".modal__btn--primary", { hasText: "run" }).click();
+
+    // The run row appears and settles streaming… → done; expanding it shows
+    // the fake upstream's streamed marker text.
+    const run = page.locator(".promptrun").first();
+    await expect(run.locator(".promptrun__status")).toHaveText("done", {
+      timeout: 10_000,
+    });
+    await run.locator(".promptrun__head").click();
+    await expect(run.locator(".promptrun__body")).toContainText("FAKE-REVIEW:");
   });
 
-  test.fixme("rate-limit response renders a clear message", async () => {
-    // Mock /api/review to return 429 with the rate-limit discriminator;
-    // assert the run row surfaces the rate-limit copy without crashing.
+  test("rate-limit: a 429 from /api/review surfaces a clear error", async ({
+    visit,
+    page,
+  }) => {
+    // page.route() the 429 — the server's per-IP rate limit is impractical to
+    // trip in a test, and this exercises the client's error rendering.
+    await mockAuthList(page, [{ kind: "anthropic" }]);
+    await page.route("**/api/review", (route) =>
+      route.fulfill({
+        status: 429,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "rate limit exceeded" }),
+      }),
+    );
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    await page.keyboard.press("/");
+    await expect(page.locator(".picker__search")).toBeVisible();
+    await page.locator(".picker__item").first().click();
+    await page.locator(".modal__btn--primary", { hasText: "run" }).click();
+
+    const run = page.locator(".promptrun").first();
+    await expect(run.locator(".promptrun__status--error")).toBeVisible();
+    // The error detail lives in the expanded body.
+    await run.locator(".promptrun__head").click();
+    await expect(run.locator(".promptrun__err")).toContainText("429");
   });
 });

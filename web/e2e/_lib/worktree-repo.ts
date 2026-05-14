@@ -87,3 +87,18 @@ export function createWorktreeRepo(): FixtureRepo {
     cleanup: () => rmSync(path, { recursive: true, force: true }),
   };
 }
+
+/** Land a fresh commit in an existing fixture repo — used to trip the
+ *  worktree live-reload poll mid-test. */
+export function addCommit(repoPath: string): void {
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: repoPath, stdio: "pipe" });
+  writeFileSync(
+    join(repoPath, "greeting.ts"),
+    GREETING_UNCOMMITTED.replace(
+      'export const DEFAULT_NAME = "everyone";',
+      'export const DEFAULT_NAME = "the whole team";',
+    ),
+  );
+  git("commit", "-am", "Widen the default greeting");
+}

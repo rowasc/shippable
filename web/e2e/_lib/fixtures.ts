@@ -17,7 +17,12 @@ export interface VisitOpts {
   skipAnthropic?: boolean;
 }
 
-export const test = base.extend<AppFixture & { visit: (path?: string, opts?: VisitOpts) => Promise<void> }>({
+export const test = base.extend<
+  AppFixture & {
+    visit: (path?: string, opts?: VisitOpts) => Promise<void>;
+    autoClearServerAuth: void;
+  }
+>({
   visit: async ({ page }, use) => {
     // Default boot mocks. Tests that exercise the unhealthy path call
     // `mockHealthDown(page)` BEFORE `visit()` — page.route order matters and
@@ -38,6 +43,18 @@ export const test = base.extend<AppFixture & { visit: (path?: string, opts?: Vis
       await page.goto(path);
     });
   },
+
+  // Auto fixture: after every test, wipe the real server's in-memory auth
+  // store. It's shared across the whole run, so a credential one test stores
+  // would otherwise leak into the next (a test never seeing the token modal,
+  // a boot panel that doesn't re-show). Best-effort — see `clearServerAuth`.
+  autoClearServerAuth: [
+    async ({ page }, use) => {
+      await use();
+      await clearServerAuth(page);
+    },
+    { auto: true },
+  ],
 });
 
 export { expect };
@@ -77,4 +94,50 @@ export async function dismissPlanOverlay(page: Page): Promise<void> {
  *  won't match — open the kebab for those.) */
 export function topbarBtn(page: Page, label: string | RegExp): Locator {
   return page.locator(".topbar-actions > .topbar__btn", { hasText: label });
+}
+
+/** Ensure the real server has an Anthropic key configured, then land in the
+ *  workspace. The server's auth store is shared across the whole run, so a
+ *  prior test may have already configured one — in that case the boot panel
+ *  won't reshow and we just proceed. Drops the default `/api/auth/list` mock
+ *  so the real store drives the boot decision. */
+export async function ensureAnthropicConfigured(
+  page: Page,
+  visit: (path?: string, opts?: VisitOpts) => Promise<void>,
+  path = "/?cs=42",
+): Promise<void> {
+  await page.unroute("**/api/auth/list").catch(() => {});
+  await visit(path, { skipAnthropic: false });
+  const panel = page.locator(".boot-gate__box .creds");
+  // The gate resolves to either the boot panel (no key) or the workspace.
+  await Promise.race([
+    panel.waitFor({ state: "visible" }).catch(() => {}),
+    page.locator(".diff").waitFor({ state: "visible" }).catch(() => {}),
+  ]);
+  if (await panel.isVisible().catch(() => false)) {
+    await page.locator(".creds__input").fill("sk-ant-e2e-fake");
+    await page.locator(".creds__btn--primary", { hasText: "Save" }).click();
+  }
+  await expectWorkspaceLoaded(page);
+}
+
+/** Clear the real server's in-memory auth store. The store is shared across
+ *  the whole run, so tests that write to it (storing keys/tokens) must clean
+ *  up in `afterEach` — otherwise a later test inherits the credential and
+ *  e.g. never sees the token modal. Runs in-page so the request carries the
+ *  allowlisted vite Origin. */
+export async function clearServerAuth(page: Page): Promise<void> {
+  await page
+    .evaluate(async () => {
+      const clear = (credential: unknown) =>
+        fetch("/api/auth/clear", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ credential }),
+        }).catch(() => {});
+      await clear({ kind: "anthropic" });
+      await clear({ kind: "github", host: "github.com" });
+      await clear({ kind: "github", host: "ghe.example.com" });
+    })
+    .catch(() => {});
 }

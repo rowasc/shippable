@@ -48,10 +48,10 @@ The `webServer` block boots three processes:
 | File | Journey | Status |
 |---|---|---|
 | `journey-1-first-run.spec.ts` | Onboarding, boot gate, Settings | active |
-| `journey-2-worktree.spec.ts`  | Local worktree review (real server + fixture repo) | 3 active + fixmes |
-| `journey-3-github-pr.spec.ts` | GitHub PR review (real server + fake upstream) | 1 active + fixmes |
+| `journey-2-worktree.spec.ts`  | Local worktree review (real server + fixture repo) | active |
+| `journey-3-github-pr.spec.ts` | GitHub PR review (real server + fake upstream) | active |
 | `journey-4-paste-url.spec.ts` | Paste / URL / file diff | active |
-| `journey-5-ai-features.spec.ts` | Plan, prompts, runner, Inspector | 2 active + fixmes |
+| `journey-5-ai-features.spec.ts` | Plan, prompts, runner, Inspector | active |
 | `journey-6-cross-cutting.spec.ts` | Themes, palette, help, recents, standalone pages | active |
 | `_lib/fixtures.ts` | `test` extension w/ default mocks; `visit()` + `topbarBtn()` helpers | — |
 | `_lib/mocks.ts`    | Reusable `page.route()` handlers + sample diff | — |
@@ -104,11 +104,11 @@ The two suites are complementary, not redundant:
 
 - Folder-picker, FindBar, webview-zoom, packaged DMG behaviour are
   `[manual]` — they need a real Tauri shell and stay in
-  `docs/usability-test.md`'s manual track.
-- The fake upstream serves one happy-path PR and one plan/review
-  response. Journey 3's failure branches (rejected token, GHE trust, bad
-  URL) and Journey 5's prompt/runner/Inspector steps stay fixme until the
-  fake grows the responses they need.
+  `docs/usability-test.md`'s manual track. Everything `[auto]`/`[mixed]`
+  has a live test; there are no `test.fixme()` stubs left.
+- The fake upstream serves a single happy-path PR and plan/review
+  response, plus owner-keyed triggers (e.g. `rejected-token`) for the
+  failure branches. Grow it when a new test needs a new response shape.
 - We use `channel: "chrome"` instead of playwright's bundled chromium
   to match the smokes and avoid the install step in dev environments
   that already have Chrome.

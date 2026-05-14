@@ -1,41 +1,57 @@
-// Journey 3 — Review a GitHub PR. The happy path runs end to end against the
-// fake upstream (_lib/scripts/fake-upstream.mjs): the From-URL field detects a
-// PR URL, the real server's /api/github/pr/load 401s without a token, the
-// GitHubTokenModal collects a PAT, and the retry loads the PR for real. The
-// remaining branches (refresh, rejected token, GHE trust, bad URL) stay fixme.
+// Journey 3 — Review a GitHub PR. Runs end to end against the fake upstream
+// (scripts/fake-upstream.mjs): the From-URL field detects a PR URL, the real
+// server's /api/github/pr/load 401s without a token, the GitHubTokenModal
+// collects a PAT, and the retry loads the PR for real. Owner-keyed triggers in
+// the fake (`rejected-token`) drive the failure branches.
 
-import { test, expect, expectWorkspaceLoaded, topbarBtn } from "./_lib/fixtures";
+import {
+  test,
+  expect,
+  expectWorkspaceLoaded,
+  dismissPlanOverlay,
+  topbarBtn,
+} from "./_lib/fixtures";
 
 const PR_URL = "https://github.com/acme/widgets/pull/7";
 
+/** Open LoadModal and submit `url` through the From-URL field. */
+async function submitUrl(page: import("@playwright/test").Page, url: string) {
+  await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+  await topbarBtn(page, "+ load").click();
+  const urlSection = page.locator(".modal__sec", { hasText: "From URL" });
+  await urlSection.locator(".modal__input").fill(url);
+  await urlSection.locator(".modal__btn", { hasText: /^load$/ }).click();
+}
+
+/** The GitHub token modal, scoped by its header so it's unambiguous. */
+function tokenModal(page: import("@playwright/test").Page) {
+  return page.locator(".modal__box", {
+    has: page.locator(".modal__h-label", { hasText: "GitHub token required" }),
+  });
+}
+
 test.describe("Journey 3 — GitHub PR", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.unroute("**/api/auth/list"); // use the real auth store
+  });
+  // The shared server auth store is wiped after every test by the
+  // `autoClearServerAuth` fixture in _lib/fixtures.ts.
+
   test("happy path: paste PR URL → token modal → load + render", async ({
     visit,
     page,
   }) => {
-    await page.unroute("**/api/auth/list"); // use the real auth store
     await visit("/?cs=42");
     await expectWorkspaceLoaded(page);
-    await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+    await submitUrl(page, PR_URL);
 
-    await topbarBtn(page, "+ load").click();
-    const urlSection = page.locator(".modal__sec", { hasText: "From URL" });
-    await urlSection.locator(".modal__input").fill(PR_URL);
-    await urlSection.locator(".modal__btn", { hasText: /^load$/ }).click();
+    // No token stored for the host → the token modal opens and names it.
+    const modal = tokenModal(page);
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText("github.com");
 
-    // No token stored for the host → the GitHub token modal opens and names it.
-    const tokenModal = page.locator(".modal__box", {
-      has: page.locator(".modal__h-label", {
-        hasText: "GitHub token required",
-      }),
-    });
-    await expect(tokenModal).toBeVisible();
-    await expect(tokenModal).toContainText("github.com");
-
-    await tokenModal
-      .getByLabel("Personal Access Token")
-      .fill("ghp_e2e_fake_token");
-    await tokenModal.locator(".modal__btn--primary").click();
+    await modal.getByLabel("Personal Access Token").fill("ghp_e2e_fake_token");
+    await modal.locator(".modal__btn--primary").click();
 
     // Retry succeeds: the server calls the fake upstream, assembles the PR
     // changeset, and the topbar shows the fake PR's title.
@@ -44,26 +60,88 @@ test.describe("Journey 3 — GitHub PR", () => {
     );
   });
 
-  test.fixme("refresh keeps local review state", async () => {
-    // Click `↻ refresh`. Assert label changes to "refreshing…", then back.
-    // Sign off a file before refresh; assert the sign-off survives the
-    // refresh round-trip.
+  test("bad PR URL surfaces an inline error, no token prompt", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    // /pull/0 is a well-formed GitHub PR URL shape but parsePrUrl rejects it
+    // (PR number must be a positive integer).
+    await submitUrl(page, "https://github.com/owner/repo/pull/0");
+
+    await expect(page.locator(".modal__hint--error, .modal__err")).toBeVisible();
+    // The load modal stays open and no token modal appears.
+    await expect(
+      page.locator(".modal__h-label", { hasText: "load changeset" }),
+    ).toBeVisible();
+    await expect(tokenModal(page)).toHaveCount(0);
   });
 
-  test.fixme("rejected token mode opens GitHubTokenModal with re-enter copy", async () => {
-    // Have the fake upstream 401 the PR fetch; assert the modal opens with
-    // "GitHub rejected the saved token" copy.
+  test("GHE host: the trust step appears before the PAT field", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    // A non-github.com host that isn't in the localStorage trusted list.
+    await submitUrl(page, "https://ghe.example.com/acme/widgets/pull/3");
+
+    // The token modal opens on the host-trust stage first.
+    const trustBtn = page.locator("button", {
+      hasText: "I trust ghe.example.com",
+    });
+    await expect(trustBtn).toBeVisible();
+    await expect(tokenModal(page)).toContainText("ghe.example.com/api/v3");
+
+    // After trusting the host, the PAT field appears in the same modal.
+    await trustBtn.click();
+    await expect(tokenModal(page).getByLabel("Personal Access Token")).toBeVisible();
   });
 
-  test.fixme("GHE host trust step appears inside GitHubTokenModal", async () => {
-    // Use a non-github.com PR URL with a host not in localStorage trusted
-    // hosts. Assert the "Token destination: https://...api/v3" line and the
-    // `I trust {host}` button. Click it. Assert the PAT field appears in
-    // the same modal.
+  test("rejected token surfaces an error in the modal", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    // The `rejected-token` owner makes the fake upstream 401 the PR fetch.
+    await submitUrl(page, "https://github.com/rejected-token/repo/pull/1");
+
+    const modal = tokenModal(page);
+    await expect(modal).toBeVisible();
+    await modal.getByLabel("Personal Access Token").fill("ghp_will_be_rejected");
+    await modal.locator(".modal__btn--primary").click();
+
+    // The retry 401s. On the submit path the client surfaces a hardcoded
+    // "Check the PAT scopes" message rather than the `reason: "rejected"`
+    // re-open copy — see "Known product bugs" #1 in docs/usability-test.md.
+    await expect(modal.locator(".modal__hint--error")).toContainText(
+      "Token rejected by github.com",
+    );
   });
 
-  test.fixme("bad PR URL surfaces an inline LoadModal error, no token prompt", async () => {
-    // Paste a malformed PR URL; assert inline error inside LoadModal and no
-    // GitHubTokenModal opens.
+  test("refresh keeps local review state", async ({ visit, page }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await submitUrl(page, PR_URL);
+    const modal = tokenModal(page);
+    await modal.getByLabel("Personal Access Token").fill("ghp_e2e_fake_token");
+    await modal.locator(".modal__btn--primary").click();
+    await expect(page.locator(".topbar__title")).toContainText(
+      "Add preferences density toggle",
+    );
+
+    // Sign off the current file, then refresh the PR from GitHub.
+    await dismissPlanOverlay(page);
+    await page.keyboard.press("Shift+M");
+    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
+
+    await page.locator(".topbar__btn", { hasText: "refresh" }).first().click();
+    // The diff re-fetches but the sign-off (local review state) survives.
+    await expect(page.locator(".topbar__title")).toContainText(
+      "Add preferences density toggle",
+    );
+    await expect(page.locator(".row--file-reviewed").first()).toBeVisible();
   });
 });
