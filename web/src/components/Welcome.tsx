@@ -1,4 +1,8 @@
 import "./Welcome.css";
+// Pulls in the shared modal__wt-* and range-picker styles used by the
+// worktree row and empty-diff RangePicker — these otherwise only load when
+// the workspace renders LoadModal, leaving Welcome unstyled.
+import "./LoadModal.css";
 import { useRef, useState } from "react";
 import type { ChangeSet, DetachedInteraction, Interaction } from "../types";
 import { parseDiff } from "../parseDiff";
@@ -6,8 +10,10 @@ import { STUBS } from "../fixtures";
 import type { RecentEntry, RecentSource } from "../recents";
 import { removeRecent } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
+import type { LoadOpts } from "../worktreeChangeset";
 import { useGithubPrLoad, isGithubPrUrl } from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
+import { RangePicker } from "./RangePicker";
 import { SettingsModal } from "./SettingsModal";
 import { useCredentials } from "../auth/useCredentials";
 
@@ -144,6 +150,22 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     onLoad: (cs, source) => deliver(cs, {}, source),
   });
 
+  // Mirrors LoadModal: empty-diff loads (branch at parity, picked merge
+  // commit, etc.) auto-open the range picker for that row, and an explicit
+  // "pick range…" button lets the user open it pre-emptively.
+  const [pickerForPath, setPickerForPath] = useState<string | null>(null);
+  function isPickerOpenFor(p: string): boolean {
+    return pickerForPath === p || worktrees.wtEmpty?.path === p;
+  }
+  function togglePicker(p: string) {
+    if (isPickerOpenFor(p)) {
+      setPickerForPath(null);
+      worktrees.clearWtEmpty();
+    } else {
+      setPickerForPath(p);
+    }
+  }
+
   function loadFromRecent(r: RecentEntry) {
     deliver(r.changeset, r.interactions, r.source);
   }
@@ -273,22 +295,64 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
               <ul className="welcome__wt-list modal__wt-list">
                 {worktrees.wtList.map((wt) => (
                   <li key={wt.path}>
-                    <button
-                      type="button"
-                      className="modal__wt-row"
-                      onClick={() => worktrees.loadFromWorktree(wt)}
-                      disabled={worktrees.wtLoadingPath !== null}
-                    >
-                      <span className="modal__wt-branch">
-                        {wt.branch ?? "(detached)"}
-                        {wt.isMain && <span className="modal__wt-tag"> main</span>}
-                      </span>
-                      <span className="modal__wt-path">{wt.path}</span>
-                      <span className="modal__wt-head">
-                        {wt.head.slice(0, 7)}
-                        {worktrees.wtLoadingPath === wt.path && " · loading…"}
-                      </span>
-                    </button>
+                    <div className="modal__wt-row-wrap">
+                      <button
+                        type="button"
+                        className="modal__wt-row"
+                        onClick={() => worktrees.loadFromWorktree(wt)}
+                        disabled={worktrees.wtLoadingPath !== null}
+                      >
+                        <span className="modal__wt-branch">
+                          {wt.branch ?? "(detached)"}
+                          {wt.isMain && <span className="modal__wt-tag"> main</span>}
+                        </span>
+                        <span className="modal__wt-path">{wt.path}</span>
+                        <span className="modal__wt-head">
+                          {wt.head.slice(0, 7)}
+                          {worktrees.wtLoadingPath === wt.path && " · loading…"}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="modal__wt-pick-range"
+                        onClick={() => togglePicker(wt.path)}
+                        disabled={worktrees.wtLoadingPath !== null}
+                        aria-expanded={isPickerOpenFor(wt.path)}
+                      >
+                        {isPickerOpenFor(wt.path) ? "close" : "pick range…"}
+                      </button>
+                    </div>
+                    {worktrees.wtEmpty?.path === wt.path && (
+                      <p className="modal__hint modal__hint--empty">
+                        {worktrees.wtEmpty.message} Pick a range below to
+                        compare commits.
+                      </p>
+                    )}
+                    {isPickerOpenFor(wt.path) && (
+                      <RangePicker
+                        worktreePath={wt.path}
+                        fetchCommits={worktrees.fetchCommits}
+                        defaultToRef="HEAD"
+                        busy={worktrees.wtLoadingPath === wt.path}
+                        onApply={(opts: LoadOpts) => {
+                          setPickerForPath(null);
+                          worktrees.clearWtEmpty();
+                          void worktrees.loadFromWorktree(wt, opts);
+                        }}
+                        onCancel={() => {
+                          setPickerForPath(null);
+                          worktrees.clearWtEmpty();
+                        }}
+                        onJustThis={(sha: string) => {
+                          setPickerForPath(null);
+                          worktrees.clearWtEmpty();
+                          void worktrees.loadFromWorktree(wt, {
+                            kind: "ref",
+                            ref: sha,
+                          });
+                        }}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
