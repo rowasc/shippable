@@ -10,7 +10,7 @@ We already carry typed intent in several places, but each as its own private voc
 - `hunk.teammateReview.verdict` — `"approve" | "comment"`.
 - `AgentReply.outcome` — `"addressed" | "declined" | "noted"`.
 
-Five vocabularies, all describing the same conceptual thing: *what does this interaction express?* This plan generalizes the primitive: every author — humans (you, teammates, PR reviewers) and AI (static annotations and the dialogue agent) — emits **review interactions**, each interaction carries an explicit **intent**, and the interactions stack append-only on a shared store. A comment is one intent. Ack is another. Request is the rest of the starter set.
+Five vocabularies, all describing the same conceptual thing: *what does this interaction express?* This plan generalizes the primitive: every author — humans (you, teammates, PR reviewers), AI (static annotations), and the dialogue agent — emits **review interactions**, each interaction carries an explicit **intent**, and the interactions stack append-only on a shared store. A comment is one intent. Ack is another. Request is the rest of the starter set.
 
 This subsumes `ackedNotes` (ack becomes an intent), `AiNote.severity` (severity maps to intent), `teammateReview.verdict` (verdict maps to intent), and eventually `AgentReply.outcome` (outcome maps to intent). The underlying ingest shapes don't have to disappear in one go — they project into the unified store at the read seam.
 
@@ -34,15 +34,17 @@ What this does **not** try to do (yet):
 
 We've been overloading `kind` for two unrelated things. We need to separate them before adding the intent axis.
 
-**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`human` / `ai`) further discriminates human-authored vs AI-authored. The target axis adds no information that isn't already addressable through those.
+**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`human` / `ai` / `agent`) further discriminates author category. The target axis adds no information that isn't already addressable through those.
 
 **Proposal:** rename that dimension to **`target`** — "what the interaction targets / attaches to" — and collapse it to three values: `"line"`, `"block"`, `"reply"`. `line` and `block` are fresh-thread anchors on code; `reply` is a reply to anything else. Consumers that need to discriminate "reply to what kind of parent?" read the `threadKey` prefix or the projected thread's head `authorRole` (see § Cross-thread aggregation). The minor cost of `target` is that `targetKey` already exists in the `ADD_REPLY` action; that's a small overload but actually consistent with the new field's meaning.
 
 The umbrella name for both dimensions together is **interaction**.
 
-**On AI-authored thread heads.** Today the dialogue agent only responds to existing threads (via the nested `agentReplies` shape). The plan future-proofs for AI eventually starting fresh threads on its own — flagging "I noticed something during a session" without waiting to be asked. An AI-authored fresh-thread interaction uses `target: "line"` or `target: "block"`; the specific actor (static-annotation pipeline vs dialogue agent) lives in `author`, while `authorRole` is just `"ai"`. Replies to an AI thread use `target: "reply"` like any other reply. No new target variant is needed.
+**On non-human thread heads.** Today the dialogue agent only responds to existing threads (via the nested `agentReplies` shape). The plan future-proofs for the agent eventually starting fresh threads on its own — flagging "I noticed something during a session" without waiting to be asked. An agent-authored fresh-thread interaction uses `target: "line"` or `target: "block"`; the author identity rides in `author` / `authorRole: "agent"`. Replies to an agent-started thread use `target: "reply"` like any other reply. No new target variant is needed.
 
-We don't differentiate the static-annotation pipeline from the dialogue agent at the role level — both are AI, both render with AI styling, replies to either get enqueued to the dialogue agent and trigger a response. If a consumer ever needs to know "which AI pipeline produced this," that's a provenance lookup against `author` or `threadKey`, not an enum branch.
+`ai` and `agent` stay as distinct roles even though both are non-human, because the renderers genuinely need to tell them apart. Static AI annotations render once in the Inspector card and are skipped from the thread row list (`ReplyThread.tsx:70`); the dialogue agent gets a dedicated `<AgentRow>` render with live-conversation affordances (`ReplyThread.tsx:99`). Collapsing them would mean recovering that distinction from a separate field (e.g. `author`), and the rendering split is too clean to give up.
+
+`user` and `teammate` *do* collapse to `human`. They're both people; the distinction was "live local authoring vs static teammate ingest," which is provenance — the `teammate:` `threadKey` prefix and the absence of an authored anchor already discriminate them. The per-file activity counter in `view.ts:489` (which today groups `user + agent` to exclude teammate-ingest from the badge count) and the Inspector-dedupe filter in `ReplyThread.tsx:70` will read `threadKey.startsWith("teammate:")` instead. One extra field to check; mirrors the same provenance-not-role argument we made for `target`.
 
 So:
 
@@ -172,7 +174,7 @@ At the **render seam** (the view layer in `view.ts`), a uniform `Interaction[]` 
 interface Interaction {
   id: string;
   author: string;
-  authorRole: "human" | "ai";
+  authorRole: "human" | "ai" | "agent";
   intent: InteractionIntent;
   target: InteractionTarget;
   threadKey: string;        // existing reply-key
@@ -210,7 +212,7 @@ function selectInteractions(state: ReviewState): {
   byThreadKey: Record<string, Interaction[]>;
   threads: Array<{
     threadKey: string;
-    headAuthorRole: "human" | "ai";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
+    headAuthorRole: "human" | "ai" | "agent";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
     currentAsk: AskIntent;             // derived: latest ask-intent reply
     originalAsk: AskIntent;            // derived: interactions[0].intent (always an ask)
     currentResponse: Exclude<ResponseIntent, "unack"> | null;  // derived: thread-level rollup; `unack` cancels and resolves to null
@@ -375,7 +377,7 @@ Per-element attribute set:
 | `target`      | yes      | `InteractionTarget` (see Naming section)               | replaces the old `kind` attribute                                     |
 | `intent`      | yes      | `InteractionIntent` (see Naming section)               | new                                                                   |
 | `author`      | yes      | display name                                           | specific actor — local reviewer, PR reviewer, teammate ingest, static-AI pipeline, dialogue agent, etc. |
-| `authorRole`  | yes      | `"human" \| "ai"`                                      | category of actor; PR-imported reviewers and teammate-ingest reviews are both `human`; static annotations and dialogue-agent replies are both `ai` |
+| `authorRole`  | yes      | `"human" \| "ai" \| "agent"`                           | category of actor; local reviewers, PR-imported reviewers, and teammate-ingest reviews are all `human` (provenance lives in `threadKey` and `author`); `ai` is the static annotation pipeline; `agent` is the live dialogue agent |
 | `file`        | yes      | repo-relative path                                     | (unchanged)                                                            |
 | `lines`       | when relevant | line or range as today                            | omitted for thread-level interactions where lines don't apply         |
 | `htmlUrl`     | when PR-sourced | `external.htmlUrl`                                | provenance link back to GitHub                                        |
@@ -567,7 +569,7 @@ Pinning these before any code:
 - **Selector cost.** The cross-thread aggregation walks every interaction on every render. Mitigation: memoize on `(changesetId, repliesRevision, ackedNotesRevision)`, with the two revision counters maintained by the reducer (added in slice 1; see § Cross-thread aggregation). Slice 1 ships with a benchmark on a 200-thread fixture; if it regresses re-render perf, we move the selector to `useMemo` per consumer.
 - **Wire rename is a breaking change for any in-flight agent session.** The MCP server is in-tree and updates atomically with the rest of the surface; existing in-memory queues are dropped on server restart anyway. The risk is small and we accept it.
 - **Render code that switched on the old `reply-to-*` variants** (badges differentiating ai-note vs hunk-summary vs teammate vs user threads) must switch to the projected thread's `headAuthorRole` or the `threadKey` prefix instead. The slice-0 reducer tests of the threadKey conventions (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) catch any seam that's still doing the old switch.
-- **Render code that switched on `authorRole === "teammate"` or `=== "agent"`** has to drop to `threadKey` prefix or to inspecting `author` instead. Same shape of fix; same slice-0 tests catch the misses.
+- **Render code that switched on `authorRole === "teammate"`** has to drop to `threadKey.startsWith("teammate:")` instead. Concretely: `view.ts:489` (per-file activity counter, today `user || agent`, becomes "`agent` plus `human` whose threadKey isn't teammate-sourced") and `ReplyThread.tsx:70` (Inspector dedupe, today `ai || teammate`, becomes "`ai` or threadKey starts with `teammate:`"). The slice-0 reducer tests of the threadKey conventions catch any seam that misses the migration. `agent` stays as a distinct role; nothing changes there.
 
 ## Docs to update when implementation lands
 
