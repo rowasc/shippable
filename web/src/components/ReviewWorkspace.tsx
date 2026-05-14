@@ -1143,9 +1143,15 @@ export function ReviewWorkspace({
       )}
 
       <div
-        className={`main ${showInspector ? "main--with-inspector" : ""} ${
-          showSidebar ? (sidebarWide ? "main--wide-sidebar" : "") : "main--no-sidebar"
-        }`}
+        className={[
+          "main",
+          showInspector && "main--with-inspector",
+          !showSidebar
+            ? "main--no-sidebar"
+            : sidebarWide && "main--wide-sidebar",
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
         {showSidebar && (
           <Sidebar

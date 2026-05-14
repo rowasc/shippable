@@ -205,6 +205,7 @@ interface WorkspaceFrame extends BaseFrame {
   overlay: Overlay;
   showGuide?: boolean;
   showInspector?: boolean;
+  showSidebar?: boolean;
   sidebarWide?: boolean;
   seedRuns?: PromptRunView[];
   /**
@@ -848,6 +849,13 @@ function buildFrames(): Frame[] {
     },
     {
       kind: "workspace",
+      caption: "press f to hide the file list and focus on the diff",
+      state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 14),
+      overlay: { kind: "none" },
+      showSidebar: false,
+    },
+    {
+      kind: "workspace",
       caption: "run any saved prompt against the current context",
       state: withCursor(fresh(), PREF_FILE.id, PREF_H1.id, 14),
       overlay: { kind: "promptPicker" },
@@ -1267,7 +1275,7 @@ function WorkspaceStage({
   const [showInspector, setShowInspector] = useState(
     frame.showInspector ?? true,
   );
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(frame.showSidebar ?? true);
 
   // Per-frame modal visibility. Initial values are seeded from the frame's
   // declared overlay. The user can dismiss them and toggle via keyboard
@@ -1679,9 +1687,15 @@ function WorkspaceStage({
       </header>
 
       <div
-        className={`main ${showInspector ? "main--with-inspector" : ""} ${
-          showSidebar ? (sidebarWide ? "main--wide-sidebar" : "") : "main--no-sidebar"
-        }`}
+        className={[
+          "main",
+          showInspector && "main--with-inspector",
+          !showSidebar
+            ? "main--no-sidebar"
+            : sidebarWide && "main--wide-sidebar",
+        ]
+          .filter(Boolean)
+          .join(" ")}
       >
         {showSidebar && (
           <Sidebar
