@@ -423,16 +423,15 @@ describe("isValidInteractionPair", () => {
     expect(isValidInteractionPair("block", "blocker")).toBe(true);
   });
 
-  it("accepts response intents on reply-to-* targets", () => {
-    expect(isValidInteractionPair("reply-to-user", "ack")).toBe(true);
-    expect(isValidInteractionPair("reply-to-ai-note", "accept")).toBe(true);
-    expect(isValidInteractionPair("reply-to-teammate", "reject")).toBe(true);
-    expect(isValidInteractionPair("reply-to-agent", "unack")).toBe(true);
-    expect(isValidInteractionPair("reply-to-hunk-summary", "ack")).toBe(true);
+  it("accepts response intents on the reply target", () => {
+    expect(isValidInteractionPair("reply", "ack")).toBe(true);
+    expect(isValidInteractionPair("reply", "accept")).toBe(true);
+    expect(isValidInteractionPair("reply", "reject")).toBe(true);
+    expect(isValidInteractionPair("reply", "unack")).toBe(true);
   });
 
-  it("accepts ask intents on reply-to-* targets (restating the ask)", () => {
-    expect(isValidInteractionPair("reply-to-ai-note", "comment")).toBe(true);
-    expect(isValidInteractionPair("reply-to-user", "blocker")).toBe(true);
+  it("accepts ask intents on the reply target (restating the ask)", () => {
+    expect(isValidInteractionPair("reply", "comment")).toBe(true);
+    expect(isValidInteractionPair("reply", "blocker")).toBe(true);
   });
 });
