@@ -1,9 +1,17 @@
+import { discoverSidecarPort } from "./port-discovery.js";
+
 export const DEFAULT_PORT = 3001;
 
 export interface HandlerDeps {
   fetchFn?: typeof fetch;
   port?: number;
   cwd?: () => string;
+  /**
+   * Discovery override for tests. When omitted, production uses the
+   * real `discoverSidecarPort` which reads the sidecar's port file and
+   * health-checks before returning a port.
+   */
+  discoverPortFn?: () => Promise<number | null>;
 }
 
 export interface ToolResult {
@@ -17,13 +25,20 @@ interface PullResponse {
   ids: string[];
 }
 
-function resolvePort(deps?: HandlerDeps): number {
+async function resolvePort(deps?: HandlerDeps): Promise<number> {
   if (deps?.port !== undefined) return deps.port;
   const envPort = process.env.SHIPPABLE_PORT;
   if (envPort !== undefined && envPort !== "") {
     const parsed = Number(envPort);
     if (Number.isFinite(parsed)) return parsed;
   }
+  // The Tauri sidecar picks an ephemeral port and writes it to an
+  // OS-conventional port file (see server/src/port-file.ts). Discovery
+  // health-checks before returning, so a stale file from a crashed
+  // sidecar falls through to the default.
+  const discoverFn = deps?.discoverPortFn ?? discoverSidecarPort;
+  const discovered = await discoverFn();
+  if (discovered !== null) return discovered;
   return DEFAULT_PORT;
 }
 
@@ -49,7 +64,7 @@ export async function handleCheckReviewComments(
   input: { worktreePath?: string },
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
-  const port = resolvePort(deps);
+  const port = await resolvePort(deps);
   const worktreePath = resolveWorktreePath(input, deps);
   const baseUrl = `http://127.0.0.1:${port}`;
   const url = `${baseUrl}/api/agent/pull`;
@@ -152,7 +167,7 @@ export async function handlePostReviewComment(
   input: PostCommentInput,
   deps?: HandlerDeps,
 ): Promise<ToolResult> {
-  const port = resolvePort(deps);
+  const port = await resolvePort(deps);
   const worktreePath = resolveWorktreePath(input, deps);
   const baseUrl = `http://127.0.0.1:${port}`;
   const url = `${baseUrl}/api/agent/replies`;

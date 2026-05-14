@@ -1547,7 +1547,23 @@ function main() {
     const allowed = ALLOWED_ORIGINS.size > 0 ? [...ALLOWED_ORIGINS].join(", ") : "(none)";
     console.log(`[server] listening on http://${HOST}:${PORT}`);
     console.log(`[server] allowed browser origins: ${allowed}`);
+    // Gated so the dev server (`npm run server`) doesn't fight the Tauri
+    // sidecar for the same on-disk file. The Tauri shell sets the env
+    // var when spawning us; nobody else should.
+    if (process.env.SHIPPABLE_WRITE_PORT_FILE) {
+      void writePortFile(PORT);
+    }
   });
+
+  // Best-effort removal so MCP clients don't chase a dead port across
+  // restarts. We schedule the unlink and exit immediately — kernel flushes
+  // the rename before the process goes away. ENOENT is swallowed inside.
+  const cleanup = () => {
+    if (process.env.SHIPPABLE_WRITE_PORT_FILE) void removePortFile();
+    process.exit(0);
+  };
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
 }
 
 // Only run main when executed directly (not when imported by tests).

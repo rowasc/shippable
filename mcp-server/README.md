@@ -107,9 +107,19 @@ After the npm publish lands, the `command` becomes `"npx"` with
 
 ## Configuration
 
-- `SHIPPABLE_PORT` (default `3001`) — the port the local Shippable server is listening on. Override if you've changed `PORT` for `server/`.
+Port resolution, in order:
 
-The MCP server connects to `http://127.0.0.1:$SHIPPABLE_PORT/api/agent/pull` (for `shippable_check_review_comments`) and `…/api/agent/replies` (for `shippable_post_review_comment`) — localhost only, no LAN exposure.
+1. `SHIPPABLE_PORT` env — explicit override; wins if set and numeric.
+2. The Shippable port-discovery file — when the desktop app (Tauri) is running, its sidecar writes its ephemeral port to an OS-conventional path on launch:
+   - macOS: `~/Library/Application Support/Shippable/port.json`
+   - Linux: `$XDG_DATA_HOME/Shippable/port.json` (or `~/.local/share/Shippable/port.json`)
+   - Windows: `%LOCALAPPDATA%/Shippable/port.json`
+   The MCP reads the file, health-checks the listed port, and uses it on success. Stale files (sidecar killed without cleanup) fail the health check and fall through.
+3. `3001` — default. Matches the bare `server/` dev port.
+
+So the common cases just work: run the DMG and the MCP discovers it; run `npm run server` and the MCP hits 3001; set `SHIPPABLE_PORT` to force either.
+
+The MCP connects only to `127.0.0.1` — no LAN exposure.
 
 ## Local development
 

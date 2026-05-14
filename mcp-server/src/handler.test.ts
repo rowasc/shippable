@@ -165,7 +165,7 @@ describe("handleCheckReviewComments", () => {
     expect(calls[0]!.url).toBe("http://127.0.0.1:5000/api/agent/pull");
   });
 
-  it("falls back to DEFAULT_PORT when both deps.port and SHIPPABLE_PORT are absent", async () => {
+  it("falls back to DEFAULT_PORT when env is empty and discovery returns null", async () => {
     vi.stubEnv("SHIPPABLE_PORT", "");
     const { fetchFn, calls } = makeFetch(
       jsonResponse({ payload: "", ids: [] }),
@@ -173,11 +173,39 @@ describe("handleCheckReviewComments", () => {
 
     await handleCheckReviewComments(
       { worktreePath: "/repo" },
-      { fetchFn },
+      { fetchFn, discoverPortFn: async () => null },
     );
 
     expect(DEFAULT_PORT).toBe(3001);
     expect(calls[0]!.url).toBe(`http://127.0.0.1:${DEFAULT_PORT}/api/agent/pull`);
+  });
+
+  it("uses the discovered sidecar port when env is empty and discovery succeeds", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, discoverPortFn: async () => 54118 },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:54118/api/agent/pull");
+  });
+
+  it("prefers SHIPPABLE_PORT over discovery", async () => {
+    vi.stubEnv("SHIPPABLE_PORT", "5000");
+    const { fetchFn, calls } = makeFetch(
+      jsonResponse({ payload: "", ids: [] }),
+    );
+    // Discovery would point us at 54118 — env wins.
+    await handleCheckReviewComments(
+      { worktreePath: "/repo" },
+      { fetchFn, discoverPortFn: async () => 54118 },
+    );
+
+    expect(calls[0]!.url).toBe("http://127.0.0.1:5000/api/agent/pull");
   });
 });
 

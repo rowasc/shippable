@@ -66,6 +66,11 @@ fn start_sidecar(app: tauri::AppHandle) {
     }
     .env("PORT", port.to_string())
     .env("SHIPPABLE_ALLOWED_ORIGINS", SIDECAR_ALLOWED_ORIGINS)
+    // Opt the sidecar into writing its OS-conventional port-discovery file
+    // so the MCP server (a separate process with no IPC channel to Tauri)
+    // can find the ephemeral port we picked. Gated here so the bare dev
+    // server doesn't also write and clobber the file in mixed setups.
+    .env("SHIPPABLE_WRITE_PORT_FILE", "1")
     // Defense-in-depth: tauri-plugin-shell inherits the parent process's
     // environment by default. Override ANTHROPIC_API_KEY to an empty string
     // so a key set in the shell that launched the .app can't shadow the
