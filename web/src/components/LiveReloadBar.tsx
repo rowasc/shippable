@@ -34,7 +34,7 @@ export function LiveReloadBar({
 
   if (worktreeGone) {
     return (
-      <div className="livebar livebar--gone">
+      <div className="livebar livebar--gone" role="status" aria-label="live reload">
         <span className="livebar__icon">⚠</span>
         <span className="livebar__msg">
           Worktree at <code>{provenance.path}</code> is no longer reachable.
@@ -49,7 +49,7 @@ export function LiveReloadBar({
 
   if (staleNext) {
     return (
-      <div className="livebar livebar--stale">
+      <div className="livebar livebar--stale" role="status" aria-label="live reload">
         <span className="livebar__icon">●</span>
         <span className="livebar__msg">
           {describeDrift(provenance.state, staleNext)}
@@ -76,7 +76,7 @@ export function LiveReloadBar({
   }
 
   return (
-    <div className="livebar">
+    <div className="livebar" role="status" aria-label="live reload">
       <span className={`livebar__dot ${enabled ? "livebar__dot--on" : ""}`} />
       <span className="livebar__msg livebar__msg--muted">
         {enabled ? "watching " : "paused on "}

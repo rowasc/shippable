@@ -59,7 +59,13 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
 
   const content = (
     <div className="modal" onClick={onCancel}>
-      <div className="modal__box" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal__box"
+        role="dialog"
+        aria-modal="true"
+        aria-label="GitHub token required"
+        onClick={(e) => e.stopPropagation()}
+      >
         <header className="modal__h">
           <span className="modal__h-label">GitHub token required</span>
           <button className="modal__close" onClick={onCancel}>
@@ -98,7 +104,7 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
                 // — this same modal is the destination for *both* the
                 // first-time prompt and a wrong-PAT retry, and a subtle
                 // .modal__hint got mistaken for fresh-prompt copy.
-                <p className="modal__hint modal__hint--error">
+                <p className="modal__hint modal__hint--error" role="alert">
                   GitHub rejected the saved token for {host}. Re-enter the
                   PAT (or generate a new one with `repo` + `read:org` scopes
                   for private repos).
@@ -139,7 +145,7 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
                   {busy ? "saving…" : `Save token for ${host}`}
                 </button>
               </div>
-              {err && <p className="modal__hint modal__hint--error">{err}</p>}
+              {err && <p className="modal__hint modal__hint--error" role="alert">{err}</p>}
             </>
           )}
         </section>

@@ -245,7 +245,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
               </div>
             )}
             {worktrees.err && (
-              <p className="modal__hint modal__hint--error">{worktrees.err}</p>
+              <p className="modal__hint modal__hint--error" role="alert">{worktrees.err}</p>
             )}
             {worktrees.wtList && worktrees.wtList.length > 0 && (
               <ul className="modal__wt-list">
@@ -344,12 +344,12 @@ export function LoadModal({ onLoad, onClose }: Props) {
             </button>
           </div>
           {url.trim() !== "" && !urlIsValid && (
-            <p className="modal__hint modal__hint--error">
+            <p className="modal__hint modal__hint--error" role="alert">
               URL must start with <code>http://</code> or <code>https://</code>.
             </p>
           )}
           {pr.error && (
-            <p className="modal__hint modal__hint--error">{pr.error}</p>
+            <p className="modal__hint modal__hint--error" role="alert">{pr.error}</p>
           )}
         </section>
 
@@ -393,7 +393,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
         </section>
 
         {err && (
-          <div className="modal__err errrow">
+          <div className="modal__err errrow" role="alert">
             <span className="errrow__msg">{err}</span>
             <CopyButton text={err} />
           </div>

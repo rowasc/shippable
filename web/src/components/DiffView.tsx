@@ -710,6 +710,9 @@ function Line({
     <div
       ref={cursorRef}
       data-line-idx={lineIdx}
+      aria-current={line.isCursor ? "true" : undefined}
+      data-ai-severity={sev}
+      data-acked={line.isAcked ? "true" : undefined}
       className={`line line--${line.kind} ${line.isCursor ? "line--cursor" : ""} ${
         line.isRead ? "line--read" : ""
       } ${line.isSelected ? "line--selected" : ""} ${

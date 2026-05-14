@@ -141,9 +141,9 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
     await pasteSection.getByRole("textbox").fill("this is not a diff");
     await pasteSection.getByRole("button", { name: "parse" }).click();
 
-    await expect(
-      page.locator(".modal__err .errrow__msg"),
-    ).toContainText("No files parsed from that diff");
+    await expect(page.getByRole("alert")).toContainText(
+      "No files parsed from that diff",
+    );
     // Modal stays open so the user can correct.
     await expect(loadModal(page)).toBeVisible();
   });
@@ -170,9 +170,7 @@ test.describe("Journey 4 — paste / URL / file diff (all [auto])", () => {
     await modal.getByRole("button", { name: /^load$/ }).click();
 
     // The error renders either inline in the URL section or in the modal's
-    // bottom error slot — accept either, just require the text.
-    await expect(
-      page.locator(".modal__hint--error, .modal__err .errrow__msg"),
-    ).toContainText(/CORS|fetch|network/i);
+    // bottom error slot — both are role="alert".
+    await expect(page.getByRole("alert")).toContainText(/CORS|fetch|network/i);
   });
 });

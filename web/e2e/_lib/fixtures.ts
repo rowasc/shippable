@@ -76,7 +76,7 @@ export async function expectWorkspaceLoaded(page: Page): Promise<void> {
  *  so wait for it briefly rather than racing a bare count() check — otherwise
  *  it slips in *after* the check and stays open for the rest of the test. */
 export async function dismissPlanOverlay(page: Page): Promise<void> {
-  const overlay = page.locator(".planview-overlay");
+  const overlay = page.getByRole("dialog", { name: "review plan" });
   const appeared = await overlay
     .waitFor({ state: "visible", timeout: 2000 })
     .then(() => true)

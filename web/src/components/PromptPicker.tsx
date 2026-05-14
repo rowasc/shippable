@@ -213,11 +213,13 @@ function PromptList({
           </div>
         )}
         {prompts.length > 0 && (
-          <ul className="picker__list">
+          <ul className="picker__list" role="listbox">
             {prompts.map((p) => (
               <li
                 key={p.id}
                 className="picker__item"
+                role="option"
+                aria-selected={false}
                 onClick={() => onPick(p)}
               >
                 <span className="picker__item-name">{p.name}</span>

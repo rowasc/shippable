@@ -24,12 +24,9 @@ async function submitUrl(page: import("@playwright/test").Page, url: string) {
   await modal.getByRole("button", { name: /^load$/ }).click();
 }
 
-/** The GitHub token modal. It has no dialog role yet (pass-2 a11y), so it's
- *  scoped by its `.modal__box` root + header text. */
+/** The GitHub token modal. */
 function tokenModal(page: import("@playwright/test").Page) {
-  return page.locator(".modal__box", {
-    has: page.locator(".modal__h-label", { hasText: "GitHub token required" }),
-  });
+  return page.getByRole("dialog", { name: "GitHub token required" });
 }
 
 test.describe("Journey 3 — GitHub PR", () => {
@@ -118,7 +115,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     // The retry 401s. On the submit path the client surfaces a hardcoded
     // "Check the PAT scopes" message rather than the `reason: "rejected"`
     // re-open copy — see "Known product bugs" #1 in docs/usability-test.md.
-    await expect(modal.locator(".modal__hint--error")).toContainText(
+    await expect(modal.getByRole("alert")).toContainText(
       "Token rejected by github.com",
     );
   });

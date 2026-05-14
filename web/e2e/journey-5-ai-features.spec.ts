@@ -60,14 +60,15 @@ test.describe("Journey 5 — AI features", () => {
     await dismissPlanOverlay(page);
 
     await page.keyboard.press("n");
-    const cursor = page.locator(".line--cursor");
-    await expect(cursor).toHaveClass(/line--ai-/);
+    const cursor = page.locator('[aria-current="true"]');
+    // landed on a line that carries an AI note
+    await expect(cursor).toHaveAttribute("data-ai-severity", /.+/);
 
     // `a` toggles the note's ack state on the line; pressing it again clears.
     await page.keyboard.press("a");
-    await expect(cursor).toHaveClass(/line--ai-acked/);
+    await expect(cursor).toHaveAttribute("data-acked", "true");
     await page.keyboard.press("a");
-    await expect(cursor).not.toHaveClass(/line--ai-acked/);
+    await expect(cursor).not.toHaveAttribute("data-acked", "true");
 
     // `r` opens the reply composer in the Inspector.
     await page.keyboard.press("r");
@@ -100,7 +101,7 @@ test.describe("Journey 5 — AI features", () => {
 
     await page.keyboard.press("/");
     await expect(page.getByPlaceholder("search prompts…")).toBeVisible();
-    await page.locator(".picker__item").first().click();
+    await page.getByRole("listbox").getByRole("option").first().click();
     await page.getByRole("button", { name: "run", exact: true }).click();
 
     // The run row appears and settles streaming… → done; expanding it shows
@@ -133,7 +134,7 @@ test.describe("Journey 5 — AI features", () => {
 
     await page.keyboard.press("/");
     await expect(page.getByPlaceholder("search prompts…")).toBeVisible();
-    await page.locator(".picker__item").first().click();
+    await page.getByRole("listbox").getByRole("option").first().click();
     await page.getByRole("button", { name: "run", exact: true }).click();
 
     const run = page.locator(".promptrun").first();

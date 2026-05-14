@@ -72,7 +72,7 @@ test.describe("Journey 2 — local worktree", () => {
 
     // Cursor starts on the first file's first line. `j` advances it — the
     // highlighted line's text changes.
-    const cursor = page.locator(".line--cursor");
+    const cursor = page.locator('[aria-current="true"]');
     await expect(cursor).toHaveCount(1);
     const beforeLine = await cursor.textContent();
     await page.keyboard.press("j");
@@ -113,14 +113,13 @@ test.describe("Journey 2 — local worktree", () => {
       await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
 
       // Baseline: the live-reload bar is watching the worktree.
-      await expect(page.locator(".livebar")).toBeVisible();
+      const liveBar = page.getByRole("status", { name: "live reload" });
+      await expect(liveBar).toBeVisible();
 
-      // A new commit lands; the 3s poll picks it up and the stale banner
-      // offers a reload.
+      // A new commit lands; the 3s poll picks it up and the banner offers a
+      // reload.
       addCommit(own.path);
-      const stale = page.locator(".livebar--stale");
-      await expect(stale).toBeVisible({ timeout: 12_000 });
-      await expect(stale).toContainText("reload");
+      await expect(liveBar).toContainText("reload", { timeout: 12_000 });
     } finally {
       own.cleanup();
     }
@@ -136,13 +135,14 @@ test.describe("Journey 2 — local worktree", () => {
       await expectWorkspaceLoaded(page);
       await loadFixtureWorktree(page, own.path);
       await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
-      await expect(page.locator(".livebar")).toBeVisible();
+      const liveBar = page.getByRole("status", { name: "live reload" });
+      await expect(liveBar).toBeVisible();
 
       // The worktree vanishes; the next poll 404s and the gone banner shows.
       own.cleanup();
-      const gone = page.locator(".livebar--gone");
-      await expect(gone).toBeVisible({ timeout: 15_000 });
-      await expect(gone).toContainText("no longer reachable");
+      await expect(liveBar).toContainText("no longer reachable", {
+        timeout: 15_000,
+      });
     } finally {
       own.cleanup();
     }

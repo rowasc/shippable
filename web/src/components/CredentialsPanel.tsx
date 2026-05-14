@@ -269,7 +269,7 @@ function CredentialRow({
             </button>
           )}
         </div>
-        {err && <p className="creds__error">{err}</p>}
+        {err && <p className="creds__error" role="alert">{err}</p>}
       </div>
     );
   }
@@ -298,7 +298,7 @@ function CredentialRow({
           {busy ? "clearing…" : "clear"}
         </button>
       )}
-      {err && <p className="creds__error">{err}</p>}
+      {err && <p className="creds__error" role="alert">{err}</p>}
     </div>
   );
 }
@@ -441,7 +441,7 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
             cancel
           </button>
         </div>
-        {submitErr && <p className="creds__error">{submitErr}</p>}
+        {submitErr && <p className="creds__error" role="alert">{submitErr}</p>}
       </div>
     );
   }
@@ -478,7 +478,7 @@ function AddGithubHost({ open, onOpen, onClose, existingHosts, onSubmit }: AddPr
         </button>
       </div>
       {isDuplicate && (
-        <p className="creds__error">
+        <p className="creds__error" role="alert">
           A credential for <code>{normalised}</code> already exists; use Rotate
           on the existing row.
         </p>

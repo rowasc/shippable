@@ -76,7 +76,7 @@ test.describe("Journey 6 — cross-cutting", () => {
   }) => {
     // cs-42 ships with review comments and AI notes. `n` jumps the cursor to
     // the next comment-bearing line; Shift+N returns to the previous one.
-    const cursor = page.locator(".line--cursor");
+    const cursor = page.locator('[aria-current="true"]');
     await page.keyboard.press("n");
     const firstStop = await cursor.textContent();
     await page.keyboard.press("n");
