@@ -10,7 +10,7 @@ We already carry typed intent in several places, but each as its own private voc
 - `hunk.teammateReview.verdict` — `"approve" | "comment"`.
 - `AgentReply.outcome` — `"addressed" | "declined" | "noted"`.
 
-Five vocabularies, all describing the same conceptual thing: *what does this interaction express?* This plan generalizes the primitive: every author (user, AI, teammate, agent) emits **review interactions**, each interaction carries an explicit **intent**, and the interactions stack append-only on a shared store. A comment is one intent. Ack is another. Request is the rest of the starter set.
+Five vocabularies, all describing the same conceptual thing: *what does this interaction express?* This plan generalizes the primitive: every author — humans (you, teammates, PR reviewers) and AI (static annotations and the dialogue agent) — emits **review interactions**, each interaction carries an explicit **intent**, and the interactions stack append-only on a shared store. A comment is one intent. Ack is another. Request is the rest of the starter set.
 
 This subsumes `ackedNotes` (ack becomes an intent), `AiNote.severity` (severity maps to intent), `teammateReview.verdict` (verdict maps to intent), and eventually `AgentReply.outcome` (outcome maps to intent). The underlying ingest shapes don't have to disappear in one go — they project into the unified store at the read seam.
 
@@ -34,13 +34,15 @@ What this does **not** try to do (yet):
 
 We've been overloading `kind` for two unrelated things. We need to separate them before adding the intent axis.
 
-**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`user` / `ai` / `teammate` / `agent`) further discriminates. The target axis adds no information that isn't already addressable through those.
+**Today:** `Comment.kind` on the wire is `"line" | "block" | "reply-to-ai-note" | "reply-to-teammate" | "reply-to-hunk-summary"`. That's *where the interaction is attached* — line vs block, fresh thread vs reply to a particular note-type. It is not about intent. The five reply variants are also redundant: the existing `threadKey` prefix (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) already encodes parent provenance, and an interaction's `authorRole` (`human` / `ai`) further discriminates human-authored vs AI-authored. The target axis adds no information that isn't already addressable through those.
 
 **Proposal:** rename that dimension to **`target`** — "what the interaction targets / attaches to" — and collapse it to three values: `"line"`, `"block"`, `"reply"`. `line` and `block` are fresh-thread anchors on code; `reply` is a reply to anything else. Consumers that need to discriminate "reply to what kind of parent?" read the `threadKey` prefix or the projected thread's head `authorRole` (see § Cross-thread aggregation). The minor cost of `target` is that `targetKey` already exists in the `ADD_REPLY` action; that's a small overload but actually consistent with the new field's meaning.
 
 The umbrella name for both dimensions together is **interaction**.
 
-**On agent-authored thread heads.** Today the agent only responds to existing threads (via the nested `agentReplies` shape). The plan future-proofs for the agent eventually starting fresh threads on its own — flagging "I noticed something during a session" without waiting to be asked. The agent can author a fresh-thread interaction with `target: "line"` or `target: "block"`; its identity rides in `author` / `authorRole: "agent"`. Replies to an agent-started thread use `target: "reply"` like any other reply; renderers that want to differentiate "the responder is talking to the agent" inspect the thread's head `authorRole`, not the target. No new target variant is needed.
+**On AI-authored thread heads.** Today the dialogue agent only responds to existing threads (via the nested `agentReplies` shape). The plan future-proofs for AI eventually starting fresh threads on its own — flagging "I noticed something during a session" without waiting to be asked. An AI-authored fresh-thread interaction uses `target: "line"` or `target: "block"`; the specific actor (static-annotation pipeline vs dialogue agent) lives in `author`, while `authorRole` is just `"ai"`. Replies to an AI thread use `target: "reply"` like any other reply. No new target variant is needed.
+
+We don't differentiate the static-annotation pipeline from the dialogue agent at the role level — both are AI, both render with AI styling, replies to either get enqueued to the dialogue agent and trigger a response. If a consumer ever needs to know "which AI pipeline produced this," that's a provenance lookup against `author` or `threadKey`, not an enum branch.
 
 So:
 
@@ -170,7 +172,7 @@ At the **render seam** (the view layer in `view.ts`), a uniform `Interaction[]` 
 interface Interaction {
   id: string;
   author: string;
-  authorRole: "user" | "ai" | "teammate" | "agent";
+  authorRole: "human" | "ai";
   intent: InteractionIntent;
   target: InteractionTarget;
   threadKey: string;        // existing reply-key
@@ -208,7 +210,7 @@ function selectInteractions(state: ReviewState): {
   byThreadKey: Record<string, Interaction[]>;
   threads: Array<{
     threadKey: string;
-    headAuthorRole: "user" | "ai" | "teammate" | "agent";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
+    headAuthorRole: "human" | "ai";  // derived: interactions[0].authorRole — the discriminator that was previously baked into the target variant
     currentAsk: AskIntent;             // derived: latest ask-intent reply
     originalAsk: AskIntent;            // derived: interactions[0].intent (always an ask)
     currentResponse: Exclude<ResponseIntent, "unack"> | null;  // derived: thread-level rollup; `unack` cancels and resolves to null
@@ -372,8 +374,8 @@ Per-element attribute set:
 | `id`          | yes      | opaque string                                          | reply-back via `shippable_post_review_comment`                        |
 | `target`      | yes      | `InteractionTarget` (see Naming section)               | replaces the old `kind` attribute                                     |
 | `intent`      | yes      | `InteractionIntent` (see Naming section)               | new                                                                   |
-| `author`      | yes      | display name                                           | who wrote it (local reviewer, PR reviewer, teammate ingest, …)        |
-| `authorRole`  | yes      | `"user" \| "ai" \| "teammate" \| "agent"`              | how the consumer should treat it; PR-imported reviewers are `user`   |
+| `author`      | yes      | display name                                           | specific actor — local reviewer, PR reviewer, teammate ingest, static-AI pipeline, dialogue agent, etc. |
+| `authorRole`  | yes      | `"human" \| "ai"`                                      | category of actor; PR-imported reviewers and teammate-ingest reviews are both `human`; static annotations and dialogue-agent replies are both `ai` |
 | `file`        | yes      | repo-relative path                                     | (unchanged)                                                            |
 | `lines`       | when relevant | line or range as today                            | omitted for thread-level interactions where lines don't apply         |
 | `htmlUrl`     | when PR-sourced | `external.htmlUrl`                                | provenance link back to GitHub                                        |
@@ -383,33 +385,33 @@ Per-element attribute set:
 ```xml
 <reviewer-feedback from="shippable" commit="<sha>">
   <interaction id="cmt_3f7a91" target="block" intent="request"
-               author="@romina" authorRole="user"
+               author="@romina" authorRole="human"
                file="server/src/queue.ts" lines="72-79">
     The atomic-ish rename here only avoids torn reads, not concurrent
     writers…
   </interaction>
   <interaction id="cmt_b22c04" target="reply" intent="comment"
-               author="@romina" authorRole="user"
+               author="@romina" authorRole="human"
                file="web/src/state.ts" lines="118">
     AI note said this branch was unreachable. It's reachable from the
     keymap handler…
   </interaction>
   <interaction id="cmt_a91e02" target="reply" intent="ack"
-               author="@romina" authorRole="user"
+               author="@romina" authorRole="human"
                file="web/src/parseDiff.ts" lines="42" />
   <interaction id="cmt_d1e8f3" target="reply" intent="accept"
-               author="@romina" authorRole="user"
+               author="@romina" authorRole="human"
                file="server/src/queue.ts" lines="72-79">
     Good catch — switching to a write lock in 5b8a2c1.
   </interaction>
   <interaction id="cmt_pr_99f1" target="reply" intent="request"
-               author="external-reviewer" authorRole="user"
+               author="external-reviewer" authorRole="human"
                htmlUrl="https://github.com/org/repo/pull/123#discussion_r4242"
                file="server/src/queue.ts" lines="72-79">
     Same concern from the PR — please add a smoke test before merge.
   </interaction>
   <interaction id="cmt_e7f209" target="reply" intent="reject"
-               author="@romina" authorRole="user"
+               author="@romina" authorRole="human"
                file="web/src/state.ts" lines="118">
     Disagree — this branch is reachable from the keymap handler at line 240.
     See REPL transcript: <agentRunId>r_19f4</agentRunId>.
@@ -495,7 +497,7 @@ GitHub PR reviews carry a *review-level* verdict alongside per-thread comments: 
 
 `APPROVE` is reserved for an explicit reviewer action (a future affordance — single-button "approve PR" at the workspace level). The plan doesn't try to derive `APPROVE` from intent counts, because "all threads acked" and "all threads accepted" both seem to qualify but neither is necessarily a positive endorsement of the PR as a whole.
 
-This is push-only — local `currentAsk` does not change because someone clicked Approve on GitHub. PR-level verdict ingest goes the other way: ingested PR reviews surface as their own kind of interaction with `authorRole: "user"` and `target: "reply"`, body = the review summary text, intent derived from the GitHub verdict (approve → `accept` at PR level; request_changes → `blocker`; comment → `comment`).
+This is push-only — local `currentAsk` does not change because someone clicked Approve on GitHub. PR-level verdict ingest goes the other way: ingested PR reviews surface as their own kind of interaction with `authorRole: "human"` and `target: "reply"`, body = the review summary text, intent derived from the GitHub verdict (approve → `accept` at PR level; request_changes → `blocker`; comment → `comment`).
 
 ## Keybindings (best-practice revision)
 
@@ -565,6 +567,7 @@ Pinning these before any code:
 - **Selector cost.** The cross-thread aggregation walks every interaction on every render. Mitigation: memoize on `(changesetId, repliesRevision, ackedNotesRevision)`, with the two revision counters maintained by the reducer (added in slice 1; see § Cross-thread aggregation). Slice 1 ships with a benchmark on a 200-thread fixture; if it regresses re-render perf, we move the selector to `useMemo` per consumer.
 - **Wire rename is a breaking change for any in-flight agent session.** The MCP server is in-tree and updates atomically with the rest of the surface; existing in-memory queues are dropped on server restart anyway. The risk is small and we accept it.
 - **Render code that switched on the old `reply-to-*` variants** (badges differentiating ai-note vs hunk-summary vs teammate vs user threads) must switch to the projected thread's `headAuthorRole` or the `threadKey` prefix instead. The slice-0 reducer tests of the threadKey conventions (`note:` / `hunkSummary:` / `teammate:` / `user:` / `block:`) catch any seam that's still doing the old switch.
+- **Render code that switched on `authorRole === "teammate"` or `=== "agent"`** has to drop to `threadKey` prefix or to inspecting `author` instead. Same shape of fix; same slice-0 tests catch the misses.
 
 ## Docs to update when implementation lands
 
