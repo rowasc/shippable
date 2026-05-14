@@ -377,7 +377,7 @@ Per-element attribute set:
 
 | attribute     | required | values                                                | notes                                                                 |
 | ------------- | -------- | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| `id`          | yes      | opaque string                                          | reply-back via `shippable_post_review_reply`                          |
+| `id`          | yes      | opaque string                                          | reply-back via `shippable_post_review_comment`                        |
 | `target`      | yes      | `InteractionTarget` (see Naming section)               | replaces the old `kind` attribute                                     |
 | `intent`      | yes      | `InteractionIntent` (see Naming section)               | new                                                                   |
 | `author`      | yes      | display name                                           | who wrote it (local reviewer, PR reviewer, teammate ingest, …)        |

@@ -2,7 +2,7 @@
 
 ## Status: shipped (v0)
 
-All five v0 slices landed (see `share-review-comments-tasks.md` for the per-task ledger). `server/src/agent-queue.ts` hosts the per-worktree queue and the agent-reply store; the `/api/agent/{enqueue,pull,unenqueue,replies}` and `/api/agent/{delivered,replies}` endpoints are wired in `server/src/index.ts`. `mcp-server/` is the standalone MCP server exposing `shippable_check_review_comments` and `shippable_post_review_reply` — agent replies thread under the original comment in the panel (see `docs/sdd/agent-reply-support/spec.md`). Open follow-ups (durable queue, multi-channel pip, server-side install verification) are listed at the bottom of this doc.
+All five v0 slices landed (see `share-review-comments-tasks.md` for the per-task ledger). `server/src/agent-queue.ts` hosts the per-worktree queue and the agent-reply store; the `/api/agent/{enqueue,pull,unenqueue,replies}` and `/api/agent/{delivered,replies}` endpoints are wired in `server/src/index.ts`. `mcp-server/` is the standalone MCP server exposing `shippable_check_review_comments` and `shippable_post_review_comment` — agent replies thread under the original comment in the panel (see `docs/sdd/agent-reply-support/spec.md` for the original reply-only design, `docs/sdd/agent-comments/spec.md` for the top-level extension that renamed the tool). Open follow-ups (durable queue, multi-channel pip, server-side install verification) are listed at the bottom of this doc.
 
 The remainder of this doc is the original plan.
 
