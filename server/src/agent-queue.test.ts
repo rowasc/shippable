@@ -13,6 +13,7 @@ import {
   unenqueue,
   formatPayload,
   resetForTests,
+  isValidInteractionPair,
   type Interaction,
 } from "./agent-queue.ts";
 import { assertGitDir } from "./worktree-validation.ts";
@@ -404,5 +405,34 @@ describe("formatPayload", () => {
     expect(out).toContain(
       `htmlUrl="https://github.com/org/repo/pull/123#discussion_r4242"`,
     );
+  });
+});
+
+describe("isValidInteractionPair", () => {
+  it("rejects a response intent on a code target", () => {
+    expect(isValidInteractionPair("line", "ack")).toBe(false);
+    expect(isValidInteractionPair("block", "accept")).toBe(false);
+    expect(isValidInteractionPair("line", "reject")).toBe(false);
+    expect(isValidInteractionPair("line", "unack")).toBe(false);
+  });
+
+  it("accepts an ask intent on a code target", () => {
+    expect(isValidInteractionPair("line", "comment")).toBe(true);
+    expect(isValidInteractionPair("block", "question")).toBe(true);
+    expect(isValidInteractionPair("line", "request")).toBe(true);
+    expect(isValidInteractionPair("block", "blocker")).toBe(true);
+  });
+
+  it("accepts response intents on reply-to-* targets", () => {
+    expect(isValidInteractionPair("reply-to-user", "ack")).toBe(true);
+    expect(isValidInteractionPair("reply-to-ai-note", "accept")).toBe(true);
+    expect(isValidInteractionPair("reply-to-teammate", "reject")).toBe(true);
+    expect(isValidInteractionPair("reply-to-agent", "unack")).toBe(true);
+    expect(isValidInteractionPair("reply-to-hunk-summary", "ack")).toBe(true);
+  });
+
+  it("accepts ask intents on reply-to-* targets (restating the ask)", () => {
+    expect(isValidInteractionPair("reply-to-ai-note", "comment")).toBe(true);
+    expect(isValidInteractionPair("reply-to-user", "blocker")).toBe(true);
   });
 });

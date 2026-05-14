@@ -1125,6 +1125,16 @@ async function handleAgentEnqueue(
     res.end(JSON.stringify({ error: "invalid interaction.intent" }));
     return;
   }
+  if (!agentQueue.isValidInteractionPair(ix.target, ix.intent)) {
+    writeCorsHeaders(res, origin);
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `invalid (target, intent) pair: response intents only attach to reply-to-* targets`,
+      }),
+    );
+    return;
+  }
   if (!isAuthorRole(ix.authorRole)) {
     writeCorsHeaders(res, origin);
     res.writeHead(400, { "Content-Type": "application/json" });

@@ -14,6 +14,25 @@ export type InteractionIntent = AskIntent | ResponseIntent;
 
 export type InteractionAuthorRole = "user" | "ai" | "agent";
 
+export function isAskIntent(i: InteractionIntent): i is AskIntent {
+  return i === "comment" || i === "question" || i === "request" || i === "blocker";
+}
+
+/**
+ * Validity rule (mirrors `web/src/types.ts#isValidInteractionPair`): response
+ * intents only ever attach to other interactions — every `reply-to-*` target.
+ * Asks attach to code (`line`/`block`) or to other interactions. The web
+ * reducer and composer enforce this too; this is the third belt-and-braces
+ * seam called out in docs/plans/typed-review-interactions.md (§158-162).
+ */
+export function isValidInteractionPair(
+  target: InteractionTarget,
+  intent: InteractionIntent,
+): boolean {
+  if (target === "line" || target === "block") return isAskIntent(intent);
+  return true;
+}
+
 export interface Interaction {
   id: string;
   target: InteractionTarget;
