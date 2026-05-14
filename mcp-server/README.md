@@ -110,11 +110,7 @@ After the npm publish lands, the `command` becomes `"npx"` with
 Port resolution, in order:
 
 1. `SHIPPABLE_PORT` env — explicit override; wins if set and numeric.
-2. The Shippable port-discovery file — when the desktop app (Tauri) is running, its sidecar writes its ephemeral port to an OS-conventional path on launch:
-   - macOS: `~/Library/Application Support/Shippable/port.json`
-   - Linux: `$XDG_DATA_HOME/Shippable/port.json` (or `~/.local/share/Shippable/port.json`)
-   - Windows: `%LOCALAPPDATA%/Shippable/port.json`
-   The MCP reads the file, health-checks the listed port, and uses it on success. Stale files (sidecar killed without cleanup) fail the health check and fall through.
+2. The Shippable port-discovery file written by the desktop sidecar (see `docs/concepts/desktop-shell-and-sidecar.md` for paths and semantics). The MCP reads it, health-checks the listed port, and uses it on success; stale files fall through.
 3. `3001` — default. Matches the bare `server/` dev port.
 
 So the common cases just work: run the DMG and the MCP discovers it; run `npm run server` and the MCP hits 3001; set `SHIPPABLE_PORT` to force either.
