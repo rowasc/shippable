@@ -13,7 +13,7 @@ function reply(id: string): Interaction {
   return {
     id,
     threadKey: "user:cs1/web/src/state.ts#h1:0",
-    target: "line",
+    target: "reply",
     intent: "comment",
     author: "me",
     authorRole: "user",
