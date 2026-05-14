@@ -315,3 +315,62 @@ describe("persist v3 — hunk-validity filtering", () => {
     expect(hydrated.state!.detachedInteractions).toEqual([detached]);
   });
 });
+
+describe("persist v3 — empty / unusable changeset boot path", () => {
+  // Repro for the blank-screen crash: a clean worktree reload produced a
+  // ChangeSet with `files: []`, recents persisted it, the next boot rehydrated
+  // it, and defaultCursor crashed reading `files[0].hunks[0]`.
+  it("returns empty hydration when the only changeset has no files", () => {
+    const emptyCs: ChangeSet = {
+      id: "wt-clean",
+      title: "empty changeset",
+      author: "tester",
+      branch: "head",
+      base: "base",
+      createdAt: "2026-05-13T00:00:00.000Z",
+      description: "",
+      files: [],
+    };
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 3,
+        cursor: { changesetId: "wt-clean", fileId: "x", hunkId: "y", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        interactions: {},
+        detachedInteractions: [],
+        drafts: {},
+      }),
+    );
+
+    expect(() => loadSession([emptyCs])).not.toThrow();
+    expect(loadSession([emptyCs])).toEqual({ state: null, drafts: {} });
+  });
+
+  it("returns empty hydration when the only file has no hunks", () => {
+    const cs: ChangeSet = {
+      ...makeChangeset(),
+      files: [
+        { id: "cs1/f1", path: "cs1/f1.ts", language: "ts", status: "modified", hunks: [] },
+      ],
+    };
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 3,
+        cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "missing", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        interactions: {},
+        detachedInteractions: [],
+        drafts: {},
+      }),
+    );
+
+    expect(() => loadSession([cs])).not.toThrow();
+    expect(loadSession([cs])).toEqual({ state: null, drafts: {} });
+  });
+});

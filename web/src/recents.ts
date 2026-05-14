@@ -63,6 +63,11 @@ export function pushRecent(
   interactions: Record<string, Interaction[]>,
   source: RecentSource,
 ): RecentEntry[] {
+  // Don't persist an empty changeset — a clean worktree reload produces
+  // `files: []`, and storing that poisons the next boot (resolveBoot
+  // would hydrate it, the cursor wouldn't resolve, and rendering would
+  // crash with no file to anchor on).
+  if (!hasAnyHunk(changeset)) return loadRecents();
   const existing = loadRecents().filter((r) => r.id !== changeset.id);
   const entry: RecentEntry = {
     id: changeset.id,
@@ -75,6 +80,13 @@ export function pushRecent(
   const next = [entry, ...existing].slice(0, MAX_RECENTS);
   save(next);
   return next;
+}
+
+function hasAnyHunk(cs: ChangeSet): boolean {
+  for (const f of cs.files) {
+    if (f.hunks.length > 0) return true;
+  }
+  return false;
 }
 
 export function removeRecent(id: string): RecentEntry[] {

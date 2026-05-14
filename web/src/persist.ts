@@ -258,13 +258,16 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
     readLines[hunkId] = new Set(arr.filter((n) => Number.isFinite(n)));
   }
 
-  // When changesets is empty (welcome boot), there's no fallback cursor to
-  // resolve — return null state so the caller knows nothing to overlay.
-  if (!cursor && changesets.length === 0) return empty;
+  // No valid persisted cursor and no usable fallback in the current
+  // changesets — return null state so the caller knows nothing to overlay.
+  // Hits the welcome boot (no changesets) AND the poisoned-recent path
+  // where the only changeset has no files / no hunks.
+  const resolvedCursor = cursor ?? defaultCursor(changesets);
+  if (!resolvedCursor) return empty;
 
   return {
     state: {
-      cursor: cursor ?? defaultCursor(changesets),
+      cursor: resolvedCursor,
       readLines,
       reviewedFiles: new Set(snapshot.reviewedFiles.filter((id) => validFileIds.has(id))),
       dismissedGuides: new Set(snapshot.dismissedGuides),
@@ -308,10 +311,13 @@ function validateCursor(
   return cursor;
 }
 
-function defaultCursor(changesets: ChangeSet[]): Cursor {
+function defaultCursor(changesets: ChangeSet[]): Cursor | null {
   const cs = changesets[0];
+  if (!cs) return null;
   const file = cs.files[0];
+  if (!file) return null;
   const hunk = file.hunks[0];
+  if (!hunk) return null;
   return {
     changesetId: cs.id,
     fileId: file.id,

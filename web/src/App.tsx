@@ -68,7 +68,7 @@ function resolveBoot(): BootSeed {
   if (peeked && hasProgress(peeked)) {
     const csId = peeked.cursor.changesetId;
     const recent = loadRecents().find((r) => r.id === csId);
-    if (recent) {
+    if (recent && isResumableChangeset(recent.changeset)) {
       return {
         changesets: [recent.changeset],
         interactions: { ...recent.interactions },
@@ -77,7 +77,7 @@ function resolveBoot(): BootSeed {
       };
     }
     const stub = findStub(csId);
-    if (stub) {
+    if (stub && isResumableChangeset(stub.changeset)) {
       return {
         changesets: [stub.changeset],
         interactions: { ...stub.interactions },
@@ -93,6 +93,16 @@ function resolveBoot(): BootSeed {
     applyPersisted: false,
     source: null,
   };
+}
+
+// Stored recents from before the pushRecent guard landed can have empty
+// `files`. Treat them as non-resumable so boot falls through to Welcome
+// instead of crashing on a cursor we can't anchor.
+function isResumableChangeset(cs: ChangeSet): boolean {
+  for (const f of cs.files) {
+    if (f.hunks.length > 0) return true;
+  }
+  return false;
 }
 
 export default function App() {
