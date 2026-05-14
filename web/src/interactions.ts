@@ -1,16 +1,14 @@
-// The read seam for the typed-review-interactions model. Projects every
-// source of interactions in state.interactions into a single Interaction[]
-// surface, indexed for cross-thread reads.
+// The read seam for the typed-review-interactions model. A private helper,
+// `projectByThread`, owns the single walk of state.interactions (plus the
+// detached bucket) and groups by threadKey. Two public selectors build on it:
 //
-// AI per-line annotations, AI hunk summaries, and teammate reviews live in
-// state.interactions (seeded at LOAD_CHANGESET by the ingest pipeline / by
-// fixture INTERACTIONS_NN constants). The seam is a pure read over the store.
+// - `selectInteractions` adds the cross-thread `byIntent` and `threads`
+//   indexes. The path the inbox view and `n`/`N` walk will read.
+// - `selectIngestSignals` reprojects the per-thread lists into the per-line /
+//   per-hunk lookups view-model builders need to render AI notes, hunk
+//   summaries, and teammate badges.
 //
-// `selectIngestSignals(state)` is the inverse view: given a state, return
-// the per-line / per-hunk lookups the view-model builders need to render
-// AI notes / hunk summaries / teammate badges.
-//
-// See docs/plans/typed-review-interactions.md.
+// See docs/plans/typed-review-interactions.md § Cross-thread aggregation.
 
 import type {
   AskIntent,
@@ -47,6 +45,29 @@ export interface InteractionSelection {
  * bucket) into a single indexed view. Pure function of `state`.
  */
 export function selectInteractions(state: ReviewState): InteractionSelection {
+  const { all, byThreadKey } = projectByThread(state);
+
+  const byIntent = emptyByIntent();
+  for (const ix of all) byIntent[ix.intent].push(ix);
+
+  const threads: ThreadSummary[] = [];
+  for (const [threadKey, interactions] of Object.entries(byThreadKey)) {
+    threads.push(summariseThread(threadKey, interactions));
+  }
+
+  return { all, byIntent, byThreadKey, threads };
+}
+
+/**
+ * Shared first pass: collect every interaction (store + detached bucket) and
+ * group by thread, sorted by `createdAt`. Both `selectInteractions` and
+ * `selectIngestSignals` build on this; the heavier `byIntent` / `threads`
+ * indexes only get computed when a caller actually wants them.
+ */
+function projectByThread(state: ReviewState): {
+  all: Interaction[];
+  byThreadKey: Record<string, Interaction[]>;
+} {
   const all: Interaction[] = [];
   for (const list of Object.values(state.interactions)) {
     for (const ix of list) all.push(ix);
@@ -61,15 +82,7 @@ export function selectInteractions(state: ReviewState): InteractionSelection {
     list.sort(compareByCreatedAt);
   }
 
-  const byIntent = emptyByIntent();
-  for (const ix of all) byIntent[ix.intent].push(ix);
-
-  const threads: ThreadSummary[] = [];
-  for (const [threadKey, interactions] of Object.entries(byThreadKey)) {
-    threads.push(summariseThread(threadKey, interactions));
-  }
-
-  return { all, byIntent, byThreadKey, threads };
+  return { all, byThreadKey };
 }
 
 // ── Ingest signal lookups (view-side) ────────────────────────────────────
@@ -101,10 +114,14 @@ export interface IngestSignals {
 }
 
 /**
- * Project the AI / teammate Interactions stored in `state.interactions`
- * back into per-line / per-hunk lookups for the render layer. The view-model
- * builders consume these instead of reading `line.aiNote`, `hunk.aiSummary`,
- * `hunk.teammateReview` (those fields no longer exist).
+ * Project the AI / teammate Interactions into per-line / per-hunk lookups
+ * for the render layer. The view-model builders consume these instead of
+ * reading `line.aiNote`, `hunk.aiSummary`, `hunk.teammateReview` (those
+ * fields no longer exist).
+ *
+ * Shares the `projectByThread` first pass with `selectInteractions`, so the
+ * store is walked the same way for both — without paying for the heavier
+ * `byIntent` / `threads` indexes the ingest path doesn't need.
  *
  * Only the *first* AI-authored interaction on a note: / hunkSummary: key is
  * used — subsequent entries on the same key are replies, not annotations.
@@ -115,7 +132,8 @@ export function selectIngestSignals(state: ReviewState): IngestSignals {
   const aiSummaryByHunk: Record<string, string> = {};
   const teammateByHunk: Record<string, TeammateSignal> = {};
 
-  for (const [threadKey, list] of Object.entries(state.interactions)) {
+  const { byThreadKey } = projectByThread(state);
+  for (const [threadKey, list] of Object.entries(byThreadKey)) {
     if (list.length === 0) continue;
 
     if (threadKey.startsWith("note:")) {
