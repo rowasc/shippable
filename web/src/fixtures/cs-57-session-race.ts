@@ -258,7 +258,7 @@ export const INTERACTIONS_57: Record<string, Interaction[]> = {
       target: "block",
       intent: "ack",
       author: "mina",
-      authorRole: "teammate",
+      authorRole: "user",
       body: "timeout budget looks fine given our boot SLO",
       createdAt: INGEST_TS,
     },

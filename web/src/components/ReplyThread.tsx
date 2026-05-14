@@ -66,8 +66,11 @@ export function ReplyThread({
   // heads (AI note, AI hunk summary, teammate review); skip them here so
   // they don't render twice. User-authored thread heads (line/block) are
   // kept — those *are* the first reply in the thread view.
+  // Teammate verdicts are now `authorRole: "user"`; they're identified
+  // structurally as the head of a `teammate:` thread (target !== "reply").
   const rows = interactions.filter((ix) => {
-    if (ix.authorRole === "ai" || ix.authorRole === "teammate") return false;
+    if (ix.authorRole === "ai") return false;
+    if (ix.threadKey.startsWith("teammate:") && ix.target !== "reply") return false;
     return true;
   });
 

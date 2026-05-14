@@ -341,7 +341,7 @@ export const INTERACTIONS_42: Record<string, Interaction[]> = {
       target: "block",
       intent: "comment",
       author: "dan",
-      authorRole: "teammate",
+      authorRole: "user",
       body: "a11y labels on the toggles look good to me",
       createdAt: INGEST_TS,
     },

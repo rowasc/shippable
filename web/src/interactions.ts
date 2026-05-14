@@ -152,7 +152,9 @@ export function selectIngestSignals(state: ReviewState): IngestSignals {
     }
 
     if (threadKey.startsWith("teammate:")) {
-      const teammate = list.find((ix) => ix.authorRole === "teammate");
+      // Head of a teammate: thread is the ingest verdict (target !== "reply");
+      // any later entries are replies on the verdict thread.
+      const teammate = list.find((ix) => ix.target !== "reply");
       if (!teammate) continue;
       teammateByHunk[threadKey.slice("teammate:".length)] = {
         user: teammate.author,

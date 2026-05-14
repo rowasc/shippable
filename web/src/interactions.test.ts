@@ -208,7 +208,7 @@ function seedFromHunkOpts(
         target: "block",
         intent: teammateVerdictIntent(opts.teammateReview.verdict),
         author: opts.teammateReview.user,
-        authorRole: "teammate",
+        authorRole: "user",
         body: opts.teammateReview.note ?? "",
         createdAt: INGEST_TS,
       },
@@ -384,7 +384,7 @@ describe("selectInteractions — teammate reviews", () => {
   it("projects approve verdict as intent: ack", () => {
     const [ix] = selectInteractions(csWithTeammate("approve")).all;
     expect(ix.intent).toBe("ack");
-    expect(ix.authorRole).toBe("teammate");
+    expect(ix.authorRole).toBe("user");
     expect(ix.target).toBe("block");
     expect(ix.author).toBe("luiz");
     expect(ix.threadKey).toBe(teammateReplyKey(HUNK_ID));

@@ -507,9 +507,16 @@ function buildCommentCounts(
     if (!parsed) continue;
     const fileId = hunkToFile.get(parsed.hunkId);
     if (!fileId) continue;
-    const userish = list.filter(
-      (ix) => ix.authorRole === "user" || ix.authorRole === "agent",
-    ).length;
+    // Count user-driven activity: local replies and agent posts. The
+    // teammate-verdict head on a `teammate:` thread is now also
+    // `authorRole: "user"` but isn't local activity — skip it
+    // structurally (it's the head, not a reply).
+    const userish = list.filter((ix) => {
+      if (ix.authorRole === "agent") return true;
+      if (ix.authorRole !== "user") return false;
+      if (key.startsWith("teammate:") && ix.target !== "reply") return false;
+      return true;
+    }).length;
     if (userish === 0) continue;
     counts.set(fileId, (counts.get(fileId) ?? 0) + userish);
   }

@@ -461,7 +461,7 @@ export const INTERACTIONS_99: Record<string, Interaction[]> = {
       target: "block",
       intent: "comment",
       author: "marco",
-      authorRole: "teammate",
+      authorRole: "user",
       body: "Approved everything except compare_tokens — please switch to hash_equals before this lands.",
       createdAt: INGEST_TS,
     },

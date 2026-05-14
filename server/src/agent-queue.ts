@@ -12,7 +12,7 @@ export type AskIntent = "comment" | "question" | "request" | "blocker";
 export type ResponseIntent = "ack" | "unack" | "accept" | "reject";
 export type InteractionIntent = AskIntent | ResponseIntent;
 
-export type InteractionAuthorRole = "user" | "ai" | "teammate" | "agent";
+export type InteractionAuthorRole = "user" | "ai" | "agent";
 
 export interface Interaction {
   id: string;

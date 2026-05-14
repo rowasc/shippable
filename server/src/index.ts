@@ -870,7 +870,6 @@ const ALL_INTENTS: readonly InteractionIntent[] = [
 const AUTHOR_ROLES: readonly InteractionAuthorRole[] = [
   "user",
   "ai",
-  "teammate",
   "agent",
 ];
 

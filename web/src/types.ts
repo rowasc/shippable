@@ -511,7 +511,12 @@ export type ResponseIntent = "ack" | "unack" | "accept" | "reject";
 
 export type InteractionIntent = AskIntent | ResponseIntent;
 
-export type InteractionAuthorRole = "user" | "ai" | "teammate" | "agent";
+/** Category of actor. `user` covers everyone human (local reviewer,
+ *  PR-imported reviewers, teammate-ingest); the specific provenance lives
+ *  in `author` (display name) and the `threadKey` prefix
+ *  (`teammate:` flags an ingest-sourced verdict head). `ai` is the static
+ *  annotation pipeline; `agent` is the live dialogue agent. */
+export type InteractionAuthorRole = "user" | "ai" | "agent";
 
 /**
  * The unified primitive. One shape for every reviewer signal. The author
