@@ -129,53 +129,80 @@ function IntentSection({
   onNavigate?: (ev: EvidenceRef) => void;
   onFilterToCommit?: (sha: string) => void;
 }) {
-  // AI-supplied intent claims always take precedence — they describe the
-  // change in a way the description usually doesn't.
-  if (intent.length > 0) {
+  const hasClaims = intent.length > 0;
+  // `prSource.body` is the author-written PR description. Keep it visible
+  // alongside the AI claims — the claims are Claude's synthesis, the body is
+  // the source of truth the reviewer wants to compare against.
+  const prBody = (changeset?.prSource?.body ?? "").trim();
+  // `description` is the synthesised single-commit subject worktree loads fall
+  // back to when there is no PR body. Drop it once AI claims exist — the
+  // claims describe the change better than its subject line.
+  const fallbackDescription =
+    !prBody && !hasClaims ? (changeset?.description ?? "").trim() : "";
+  const hasCommits = !!changeset?.commits && changeset.commits.length > 0;
+
+  if (!hasClaims && !prBody && !fallbackDescription && !hasCommits) {
     return (
       <section className="plan__sec">
         <div className="plan__sec-h">What this change does</div>
-        <ul className="plan__claims">
-          {intent.map((c, i) => (
-            <ClaimRow key={i} claim={c} onNavigate={onNavigate} />
-          ))}
-        </ul>
+        <div className="plan__empty">No description available.</div>
       </section>
     );
   }
 
-  // Prefer the PR body (richer than the synthesised single-commit subject we
-  // fall back to in worktree loads).
-  const description = (changeset?.prSource?.body ?? changeset?.description ?? "").trim();
-
-  const hasCommits = !!changeset?.commits && changeset.commits.length > 0;
-
   return (
-    <section className="plan__sec">
-      <div className="plan__sec-h">What this change does</div>
-      {description && (
-        <div className="plan__desc">
-          <MarkdownView
-            source={description}
-            basePath=""
-            imageAssets={changeset?.imageAssets}
-          />
-        </div>
+    <>
+      {hasClaims && (
+        <section className="plan__sec">
+          <div className="plan__sec-h">What this change does</div>
+          <ul className="plan__claims">
+            {intent.map((c, i) => (
+              <ClaimRow key={i} claim={c} onNavigate={onNavigate} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {prBody && (
+        <section className="plan__sec">
+          <div className="plan__sec-h">PR description</div>
+          <div className="plan__desc">
+            <MarkdownView
+              source={prBody}
+              basePath=""
+              imageAssets={changeset?.imageAssets}
+            />
+          </div>
+          {changeset && !hasCommits && (
+            <DescriptionFiles changeset={changeset} onNavigate={onNavigate} />
+          )}
+        </section>
+      )}
+      {fallbackDescription && (
+        <section className="plan__sec">
+          <div className="plan__sec-h">What this change does</div>
+          <div className="plan__desc">
+            <MarkdownView
+              source={fallbackDescription}
+              basePath=""
+              imageAssets={changeset?.imageAssets}
+            />
+          </div>
+          {changeset && !hasCommits && (
+            <DescriptionFiles changeset={changeset} onNavigate={onNavigate} />
+          )}
+        </section>
       )}
       {changeset && hasCommits && (
-        <CommitGroups
-          changeset={changeset}
-          onNavigate={onNavigate}
-          onFilterToCommit={onFilterToCommit}
-        />
+        <section className="plan__sec">
+          <div className="plan__sec-h">Commits</div>
+          <CommitGroups
+            changeset={changeset}
+            onNavigate={onNavigate}
+            onFilterToCommit={onFilterToCommit}
+          />
+        </section>
       )}
-      {changeset && !hasCommits && description && (
-        <DescriptionFiles changeset={changeset} onNavigate={onNavigate} />
-      )}
-      {!description && !hasCommits && (
-        <div className="plan__empty">No description available.</div>
-      )}
-    </section>
+    </>
   );
 }
 
