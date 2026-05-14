@@ -64,11 +64,14 @@ test.describe("Journey 5 — AI features", () => {
     // landed on a line that carries an AI note
     await expect(cursor).toHaveAttribute("data-ai-severity", /.+/);
 
-    // `a` toggles the note's ack state on the line; pressing it again clears.
+    // `a` acks the note: the line's data-acked flips AND the Inspector grows
+    // a "✓ acked" affordance. Pressing it again clears both.
     await page.keyboard.press("a");
     await expect(cursor).toHaveAttribute("data-acked", "true");
+    await expect(page.getByRole("button", { name: "✓ acked" })).toBeVisible();
     await page.keyboard.press("a");
     await expect(cursor).not.toHaveAttribute("data-acked", "true");
+    await expect(page.getByRole("button", { name: "✓ acked" })).toHaveCount(0);
 
     // `r` opens the reply composer in the Inspector.
     await page.keyboard.press("r");
@@ -142,5 +145,133 @@ test.describe("Journey 5 — AI features", () => {
     // The error detail lives in the expanded body.
     await run.getByRole("button", { expanded: false }).click();
     await expect(run.locator(".promptrun__err")).toContainText("429");
+  });
+
+  test("plan: clicking an evidence reference jumps the cursor", async ({
+    visit,
+    page,
+  }) => {
+    await ensureAnthropicConfigured(page, visit);
+    await page.getByRole("button", { name: "Send to Claude" }).click();
+    await expect(page.getByText(/FAKE-PLAN:/)).toBeVisible();
+
+    // The fake plan's claim cites src/utils/storage.ts — clicking that
+    // reference (scoped to the plan dialog, not the sidebar file row) jumps
+    // the cursor into the file.
+    await page
+      .getByRole("dialog", { name: "review plan" })
+      .getByRole("button", { name: "src/utils/storage.ts" })
+      .first()
+      .click();
+    await expect(page.getByRole("main")).toContainText("src/utils/storage.ts");
+  });
+
+  test("Inspector ack + reply persist across reload", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    // Ack a note and leave a reply on it.
+    await page.keyboard.press("n");
+    await page.keyboard.press("a");
+    await expect(page.getByRole("button", { name: "✓ acked" })).toBeVisible();
+    await page.keyboard.press("r");
+    const composer = page.getByPlaceholder("Write a reply…");
+    await composer.fill("e2e: looks intentional");
+    await composer.press("ControlOrMeta+Enter");
+    await expect(page.getByText("e2e: looks intentional")).toBeVisible();
+
+    // Wait for the debounced session save, then reopen at `/` — the session
+    // resumes with the ack and the reply intact.
+    await page.waitForFunction(
+      () =>
+        (localStorage.getItem("shippable:review:v1") ?? "").includes(
+          "e2e: looks intentional",
+        ),
+    );
+    await visit("/");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+    await expect(page.getByRole("button", { name: "✓ acked" })).toBeVisible();
+    await expect(page.getByText("e2e: looks intentional")).toBeVisible();
+  });
+
+  test("plan diagram: generate opens the diagram with type tabs", async ({
+    visit,
+    page,
+  }) => {
+    await ensureAnthropicConfigured(page, visit);
+    // The plan overlay offers a "generate diagram" affordance.
+    await page.getByRole("button", { name: "generate diagram" }).click();
+    await expect(
+      page.getByRole("tablist", { name: "Diagram types" }),
+    ).toBeVisible();
+  });
+
+  test("inline runner: e runs a hunk and shows output", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+
+    // Move to src/utils/storage.ts — a hunk with real runnable code — and run
+    // it with `e`. Running produces output (logs / return / error) in-panel.
+    await page.keyboard.press("]");
+    await expect(page.getByRole("main")).toContainText("src/utils/storage.ts");
+    await page.keyboard.press("e");
+
+    const runner = page.locator(".coderunner--open");
+    await expect(runner).toBeVisible();
+    await runner.locator(".coderunner__run").first().click();
+    await expect(runner.locator(".coderunner__out")).toBeVisible();
+  });
+
+  test("prompt runs panel: widen and dismiss controls", async ({
+    visit,
+    page,
+  }) => {
+    await ensureAnthropicConfigured(page, visit);
+    await dismissPlanOverlay(page);
+    await page.keyboard.press("/");
+    await page.getByRole("listbox").getByRole("option").first().click();
+    await page.getByRole("button", { name: "run", exact: true }).click();
+
+    const run = page.locator(".promptrun").first();
+    await expect(run).toBeVisible();
+    // The panel widens and narrows…
+    await page.getByRole("button", { name: /widen the sidebar/ }).click();
+    await page.getByRole("button", { name: /narrow the sidebar/ }).click();
+    // …and the run can be dismissed.
+    await page.getByRole("button", { name: "dismiss this run" }).click();
+    await expect(run).toHaveCount(0);
+  });
+
+  test("prompt editor: fork a built-in, edit, save, delete", async ({
+    visit,
+    page,
+  }) => {
+    await ensureAnthropicConfigured(page, visit);
+    await dismissPlanOverlay(page);
+    await page.keyboard.press("/");
+    await expect(page.getByPlaceholder("search prompts…")).toBeVisible();
+
+    // Fork a built-in prompt into an editable user copy, tweak it, save.
+    await page.getByRole("button", { name: "fork" }).first().click();
+    await page
+      .getByPlaceholder("Short summary shown in the picker")
+      .fill("e2e edited copy");
+    await page.getByRole("button", { name: "save", exact: true }).click();
+    await expect(page.getByText("e2e edited copy")).toBeVisible();
+
+    // Deleting the user override restores the library default.
+    await page.getByRole("button", { name: "edit" }).first().click();
+    await page.getByRole("button", { name: "delete" }).click();
+    await page.getByRole("button", { name: "yes" }).click();
+    await expect(page.getByText("e2e edited copy")).toHaveCount(0);
   });
 });

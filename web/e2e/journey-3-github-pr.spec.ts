@@ -29,6 +29,18 @@ function tokenModal(page: import("@playwright/test").Page) {
   return page.getByRole("dialog", { name: "GitHub token required" });
 }
 
+/** Load the fake PR end to end: submit the URL, satisfy the token modal, and
+ *  wait for the PR changeset to render. */
+async function loadFakePr(page: import("@playwright/test").Page) {
+  await submitUrl(page, PR_URL);
+  const modal = tokenModal(page);
+  await modal.getByLabel("Personal Access Token").fill("ghp_e2e_fake_token");
+  await modal.getByRole("button", { name: /Save token/ }).click();
+  await expect(page.locator(".topbar__title")).toContainText(
+    "Add preferences density toggle",
+  );
+}
+
 test.describe("Journey 3 — GitHub PR", () => {
   test.beforeEach(async ({ page }) => {
     await page.unroute("**/api/auth/list"); // use the real auth store
@@ -69,7 +81,7 @@ test.describe("Journey 3 — GitHub PR", () => {
     // (PR number must be a positive integer).
     await submitUrl(page, "https://github.com/owner/repo/pull/0");
 
-    await expect(page.locator(".modal__hint--error, .modal__err")).toBeVisible();
+    await expect(page.getByRole("alert")).toBeVisible();
     // The load modal stays open and no token modal appears.
     await expect(
       page.getByRole("dialog", { name: "load changeset" }),
@@ -146,5 +158,39 @@ test.describe("Journey 3 — GitHub PR", () => {
     await expect(
       page.getByLabel("reviewed", { exact: true }).first(),
     ).toBeVisible();
+  });
+
+  test("PR conversation disclosure shows issue-level comments", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFakePr(page);
+
+    // The Inspector's "PR conversation (N)" disclosure holds issue-level
+    // comments; expanding it reveals the fake upstream's conversation comment.
+    const conversation = page.getByText(/PR conversation \(\d+\)/);
+    await expect(conversation).toBeVisible();
+    await conversation.click(); // expand the <details>
+    await expect(
+      page.getByText(/add a test for the cozy mode/),
+    ).toBeVisible();
+  });
+
+  test("multi-line review comment shows an L-range label", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFakePr(page);
+
+    // The fake PR carries a multi-line review comment (lines 2–3); it renders
+    // anchored under its hunk with an L{a}–L{b} line-range label.
+    await expect(
+      page.getByText("Should this be a union type?"),
+    ).toBeVisible();
+    await expect(page.getByText(/L2.L3/)).toBeVisible();
   });
 });

@@ -306,7 +306,7 @@ export function Inspector({
   const showPill = worktreeSource != null && !prSource && pillMatch != null;
 
   return (
-    <aside className="inspector">
+    <aside className="inspector" aria-label="inspector">
       <header className="inspector__h">
         <span className="inspector__h-label">inspector</span>
         <span className="inspector__h-viewer">viewing as @you</span>

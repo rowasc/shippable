@@ -5,8 +5,9 @@
 //
 // Layout matches `SAMPLE_WORKTREE` in docs/usability-test.md: a base commit on
 // `main`, a `feat/x` branch with one extra commit, plus tracked uncommitted
-// edits in two files and one untracked file. Files are intentionally
-// multi-line so the diff has real hunks to navigate and expand.
+// edits in two files and one untracked file. `greeting.ts` is intentionally
+// long with its committed + uncommitted edits far apart, so the cumulative
+// diff has separated hunks with collapsed context to expand.
 
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -30,20 +31,41 @@ export function farewell(name: string): string {
 
 export const DEFAULT_NAME = "world";
 
-export function greetDefault(): string {
-  return greet(DEFAULT_NAME);
+export function greetAll(names: string[]): string[] {
+  return names.map((n) => greet(n));
+}
+
+export function farewellAll(names: string[]): string[] {
+  return names.map((n) => farewell(n));
+}
+
+export interface Greeter {
+  greet(name: string): string;
+  farewell(name: string): string;
+}
+
+export const formalGreeter: Greeter = {
+  greet: (n) => \`Good day, \${n}\`,
+  farewell: (n) => \`Farewell, \${n}\`,
+};
+
+export function isGreeter(x: unknown): x is Greeter {
+  return typeof x === "object" && x !== null;
 }
 `;
 
+// Committed on feat/x: a change near the top of the file.
 const GREETING_COMMITTED = GREETING_BASE.replace(
   "  return `hi, ${name}`;",
   "  return `hello, ${name}`;",
 );
 
+// Tracked uncommitted: a change near the bottom — far enough from the
+// committed one that the cumulative diff keeps them in separate hunks.
 const GREETING_UNCOMMITTED = GREETING_COMMITTED.replace(
-  '  return `bye, ${name}`;',
-  '  return `farewell, ${name}`;',
-).replace('export const DEFAULT_NAME = "world";', 'export const DEFAULT_NAME = "everyone";');
+  "  farewell: (n) => `Farewell, ${n}`,",
+  "  farewell: (n) => `Goodbye, ${n}`,",
+);
 
 const README_BASE = `# fixture
 
@@ -96,8 +118,8 @@ export function addCommit(repoPath: string): void {
   writeFileSync(
     join(repoPath, "greeting.ts"),
     GREETING_UNCOMMITTED.replace(
+      'export const DEFAULT_NAME = "world";',
       'export const DEFAULT_NAME = "everyone";',
-      'export const DEFAULT_NAME = "the whole team";',
     ),
   );
   git("commit", "-am", "Widen the default greeting");

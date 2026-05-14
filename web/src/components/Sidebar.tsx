@@ -34,7 +34,7 @@ export function Sidebar({
   worktreePath,
 }: Props) {
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" aria-label="changed files">
       <PromptRunsPanel
         runs={runs}
         onClose={onCloseRun}

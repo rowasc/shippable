@@ -7,7 +7,12 @@
 // The folder picker (macOS-only, AppleScript) stays [manual]; we drive the
 // "paste path instead" affordance instead.
 
-import { test, expect, expectWorkspaceLoaded } from "./_lib/fixtures";
+import {
+  test,
+  expect,
+  expectWorkspaceLoaded,
+  dismissPlanOverlay,
+} from "./_lib/fixtures";
 import {
   createWorktreeRepo,
   addCommit,
@@ -41,7 +46,10 @@ async function loadFixtureWorktree(
   const row = modal.getByRole("button", { name: /feat\/x/ });
   await expect(row).toHaveCount(1);
   await row.click();
-  await expectWorkspaceLoaded(page);
+  // The modal closes only once the worktree changeset has actually loaded
+  // (setShowLoad(false) fires after the fetch resolves). Wait for that —
+  // NOT for `.diff`, which is already up from the initial `?cs=42` load.
+  await expect(modal).toHaveCount(0);
 }
 
 test.describe("Journey 2 — local worktree", () => {
@@ -98,6 +106,114 @@ test.describe("Journey 2 — local worktree", () => {
     // Toggling again clears it.
     await page.keyboard.press("Shift+M");
     await expect(page.getByLabel("reviewed", { exact: true })).toHaveCount(0);
+  });
+
+  test("commit-range picker lists the worktree's commits", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page, repo.path);
+    await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+
+    // The ⇄ range topbar button opens the commit-range picker.
+    await page.getByRole("button", { name: /range/ }).click();
+    // The fixture repo has two commits; each row offers a "just this" shortcut.
+    const justThis = page.getByRole("button", { name: "just this" });
+    await expect(justThis).toHaveCount(2);
+    // Narrowing to a single commit keeps a diff loaded.
+    await justThis.first().click();
+    await expectWorkspaceLoaded(page);
+  });
+
+  test("context expansion: expand bars and full-file view", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page, repo.path);
+    await dismissPlanOverlay(page); // fully clear the overlay — we click in the diff
+
+    // The diff shows one file at a time; move to greeting.ts, the long file
+    // whose committed + uncommitted edits are far apart → a collapsed gap
+    // with an expand bar.
+    await page.keyboard.press("]");
+    await expect(page.getByRole("main")).toContainText("greeting.ts");
+
+    // For a non-markdown worktree file the bar lazy-fetches; clicking it
+    // loads the surrounding context.
+    const expandBar = page
+      .getByRole("button", { name: /load context|expand \d+ line/ })
+      .first();
+    await expect(expandBar).toBeVisible();
+    await expandBar.click();
+
+    // The full-file toggle shows the whole file, then collapses back to hunks.
+    const fullFile = page.getByRole("button", { name: "↗ expand entire file" });
+    await expect(fullFile).toBeVisible();
+    await fullFile.click();
+    await expect(
+      page.getByRole("button", { name: "↙ collapse to hunks" }),
+    ).toBeVisible();
+  });
+
+  test("comment authoring: c opens a composer and the comment renders", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page, repo.path);
+    await dismissPlanOverlay(page);
+
+    // `c` on the current line opens the comment composer in the Inspector.
+    await page.keyboard.press("c");
+    const inspector = page.getByRole("complementary", { name: "inspector" });
+    const composer = inspector.getByRole("textbox");
+    await expect(composer).toBeVisible();
+    await composer.fill("e2e: needs a guard here");
+    await composer.press("ControlOrMeta+Enter");
+
+    // The saved comment renders back in the Inspector.
+    await expect(inspector).toContainText("e2e: needs a guard here");
+  });
+
+  test("worktree review progress persists across reload", async ({
+    visit,
+    page,
+  }) => {
+    // Asserts read-mark persistence specifically: worktree file sign-offs do
+    // NOT survive a reload — see "Known product bugs" #6 in
+    // docs/usability-test.md.
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page, repo.path);
+    await dismissPlanOverlay(page);
+
+    // Read a few lines, then wait for the debounced session save to land.
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.keyboard.press("j");
+    await page.waitForFunction(() => {
+      const raw = localStorage.getItem("shippable:review:v1");
+      if (!raw) return false;
+      try {
+        return Object.keys(JSON.parse(raw).readLines ?? {}).length > 0;
+      } catch {
+        return false;
+      }
+    });
+
+    // Reopen at `/` — the worktree session resumes from peekSession with the
+    // read progress intact (the sidebar's per-file read meter is non-zero).
+    await visit("/");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+    await expect(
+      page.getByRole("button", { name: /[1-9]\d*% read/ }).first(),
+    ).toBeVisible();
   });
 
   test("live-reload banner appears when a new commit lands", async ({

@@ -48,7 +48,13 @@ const PLAN_OUTPUT = {
   intent: [
     {
       text: "FAKE-PLAN: introduces a user preferences panel backed by localStorage.",
-      evidence: [{ kind: "description" }],
+      // A file evidence ref (cs-42 has this file) so the e2e suite can click
+      // the reference and assert the cursor jumps. assemblePlan keeps refs
+      // that validate against the changeset.
+      evidence: [
+        { kind: "description" },
+        { kind: "file", path: "src/utils/storage.ts" },
+      ],
     },
   ],
   entryPoints: [],
@@ -167,12 +173,39 @@ function handleGithub(req, res, url) {
         { filename: "src/prefs.ts", status: "modified", patch: PR_PATCH },
       ]);
     }
-    if (sub === "/comments") return json(res, 200, []); // line comments
+    if (sub === "/comments") {
+      // One multi-line review comment anchored to the patch — drives the
+      // `L{a}–L{b}` line-range label.
+      return json(res, 200, [
+        {
+          id: 9001,
+          user: { login: "reviewer" },
+          body: "Should this be a union type?",
+          path: "src/prefs.ts",
+          line: 3,
+          original_line: 3,
+          start_line: 2,
+          original_start_line: 2,
+          side: "RIGHT",
+          diff_hunk: PR_PATCH,
+          original_commit_id: "head00000000000000000000000000000000aaaa",
+          html_url: `https://github.com/${owner}/${repo}/pull/${number}#discussion_r9001`,
+        },
+      ]);
+    }
     return json(res, 200, prMeta(owner, repo, Number(number)));
   }
-  // /repos/:owner/:repo/issues/:number/comments
-  if (/^\/repos\/[^/]+\/[^/]+\/issues\/\d+\/comments$/.test(url.pathname)) {
-    return json(res, 200, []); // issue (conversation) comments
+  // /repos/:owner/:repo/issues/:number/comments — issue-level conversation
+  if (/^\/repos\/[^/]+\/[^/]+\/issues\/(\d+)\/comments$/.test(url.pathname)) {
+    return json(res, 200, [
+      {
+        id: 8001,
+        user: { login: "maintainer" },
+        body: "Thanks — can you add a test for the cozy mode?",
+        created_at: "2026-05-01T12:00:00Z",
+        html_url: "https://github.com/acme/widgets/pull/7#issuecomment-8001",
+      },
+    ]);
   }
   return json(res, 404, { message: "fake-upstream: no GitHub route" });
 }

@@ -105,10 +105,14 @@ The two suites are complementary, not redundant:
 - Folder-picker, FindBar, webview-zoom, packaged DMG behaviour are
   `[manual]` — they need a real Tauri shell and stay in
   `docs/usability-test.md`'s manual track. Everything `[auto]`/`[mixed]`
-  has a live test; there are no `test.fixme()` stubs left.
-- The fake upstream serves a single happy-path PR and plan/review
-  response, plus owner-keyed triggers (e.g. `rejected-token`) for the
-  failure branches. Grow it when a new test needs a new response shape.
+  has a live test; there are no `test.fixme()` stubs left. The one
+  uncovered `[auto]` step is J6.13 (guide suggestions) — no fixture
+  changeset carries guide-suggestion data, so it needs a dedicated
+  fixture first.
+- The fake upstream serves a happy-path PR (with line + issue comments)
+  and a plan/review response, plus owner-keyed triggers (e.g.
+  `rejected-token`) for the failure branches. Grow it when a new test
+  needs a new response shape.
 - We use `channel: "chrome"` instead of playwright's bundled chromium
   to match the smokes and avoid the install step in dev environments
   that already have Chrome.

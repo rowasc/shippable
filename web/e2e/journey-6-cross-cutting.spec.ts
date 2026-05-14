@@ -7,6 +7,7 @@
 // manual track since they depend on Tauri / native menus.
 
 import { test, expect, expectWorkspaceLoaded, dismissPlanOverlay } from "./_lib/fixtures";
+import { mockAuthList, mockAuthWriteable } from "./_lib/mocks";
 
 test.describe("Journey 6 — cross-cutting", () => {
   test.beforeEach(async ({ visit, page }) => {
@@ -104,45 +105,67 @@ test.describe("Journey 6 — standalone entry points", () => {
   });
 });
 
-test.describe("Journey 6 — Welcome recents", () => {
-  test("recents survive a reload and can be dismissed", async ({ page, visit }) => {
-    // Seed the recents store before navigation — the Welcome screen reads
-    // from localStorage at mount.
-    await page.addInitScript(() => {
-      const payload = {
-        v: 1,
-        entries: [
-          {
-            id: "stub-recent-1",
-            title: "Friendlier greeting",
-            addedAt: Date.now(),
-            source: { kind: "paste" },
-            changeset: {
-              id: "stub-recent-1",
-              title: "Friendlier greeting",
-              files: [],
-            },
-            interactions: {},
-          },
-        ],
-      };
-      try {
-        window.localStorage.setItem(
-          "shippable:recents:v1",
-          JSON.stringify(payload),
-        );
-      } catch {}
+test.describe("Journey 6 — Settings credential rows", () => {
+  test("clearing a GitHub PAT row unsets it", async ({ visit, page }) => {
+    // Start with a GitHub host already configured so Settings shows its row.
+    await mockAuthList(page, [{ kind: "github", host: "github.com" }]);
+    await mockAuthWriteable(page);
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
+
+    await page.getByRole("button", { name: "settings" }).click();
+    const settings = page.getByRole("dialog", { name: "settings" });
+    const clear = settings.getByRole("button", { name: "clear github.com" });
+    await expect(clear).toBeVisible();
+
+    // After clearing, the row flips to unset — the clear affordance goes away.
+    let cleared = false;
+    await page.unroute("**/api/auth/list");
+    await page.route("**/api/auth/list", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          credentials: cleared ? [] : [{ kind: "github", host: "github.com" }],
+        }),
+      }),
+    );
+    await page.route("**/api/auth/clear", async (route) => {
+      cleared = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
     });
 
+    await clear.click();
+    await expect(
+      settings.getByRole("button", { name: "clear github.com" }),
+    ).toHaveCount(0);
+  });
+});
+
+test.describe("Journey 6 — Welcome recents", () => {
+  test("recents survive a reload and can be dismissed", async ({ page, visit }) => {
+    // Exercise the real write path: loading a changeset pushes it into the
+    // recents store (App.tsx pushRecent), so no hand-seeded localStorage.
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+
+    // Back on Welcome, the just-loaded changeset shows in recents. The open
+    // button's name starts with the title; the forget button's starts with
+    // "forget" — anchor so we match only the open button.
     await visit("/");
-    // The open button's name starts with the title; the forget button's
-    // starts with "forget" — anchor so we match only the open button.
-    const recent = page.getByRole("button", { name: /^Friendlier greeting/ });
+    const recent = page.getByRole("button", {
+      name: /^Add user preferences panel/,
+    });
     await expect(recent).toBeVisible();
 
-    // Dismissing the entry removes it; the empty state takes over.
+    // Dismissing the entry removes it; the removal persists across reload.
     await page
-      .getByRole("button", { name: "forget Friendlier greeting" })
+      .getByRole("button", { name: "forget Add user preferences panel" })
       .click();
     await expect(recent).toHaveCount(0);
 
