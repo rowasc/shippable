@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { elideReason } from "./plan.ts";
+import { buildUserMessage, elideReason } from "./plan.ts";
+import { buildStructureMap } from "../../web/src/plan.ts";
+import type { ChangeSet, DiffFile, Hunk } from "../../web/src/types.ts";
 
 describe("elideReason", () => {
   it("elides known lockfiles by basename, anywhere in the tree", () => {
@@ -30,5 +32,121 @@ describe("elideReason", () => {
     // Guard against an over-eager substring/regex match.
     expect(elideReason("src/package-lock-utils.ts")).toBeNull();
     expect(elideReason("docs/yarn.lock.md")).toBeNull();
+  });
+});
+
+// A small, deterministic ChangeSet exercising both kinds of symbols
+// (exported + non-exported) and a real-looking diff section. Used as the
+// fixture for the byte-budget snapshot below.
+function fixtureChangeSet(): ChangeSet {
+  const hunk = (
+    id: string,
+    addedLines: string[],
+    defines: string[],
+    exported: string[],
+    references: string[] = [],
+  ): Hunk => ({
+    id,
+    header: `@@ ${id} @@`,
+    oldStart: 1,
+    oldCount: 0,
+    newStart: 1,
+    newCount: addedLines.length,
+    lines: addedLines.map((text) => ({ kind: "add" as const, text })),
+    definesSymbols: defines,
+    exportedSymbols: exported,
+    referencesSymbols: references,
+  });
+  const file = (path: string, hunks: Hunk[]): DiffFile => ({
+    id: `fixture/${path}`,
+    path,
+    language: "ts",
+    status: "added",
+    hunks,
+  });
+  return {
+    id: "fixture",
+    title: "Add Api helpers and internal math",
+    author: "test",
+    branch: "feat/fixture",
+    base: "main",
+    createdAt: "2026-05-14T00:00:00Z",
+    description: "Adds the Api surface for consumers plus internal helpers.",
+    files: [
+      file("api.ts", [
+        hunk(
+          "api.ts#h1",
+          [
+            "export interface Api {",
+            "  fetch(id: string): Promise<Result>;",
+            "}",
+            "export interface Result { value: number }",
+            "export function ApiHelper(api: Api) {",
+            "  return api;",
+            "}",
+            "function internalUsed() { return 1 }",
+            "function internalUnused() { return 2 }",
+          ],
+          ["Api", "Result", "ApiHelper", "internalUsed", "internalUnused"],
+          ["Api", "Result", "ApiHelper"],
+        ),
+      ]),
+      file("math.ts", [
+        hunk(
+          "math.ts#h1",
+          [
+            "function mathHelper(n: number) { return n * 2 }",
+            "function scratchA() { return 0 }",
+            "function scratchB() { return 0 }",
+          ],
+          ["mathHelper", "scratchA", "scratchB"],
+          [],
+        ),
+      ]),
+      file("consumer.ts", [
+        hunk(
+          "consumer.ts#h1",
+          [
+            "import { Api } from './api';",
+            "export function use(api: Api) {",
+            "  return mathHelper(internalUsed());",
+            "}",
+          ],
+          ["use"],
+          ["use"],
+          ["Api", "mathHelper", "internalUsed"],
+        ),
+      ]),
+    ],
+  };
+}
+
+describe("buildUserMessage byte budget", () => {
+  it("matches the recorded byte count for the fixture", () => {
+    const cs = fixtureChangeSet();
+    const map = buildStructureMap(cs);
+    const message = buildUserMessage(cs, map);
+
+    // Inline snapshot pins the byte count for a fixed input. It fails when
+    // the prompt payload grows (or shrinks) unintentionally. If the change
+    // is intentional — e.g., you added a useful new section to the map —
+    // re-run vitest with `-u` to record the new number alongside the change.
+    expect(message.length).toMatchInlineSnapshot(`2219`);
+  });
+
+  it("drops non-exported zero-ref symbols from the serialised map section", () => {
+    const cs = fixtureChangeSet();
+    const map = buildStructureMap(cs);
+    const message = buildUserMessage(cs, map);
+
+    const structureSection = message.slice(
+      message.indexOf("## StructureMap"),
+      message.indexOf("## Diff"),
+    );
+    expect(structureSection).toContain("Api");
+    expect(structureSection).toContain("mathHelper");
+    expect(structureSection).not.toContain("internalUnused");
+    expect(structureSection).not.toContain("scratchA");
+    expect(structureSection).not.toContain("scratchB");
   });
 });

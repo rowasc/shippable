@@ -74,9 +74,17 @@ Do NOT fabricate paths, hunk ids, or symbol names. If you cannot cite evidence, 
 ## Style for entryPoints
 
 - Prefer files that define symbols referenced by other files (roots of the diff's dependency graph).
+- Files that introduce **exported** symbols are also strong entry points, even when nothing in the diff consumes them yet — they're the API surface a reviewer needs to evaluate first. A symbol's \`exported\` flag in StructureMap.symbols tells you whether it's part of the file's public surface.
 - Test files are good secondary entry points — they describe intended behavior.
 - Each entry point's reason must explain *why start here*, not just *what's here*.
 - If a specific hunk is the best starting point (e.g., the main definition), include its hunkId.
+
+## StructureMap shape
+
+\`StructureMap.symbols\` lists symbols defined in the diff. Each entry is \`{ name, definedIn, referencedIn, exported }\`:
+
+- \`referencedIn\` is the set of *other files in this ChangeSet* that consume the symbol. An empty array doesn't mean "unused" — it means "no in-diff consumer," which is normal for newly exported APIs.
+- \`exported: true\` means the declaration carries the \`export\` keyword. Use this to distinguish API additions from internal helpers when framing claims (e.g., "Adds public X" vs "Adds internal helper Y"). Non-exported symbols with zero in-diff consumers are omitted from the map entirely; you won't see them.
 
 ## Elided files
 
@@ -125,7 +133,7 @@ export async function generatePlan(cs: ChangeSet): Promise<ReviewPlan> {
   return assemblePlan(cs, map, response.parsed_output);
 }
 
-function buildUserMessage(cs: ChangeSet, map: StructureMap): string {
+export function buildUserMessage(cs: ChangeSet, map: StructureMap): string {
   const lines: string[] = [];
   lines.push(`# ChangeSet: ${cs.id}`);
   lines.push(`Title: ${cs.title}`);

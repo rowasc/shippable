@@ -16,6 +16,8 @@ export interface Hunk {
   newCount: number;
   lines: DiffLine[];
   definesSymbols?: string[];
+  /** Subset of `definesSymbols` declared with the `export` keyword. */
+  exportedSymbols?: string[];
   referencesSymbols?: string[];
   aiReviewed?: boolean;
   /**
@@ -319,6 +321,11 @@ export interface StructureMapSymbol {
   definedIn: string;
   /** File paths (within this ChangeSet) that reference it. */
   referencedIn: string[];
+  /** True when the symbol is declared with `export` — i.e. part of the file's
+   *  public surface. Symbols with `exported: true` are kept in the map even
+   *  when `referencedIn` is empty, since they represent API additions whose
+   *  consumers may live outside the ChangeSet. */
+  exported: boolean;
 }
 
 export interface StructureMap {

@@ -40,16 +40,26 @@ export function buildStructureMap(cs: ChangeSet): StructureMap {
     };
   });
 
-  // symbol name → { definedIn, referencedIn set }
-  const defs = new Map<string, { definedIn: string; referencedIn: Set<string> }>();
+  // symbol name → { definedIn, exported, referencedIn set }
+  const defs = new Map<
+    string,
+    { definedIn: string; exported: boolean; referencedIn: Set<string> }
+  >();
 
   for (const f of cs.files) {
     for (const h of f.hunks) {
+      const exportedSet = new Set(h.exportedSymbols ?? []);
       for (const name of h.definesSymbols ?? []) {
-        // First definition wins. Re-definitions across hunks are rare; if it
-        // matters later, extend this to a list.
-        if (!defs.has(name)) {
-          defs.set(name, { definedIn: f.path, referencedIn: new Set() });
+        const existing = defs.get(name);
+        if (!existing) {
+          defs.set(name, {
+            definedIn: f.path,
+            exported: exportedSet.has(name),
+            referencedIn: new Set(),
+          });
+        } else if (!existing.exported && exportedSet.has(name)) {
+          // Promote: a later hunk re-declares the same name with `export`.
+          existing.exported = true;
         }
       }
     }
@@ -86,9 +96,19 @@ export function buildStructureMap(cs: ChangeSet): StructureMap {
     }
   }
 
+  // Drop non-exported leaves: a symbol that's not part of the file's public
+  // surface AND has no in-diff consumer is noise for the planner. Exported
+  // leaves are kept — they're API additions whose consumers may live outside
+  // this ChangeSet, and that's the signal a reviewer wants surfaced.
   const symbols: StructureMapSymbol[] = [];
-  for (const [name, { definedIn, referencedIn }] of defs) {
-    symbols.push({ name, definedIn, referencedIn: [...referencedIn].sort() });
+  for (const [name, { definedIn, exported, referencedIn }] of defs) {
+    if (!exported && referencedIn.size === 0) continue;
+    symbols.push({
+      name,
+      definedIn,
+      referencedIn: [...referencedIn].sort(),
+      exported,
+    });
   }
   symbols.sort((a, b) => a.name.localeCompare(b.name));
 

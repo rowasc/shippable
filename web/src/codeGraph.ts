@@ -12,6 +12,7 @@ export interface GraphSourceFile {
 
 interface Definition {
   name: string;
+  exported: boolean;
 }
 
 interface ImportReference {
@@ -62,11 +63,17 @@ export function buildDiffCodeGraph(files: DiffFile[]): {
 
   return {
     files: files.map((file) => {
-      const definitions = new Set(analysis.byPath.get(file.path)?.definitions.map((def) => def.name) ?? []);
+      const fileDefs = analysis.byPath.get(file.path)?.definitions ?? [];
+      const definitions = new Set(fileDefs.map((def) => def.name));
+      const exportedDefinitions = new Set(
+        fileDefs.filter((def) => def.exported).map((def) => def.name),
+      );
       const references = fileReferences.get(file.path) ?? new Set<string>();
       return {
         ...file,
-        hunks: file.hunks.map((hunk) => annotateHunk(hunk, definitions, references)),
+        hunks: file.hunks.map((hunk) =>
+          annotateHunk(hunk, definitions, exportedDefinitions, references),
+        ),
       };
     }),
     graph: analysis.graph,
@@ -168,6 +175,7 @@ function buildReferencedSymbolMap(analysis: {
 function annotateHunk(
   hunk: Hunk,
   fileDefinitions: Set<string>,
+  fileExportedDefinitions: Set<string>,
   fileReferences: Set<string>,
 ): Hunk {
   const text = hunk.lines
@@ -177,11 +185,13 @@ function annotateHunk(
   const definedHere = extractDefinitions(text)
     .map((def) => def.name)
     .filter((name, index, list) => list.indexOf(name) === index && fileDefinitions.has(name));
+  const exportedHere = definedHere.filter((name) => fileExportedDefinitions.has(name));
   const referencedHere = [...fileReferences].filter((name) => containsWord(text, name));
 
   return {
     ...hunk,
     definesSymbols: mergeUnique(hunk.definesSymbols, definedHere),
+    exportedSymbols: mergeUnique(hunk.exportedSymbols, exportedHere),
     referencesSymbols: mergeUnique(hunk.referencesSymbols, referencedHere),
   };
 }
@@ -231,15 +241,20 @@ function extractDefinitions(text: string): Definition[] {
     for (const pattern of patterns) {
       const match = pattern.re.exec(line);
       if (!match) continue;
-      definitions.push({ name: match[pattern.nameIndex] });
+      const exported = /^\s*export\b/.test(line);
+      definitions.push({ name: match[pattern.nameIndex], exported });
       break;
     }
   });
 
-  return definitions.filter(
-    (definition, index, list) =>
-      list.findIndex((other) => other.name === definition.name) === index,
-  );
+  // Deduplicate by name; if any occurrence was exported, the result is exported.
+  const byName = new Map<string, Definition>();
+  for (const def of definitions) {
+    const existing = byName.get(def.name);
+    if (!existing) byName.set(def.name, def);
+    else if (def.exported && !existing.exported) byName.set(def.name, def);
+  }
+  return [...byName.values()];
 }
 
 function extractImports(text: string): ImportReference[] {
