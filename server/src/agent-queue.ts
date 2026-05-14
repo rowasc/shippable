@@ -344,9 +344,7 @@ function escapeXmlAttr(value: string): string {
 }
 
 function sanitizeBody(body: string): string {
-  // Strip `]]>` so a future CDATA wrapper around the body can't be terminated
-  // early by user content. We don't wrap in CDATA today, but the cost is
-  // trivial and it future-proofs the format.
+  // Strip `]]>` so the CDATA wrapper can't be terminated early by user content.
   return body.replace(/\]\]>/g, "]]");
 }
 
@@ -381,5 +379,7 @@ function renderInteraction(c: Interaction): string {
   if (c.supersedes) {
     attrs.push(`supersedes="${escapeXmlAttr(c.supersedes)}"`);
   }
-  return `  <interaction ${attrs.join(" ")}>${sanitizeBody(c.body)}</interaction>`;
+  // Wrap body in CDATA so a reviewer can't break out of the <interaction>
+  // element by pasting `</interaction>` into their comment.
+  return `  <interaction ${attrs.join(" ")}><![CDATA[${sanitizeBody(c.body)}]]></interaction>`;
 }
