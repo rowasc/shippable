@@ -241,7 +241,7 @@ export type Action =
        * Overlay PR metadata onto an existing worktree-loaded ChangeSet. The
        * diff structure (files/hunks) is untouched; only `prSource` and
        * `prConversation` are set. `worktreeSource` is preserved. PR review
-       * comments arrive separately via MERGE_PR_REPLIES.
+       * comments arrive separately via MERGE_PR_INTERACTIONS.
        */
       type: "MERGE_PR_OVERLAY";
       changesetId: string;
@@ -1022,9 +1022,7 @@ function mergeAgentInteractions(
         interaction: {
           id: p.id,
           threadKey,
-          target: p.target.startsWith("reply-to-")
-            ? p.target
-            : replyTargetForKey(threadKey),
+          target: p.target,
           intent: p.intent,
           author: p.author,
           authorRole: "agent",
@@ -1298,8 +1296,7 @@ export function reviewedFilesCount(
 
 /**
  * True when the local user's latest response on the AI-note thread at
- * (hunkId, lineIdx) is `ack`. Replaces direct lookups of the deprecated
- * `state.ackedNotes` Set.
+ * (hunkId, lineIdx) is `ack`.
  */
 export function isAckedByMe(
   state: ReviewState,
@@ -1320,10 +1317,9 @@ export function isAckedByMe(
 }
 
 /**
- * Drop-in for the deprecated `state.ackedNotes` Set. Returns the set of
- * `${hunkId}:${lineIdx}` keys where the local user's latest response on
- * the AI-note thread is `ack`. Use this when handing off to view-model
- * builders that still take `acked: Set<string>`.
+ * Returns the set of `${hunkId}:${lineIdx}` keys where the local user's
+ * latest response on the AI-note thread is `ack`. Use this when handing
+ * off to view-model builders that still take `acked: Set<string>`.
  */
 export function selectAckedNotes(
   state: ReviewState,

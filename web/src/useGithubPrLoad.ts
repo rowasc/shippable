@@ -21,7 +21,7 @@ import { keychainAccountFor } from "./auth/credential";
 export interface UseGithubPrLoadOptions {
   /**
    * Called on a successful load. The caller dispatches LOAD_CHANGESET +
-   * MERGE_PR_REPLIES (or whatever fits its surface) using the result.
+   * MERGE_PR_INTERACTIONS (or whatever fits its surface) using the result.
    */
   onResult: (result: PrLoadResult, prUrl: string) => void;
 }

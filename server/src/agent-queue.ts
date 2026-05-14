@@ -402,7 +402,7 @@ export function formatPayload(
 
 function renderInteraction(c: Interaction): string {
   // `id` is first so the agent sees it before the body — needed to call
-  // `shippable_post_review_reply`. Pull-and-ack drains the queue, so this
+  // `shippable_post_review_comment`. Pull-and-ack drains the queue, so this
   // is the only chance the agent has to read the id.
   const attrs: string[] = [
     `id="${escapeXmlAttr(c.id)}"`,
