@@ -6,6 +6,8 @@ This pairs with `auto-mode-sandbox.md`. The sandbox is where agents *do* the wor
 
 Directory selection shipped as a chooser-first flow in both Tauri and browser-dev, with the browser chooser opened through the local server so the existing git-backed path API stays intact. See [worktree-directory-picker](../features/worktree-directory-picker.md) for the user-facing surface.
 
+Follow-up plan: [branch-picker-worktree-creation](./branch-picker-worktree-creation.md) covers the branch-first workflow for repos where a branch exists locally but is not checked out anywhere yet.
+
 ## Goal
 
 What this enables:
