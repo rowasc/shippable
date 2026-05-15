@@ -95,7 +95,7 @@ import {
   buildGuidePromptViewModel,
   buildInspectorViewModel,
 } from "../view";
-import { selectIngestSignals } from "../interactions";
+import { newReviewerInteractionId, selectIngestSignals } from "../interactions";
 
 interface Props {
   state: ReviewState;
@@ -1367,7 +1367,7 @@ export function ReviewWorkspace({
             }
             onSubmitReply={(key, body) => {
               const createdAt = new Date();
-              const interactionId = `r-${createdAt.getTime()}`;
+              const interactionId = newReviewerInteractionId();
               const isFirst = (state.interactions[key]?.length ?? 0) === 0;
               const interaction: Interaction = {
                 id: interactionId,

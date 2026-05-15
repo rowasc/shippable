@@ -19,6 +19,19 @@ import type {
 } from "./types";
 import { isAskIntent, isResponseIntent } from "./types";
 
+/**
+ * Mint a fresh reviewer-authored interaction id. Earlier versions used a pure
+ * `r-${Date.now()}` form, which collided on two interactions authored in the
+ * same millisecond — the DB UPSERT then silently overwrote the first row's
+ * body/intent/etc. on conflict. The random suffix bumps entropy by ~31 bits
+ * inside any same-ms bucket, well below the birthday-problem threshold for
+ * realistic burst sizes. Agent-minted IDs follow the same shape with an
+ * `a-` prefix (see server/src/agent-queue.ts).
+ */
+export function newReviewerInteractionId(): string {
+  return `r-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export interface ThreadSummary {
   threadKey: string;
   /** Intent of the latest ask-intent interaction. Always present (every thread starts with an ask). */

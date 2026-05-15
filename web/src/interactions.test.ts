@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { selectInteractions } from "./interactions";
+import { newReviewerInteractionId, selectInteractions } from "./interactions";
 import {
   ackedNotesToInteractions,
   firstTargetForKey,
@@ -675,5 +675,21 @@ describe("selectInteractions — detached replies", () => {
     expect(sel.all).toHaveLength(1);
     expect(sel.all[0].id).toBe("d1");
     expect(sel.all[0].threadKey).toBe(threadKey);
+  });
+});
+
+describe("newReviewerInteractionId", () => {
+  it("emits the r- prefix and an embedded timestamp", () => {
+    const id = newReviewerInteractionId();
+    expect(id).toMatch(/^r-\d+-[a-z0-9]+$/);
+  });
+
+  it("produces distinct ids inside a single millisecond bucket", () => {
+    // Reproduces the original B2 scenario — two interactions authored in the
+    // same Date.now() tick must not produce the same id, or the DB UPSERT
+    // silently overwrites the first row.
+    const ids = new Set<string>();
+    for (let i = 0; i < 1000; i++) ids.add(newReviewerInteractionId());
+    expect(ids.size).toBe(1000);
   });
 });

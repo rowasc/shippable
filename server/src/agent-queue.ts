@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   pullAndAck as storePullAndAck,
   listDelivered as storeListDelivered,
@@ -8,6 +7,19 @@ import {
   type StoredInteraction,
 } from "./db/interaction-store.ts";
 import { resetForTests as resetDb } from "./db/index.ts";
+
+/**
+ * Mint a fresh agent-authored interaction id. `a-` prefix mirrors the
+ * reviewer-side `r-` (see web/src/interactions.ts newReviewerInteractionId)
+ * so DB inspection distinguishes origin at a glance. The random suffix
+ * guards against two agent posts arriving in the same millisecond — the
+ * `interactions` table's UPSERT silently overwrites on conflict, which
+ * would have been a long-tail bug if the prior `randomUUID()` were ever
+ * swapped for a less-entropic scheme.
+ */
+function newAgentInteractionId(): string {
+  return `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 // The reviewer↔agent channel. Backed by the SQLite `interactions` table via
 // db/interaction-store.ts — this module owns only the wire envelope: the
@@ -193,7 +205,7 @@ export function postReply(
     agentLabel?: string;
   },
 ): string {
-  const id = randomUUID();
+  const id = newAgentInteractionId();
   postAgentInteraction({
     id,
     worktreePath,
@@ -224,7 +236,7 @@ export function postTopLevel(
     agentLabel?: string;
   },
 ): string {
-  const id = randomUUID();
+  const id = newAgentInteractionId();
   postAgentInteraction({
     id,
     worktreePath,

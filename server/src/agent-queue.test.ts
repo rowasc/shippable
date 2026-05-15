@@ -204,6 +204,28 @@ describe("delivered", () => {
 });
 
 describe("postReply / postTopLevel / listReplies", () => {
+  it("postReply emits a unique a- prefixed id even on back-to-back calls", () => {
+    // Regression for B2: the prior randomUUID() generator was fine, but the
+    // switch to a timestamp-based scheme made same-ms collisions possible.
+    // 100 back-to-back posts must all land distinctly — the interactions
+    // table's UPSERT silently overwrites on conflict, so a collision is
+    // invisible data loss.
+    const ids = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      ids.add(
+        postReply(WT, {
+          parentId: `c${i}`,
+          body: `r${i}`,
+          intent: "ack",
+        }),
+      );
+    }
+    expect(ids.size).toBe(100);
+    for (const id of ids) {
+      expect(id).toMatch(/^a-\d+-[a-z0-9]+$/);
+    }
+  });
+
   it("postReply assigns id + postedAt and appends to the worktree's reply list", () => {
     const id = postReply(WT, {
       parentId: "c1",

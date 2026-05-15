@@ -22,6 +22,7 @@ import {
 } from "./types";
 import { findAnchorInFile, hashAnchorWindow } from "./anchor";
 import { enrichWithFileContent } from "./expandContext";
+import { newReviewerInteractionId } from "./interactions";
 
 /**
  * Wire shape returned by `GET /api/agent/replies` — one envelope serves
@@ -386,7 +387,7 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       const nextIntent: "ack" | "unack" =
         lastResponse?.intent === "ack" ? "unack" : "ack";
       const interaction: Interaction = {
-        id: `${nextIntent}:${threadKey}:${Date.now()}`,
+        id: newReviewerInteractionId(),
         threadKey,
         target: "reply",
         intent: nextIntent,
