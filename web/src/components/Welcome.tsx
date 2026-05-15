@@ -257,7 +257,7 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
             either way. */}
         {worktrees.serverAvailable === true ? (
           <section className="welcome__hero welcome__wt">
-            <h1 className="welcome__hero-h">Open a local branch</h1>
+            <h1 className="welcome__hero-h">Open a local worktree</h1>
             <p className="welcome__hero-sub">
               Choose a repo root or worktrees folder. Shippable scans it and
               loads the latest committed diff from the worktree you pick.
