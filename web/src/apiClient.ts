@@ -25,6 +25,13 @@ export async function getJson<T>(path: string): Promise<T> {
   return unwrap<T>(res);
 }
 
+// Body-less DELETE — the id goes in the query string (caller builds the URL).
+// Don't copy-paste for a DELETE that needs a request body; add a new helper.
+export async function deleteJson<T>(path: string): Promise<T> {
+  const res = await fetch(await apiUrl(path), { method: "DELETE" });
+  return unwrap<T>(res);
+}
+
 async function unwrap<T>(res: Response): Promise<T> {
   const json = (await res.json()) as T | ErrorEnvelope;
   if (
