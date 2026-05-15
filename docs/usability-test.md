@@ -200,7 +200,7 @@ LoadModal renders three loaders as stacked sections simultaneously (not tabs): *
 
 ### Failure branches
 
-- **Server dies mid-session.** Kill the server while the app is loaded. Trigger any server-backed action (load a worktree, run a prompt). **Expect (today):** Individual actions surface clear errors. `ServerHealthGate` does **not** re-engage mid-session — it runs only at boot. Reloading the app re-runs the gate. (See known bugs.)
+- **Server dies mid-session.** Kill the server while the app is loaded. **Expect:** Within ~60 seconds (two heartbeat misses on a 30s cadence) `ServerHealthGate` re-engages and shows the "Server unreachable" panel without unmounting workspace state. A single transient blip (one missed probe) does not flip the gate. Once the sidecar is restarted, click Retry to re-probe and return to the workspace.
 - **Server returns 500.** If a backend endpoint errors, the calling UI surfaces it without crashing the app.
 - **Origin handling for Tauri webview.** The Tauri webview reports origin `tauri://localhost`, not literal `null`. Verify the server's allowed-origins list includes it (otherwise `/api/health` denies and the gate trips). Literal `Origin: null` (opaque origin) is actively denied by the server — that's intentional. See comment in `server/src/index.ts`.
 - `[manual]` **Packaged DMG behaviour.** Mount the DMG, drag to Applications, launch. **Expect:** Sidecar starts; no Gatekeeper-block beyond the expected unsigned-app warning; AI features and worktree loading work without `tauri dev` env vars present (verifies the sidecar isn't quietly relying on inherited shell env).
@@ -212,7 +212,6 @@ LoadModal renders three loaders as stacked sections simultaneously (not tabs): *
 These are real defects discovered while validating this spec against the code. They are listed here so the spec's Expects describe today's behaviour honestly; file them separately and tighten the relevant Expect when they're fixed.
 
 1. **Prompt runs don't persist across reload (J5).** `runs` is plain `useState` in `ReviewWorkspace.tsx:171`; no persistence hook. Streaming results vanish on reload. Documented as a known limitation rather than a defect — runs are a working surface, not a record; revisit if it becomes a real user complaint.
-2. **`ServerHealthGate` doesn't re-engage mid-session (J6).** `bootResolved` latches (`ServerHealthGate.tsx:29-34, 86-88`) and the gate has no ongoing health probe; a server that dies after boot is only re-detected on app reload.
 
 ---
 

@@ -27,10 +27,15 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
   const [attempt, setAttempt] = useState(0);
   const [trackedAttempt, setTrackedAttempt] = useState(attempt);
   // Once the gate has fallen through to `children` once, never re-show the
-  // boot panel: in-session credential changes (clearing or rotating from
-  // Settings) would otherwise unmount the workspace and lose its state.
-  // Settings is the right place to manage credentials post-onboarding; the
-  // gate is a first-launch concern only.
+  // credentials panel: in-session credential changes (clearing or rotating
+  // from Settings) would otherwise unmount the workspace and lose its state.
+  // Settings is the right place to manage credentials post-onboarding.
+  //
+  // This latch does NOT gate the "server unreachable" / "database
+  // unavailable" branches — those react to live `state` and re-engage
+  // mid-session via the heartbeat below. A sidecar crash should still
+  // surface a clear "server unreachable" panel rather than letting
+  // every per-feature API call fail in isolation.
   const [bootResolved, setBootResolved] = useState(false);
 
   if (attempt !== trackedAttempt) {
@@ -78,6 +83,39 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, [attempt]);
+
+  // Heartbeat: while the gate has fallen through to children (`state ===
+  // "ready"`), keep probing `/api/health` so a sidecar crash mid-session
+  // re-engages the unreachable panel instead of letting every per-feature
+  // call fail in isolation. Two consecutive failures flip state; a single
+  // transient blip (laptop sleep, OS network hiccup) shouldn't unmount the
+  // workspace. The probe doesn't run while the gate is already showing —
+  // the boot effect above owns that path.
+  useEffect(() => {
+    if (state !== "ready") return;
+    let consecutiveFailures = 0;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(await apiUrl("/api/health"));
+        if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        const body = await res.json().catch(() => ({}));
+        if (body?.db?.status === "error") {
+          consecutiveFailures = 0;
+          setState("db-error");
+          setError(body.db.error ?? "database unavailable");
+          return;
+        }
+        consecutiveFailures = 0;
+      } catch (err) {
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 2) {
+          setState("unreachable");
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [state]);
 
   // Wait for credentials to resolve (initial rehydrate finishes by calling
   // refresh, which flips status to "ready" or "error") before deciding which

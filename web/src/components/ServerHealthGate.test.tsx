@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -175,6 +176,114 @@ describe("ServerHealthGate", () => {
       </CredentialsProvider>,
     );
     await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+  });
+
+  it("re-engages the unreachable panel after two consecutive heartbeat failures", async () => {
+    // First call is the boot probe. After that, the 30s heartbeat fires; a
+    // single failure isn't enough to flip state (transient blips happen),
+    // but two consecutive failures should surface the unreachable panel
+    // even though the gate had previously fallen through.
+    const okResponse = {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: () => Promise.resolve({ ok: true }),
+    } as Response;
+    const failResponse = {
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      json: () => Promise.resolve({}),
+    } as Response;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(okResponse) // boot probe
+      .mockResolvedValueOnce(failResponse) // 1st heartbeat: fails (no flip)
+      .mockResolvedValueOnce(failResponse); // 2nd heartbeat: flips state
+    global.fetch = fetchMock;
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <CredentialsProvider>
+          <ServerHealthGate>
+            <span data-testid="content">app</span>
+          </ServerHealthGate>
+        </CredentialsProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+
+      // First heartbeat: still healthy from the gate's perspective.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(screen.getByTestId("content")).toBeTruthy();
+
+      // Second heartbeat (consecutive failure): gate re-engages.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      await waitFor(() =>
+        expect(screen.getByText(/server unreachable/i)).toBeTruthy(),
+      );
+      expect(screen.queryByTestId("content")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("recovers across a transient heartbeat blip without flipping state", async () => {
+    // One failure followed by a success: counter resets, gate stays on
+    // children. Otherwise a single TCP RST from a sleeping laptop would
+    // unmount the workspace.
+    const okResponse = () =>
+      ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve({ ok: true }),
+      }) as Response;
+    const failResponse = {
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      json: () => Promise.resolve({}),
+    } as Response;
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(okResponse()) // boot
+      .mockResolvedValueOnce(failResponse) // 1st heartbeat: fail
+      .mockResolvedValueOnce(okResponse()); // 2nd heartbeat: recover
+    global.fetch = fetchMock;
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <CredentialsProvider>
+          <ServerHealthGate>
+            <span data-testid="content">app</span>
+          </ServerHealthGate>
+        </CredentialsProvider>,
+      );
+      await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      // Both heartbeats fired (3 total fetches: boot + 2 heartbeats), and
+      // the gate is still on children — the lone failure didn't flip.
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      expect(screen.getByTestId("content")).toBeTruthy();
+      expect(screen.queryByText(/server unreachable/i)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not re-show the boot panel if the anthropic credential is cleared mid-session", async () => {
