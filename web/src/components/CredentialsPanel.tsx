@@ -8,6 +8,7 @@
 // write (Tauri) + /api/auth/set call.
 
 import { useState } from "react";
+import { openExternal } from "../openExternal";
 import "./CredentialsPanel.css";
 import { useCredentials } from "../auth/useCredentials";
 import type { Credential } from "../auth/credential";
@@ -166,8 +167,10 @@ export function CredentialsPanel({ mode }: Props) {
             Need a key?{" "}
             <a
               href="https://console.anthropic.com/settings/keys"
-              target="_blank"
-              rel="noreferrer"
+              onClick={(e) => {
+                e.preventDefault();
+                void openExternal("https://console.anthropic.com/settings/keys");
+              }}
             >
               Create one in the Anthropic Console
             </a>

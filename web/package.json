@@ -25,6 +25,7 @@
     "@php-wasm/web": "3.1.28",
     "@php-wasm/web-8-3": "3.1.28",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-shell": "^2.3.5",
     "esbuild-wasm": "^0.28.0",
     "github-markdown-css": "^5.9.0",
     "hast-util-to-jsx-runtime": "^2.3.6",

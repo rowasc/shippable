@@ -7,6 +7,7 @@ import type {
   InteractionIntent,
 } from "../types";
 import type { SymbolIndex } from "../symbols";
+import { openExternal } from "../openExternal";
 import { RichText } from "./RichText";
 
 interface Props {
@@ -121,8 +122,10 @@ export function ReplyThread({
                   <a
                     className="reply__external"
                     href={ix.external!.htmlUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      void openExternal(ix.external!.htmlUrl);
+                    }}
                     title="Open on GitHub"
                   >
                     ↗ GitHub

@@ -33,6 +33,7 @@ import {
   asTokenRejectionHint,
   type TokenRejectionHint,
 } from "../useGithubPrLoad";
+import { openExternal } from "../openExternal";
 import type { PrMatch } from "../githubPrClient";
 
 /**
@@ -1001,8 +1002,10 @@ function PrConversationSection({ items }: { items: PrConversationItem[] }) {
               <span className="ainote__actions">
                 <a
                   href={item.htmlUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(item.htmlUrl);
+                  }}
                   className="ainote__ack"
                   title="Open on GitHub"
                 >

@@ -7,6 +7,7 @@ import {
   trustGithubHost,
 } from "../githubHostTrust";
 import type { TokenRejectionHint } from "../useGithubPrLoad";
+import { openExternal } from "../openExternal";
 import "./LoadModal.css";
 
 interface Props {
@@ -133,7 +134,13 @@ export function GitHubTokenModal({
                 </p>
               )}
               <p className="modal__hint">
-                <a href={helpUrl} target="_blank" rel="noreferrer">
+                <a
+                  href={helpUrl}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void openExternal(helpUrl);
+                  }}
+                >
                   Help: how to create a PAT
                 </a>
               </p>
