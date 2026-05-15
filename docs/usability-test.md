@@ -27,7 +27,7 @@ The journeys reference these by name. Set them up once before running the script
 |---|---|---|
 | `SAMPLE_WORKTREE` | A local git checkout with uncommitted edits in ≥2 files. | Any working repo; the Shippable repo itself works. |
 | `SAMPLE_PR_PUBLIC` | A public github.com PR URL. | Pick one with a handful of files and at least one review comment. |
-| `SAMPLE_PR_GHE` | A github.a8c.com or other GHE PR URL. | Skip the GHE-specific steps if you don't have one. |
+| `SAMPLE_PR_GHE` | A GHE PR URL. | Skip the GHE-specific steps if you don't have one. |
 | `SAMPLE_DIFF_URL` | A reachable `.diff` URL (e.g. a GitHub PR with `.diff` appended). | Must be CORS-permissive — the browser fetches it directly. |
 | `SAMPLE_DIFF_FILE` | A local `.diff` or `.patch` file. | Save one from `SAMPLE_PR_PUBLIC` to disk. |
 | `ANTHROPIC_KEY` | A working Anthropic API key. | Required for Journey 5; everything else works without it. |
