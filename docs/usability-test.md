@@ -196,7 +196,7 @@ LoadModal renders three loaders as stacked sections simultaneously (not tabs): *
 10. `[mixed]` Open `/feature-docs.html`. **Expect:** Per-feature viewer pairs docs in `docs/features/` with their fixtures.
 11. `[manual]` On desktop, trigger **Find** via the Edit menu (Tauri menu wiring). **Expect:** FindBar opens with a search input; matches highlight (Highlight API on supported webviews, fallback otherwise); Enter cycles matches; Escape closes. On the web track, this is the browser's native Find.
 12. `[manual]` On desktop, use **Cmd+=** / **Cmd+−** / **Cmd+0** to zoom the webview. **Expect:** UI scales; zoom level persists across launches (stored in `localStorage`).
-13. `[auto]` Trigger a guide suggestion (use a fixture known to surface one — pick from `/gallery.html`). Dismiss with `Escape` or `n`; reload. **Expect:** Dismissed state persists; the same guide doesn't re-appear. Accept with `Enter` or `y`. **Expect:** Cursor jumps to the referenced location. (Accept does **not** persist today — see known bugs.)
+13. `[auto]` Trigger a guide suggestion (use a fixture known to surface one — pick from `/gallery.html`). Dismiss with `Escape` or `n`; reload. **Expect:** Dismissed state persists; the same guide doesn't re-appear. Accept with `Enter` or `y`. **Expect:** Cursor jumps to the referenced location. The guide remains available — navigating back to the same trigger line (or reloading with the cursor in that position) re-surfaces it. Guides are persistent navigation aids; only `dismiss` makes them go away.
 
 ### Failure branches
 
@@ -213,9 +213,8 @@ These are real defects discovered while validating this spec against the code. T
 
 1. **Token-rejected modal swallows scope and rate-limit hints (J3).** `githubPrClient.ts:36-52, 77-96` parses the server's hint into `GithubFetchError.hint`, but `useGithubPrLoad.ts:98-105, 137-147` never reads it — scope errors, invalid-token, and rate-limit all collapse into the same rejected-token modal. Users see "wrong token" for tokens that are correct but missing scope, or for hosts that are rate-limited.
 2. **Prompt runs don't persist across reload (J5).** `runs` is plain `useState` in `ReviewWorkspace.tsx:163`; no persistence hook. Streaming results vanish on reload.
-3. **Accepted guides don't persist (J6).** Only `DISMISS_GUIDE` writes to `dismissedGuides` (`state.ts:374-378`; action type at `state.ts:159`). There is no `acceptedGuides` set; accept-then-reload re-surfaces the same guide.
-4. **`ServerHealthGate` doesn't re-engage mid-session (J6).** `bootResolved` latches (`ServerHealthGate.tsx:29-34, 86-88`) and the gate has no ongoing health probe; a server that dies after boot is only re-detected on app reload.
-5. **AI-off chip doesn't return after clearing a configured key (J1).** The chip is gated on `anthropicSkipped` (`ReviewWorkspace.tsx:137-138`), but `clear` in `auth/useCredentials.tsx:130-153` never sets that flag. A user who configured a key and then cleared it leaves `anthropicSkipped` false, so the chip stays absent and there's no visible signal that AI is off.
+3. **`ServerHealthGate` doesn't re-engage mid-session (J6).** `bootResolved` latches (`ServerHealthGate.tsx:29-34, 86-88`) and the gate has no ongoing health probe; a server that dies after boot is only re-detected on app reload.
+4. **AI-off chip doesn't return after clearing a configured key (J1).** The chip is gated on `anthropicSkipped` (`ReviewWorkspace.tsx:137-138`), but `clear` in `auth/useCredentials.tsx:130-153` never sets that flag. A user who configured a key and then cleared it leaves `anthropicSkipped` false, so the chip stays absent and there's no visible signal that AI is off.
 
 ---
 
