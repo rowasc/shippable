@@ -1,10 +1,18 @@
 import { randomUUID } from "node:crypto";
+import {
+  pullAndAck as storePullAndAck,
+  listDelivered as storeListDelivered,
+  postAgentInteraction,
+  listAgentReplies,
+  isDeliveredInteractionId as storeIsDelivered,
+  type StoredInteraction,
+} from "./db/interaction-store.ts";
+import { resetForTests as resetDb } from "./db/index.ts";
 
-// In-memory per-worktree queue for review interactions. See
-// docs/plans/share-review-comments.md and docs/plans/typed-review-interactions.md
-// for the design. The wire envelope is `<interaction>`; the stored shape
-// mirrors `web/src/types.ts#Interaction` minus the fields the wire doesn't
-// need (anchor*, runRecipe, queue bookkeeping).
+// The reviewer↔agent channel. Backed by the SQLite `interactions` table via
+// db/interaction-store.ts — this module owns only the wire envelope: the
+// `<reviewer-feedback>` XML the agent reads, CDATA sanitisation, attribute
+// escaping, and payload sort order.
 
 export type InteractionTarget = "line" | "block" | "reply";
 
@@ -54,6 +62,11 @@ export function isValidInteractionPair(
   return true;
 }
 
+/**
+ * Wire shape of one entry in the `<reviewer-feedback>` envelope. Projected from
+ * a `StoredInteraction`: the hot columns map straight across, `file` / `lines` /
+ * `commitSha` / `htmlUrl` are pulled out of `payload`.
+ */
 export interface Interaction {
   id: string;
   target: InteractionTarget;
@@ -66,16 +79,14 @@ export interface Interaction {
   lines?: string;
   body: string;
   commitSha: string;
-  /** Prior interaction id this entry replaces. Null when not an edit. */
-  supersedes: string | null;
-  /** ISO timestamp stamped at enqueue. */
+  /** ISO timestamp — `created_at` of the stored row. */
   enqueuedAt: string;
   /** Optional provenance link back to GitHub for PR-imported interactions. */
   htmlUrl?: string;
 }
 
 export interface DeliveredInteraction extends Interaction {
-  /** ISO timestamp stamped when the interaction is moved out of pending. */
+  /** Mirrors `created_at`; the channel no longer stamps a distinct delivery time. */
   deliveredAt: string;
 }
 
@@ -84,112 +95,88 @@ export interface DeliveredInteraction extends Interaction {
  *  is a local toggle, not something an agent posts back. */
 export type AgentResponseIntent = Exclude<ResponseIntent, "unack">;
 
+// ─── StoredInteraction → wire projection ─────────────────────────────────────
+
+/** Pull a string off a payload bag, or "" when absent / wrong-typed. */
+function payloadString(payload: Record<string, unknown>, key: string): string {
+  const v = payload[key];
+  return typeof v === "string" ? v : "";
+}
+
 /**
- * An agent's post-back to the review server. One shape covers both modes:
- *   - reply (`parentId` set) — a response to a delivered reviewer
- *     interaction. Intent is constrained to the response-intent subset
- *     (ack / accept / reject).
- *   - top-level (`file` + `lines` + `target` set) — a fresh thread the
- *     agent started on its own. Intent is one of the ask intents.
+ * `file` lives in `payload.anchorPath` for enqueued review interactions and in
+ * `payload.file` for agent-started rows. `lines` is `payload.anchorLineNo`
+ * (a number) or `payload.lines` (already a string).
  */
-export type AgentReply =
-  | {
-      id: string;
-      parentId: string;
-      body: string;
-      intent: AgentResponseIntent;
-      postedAt: string;
-      agentLabel?: string;
-    }
-  | {
-      id: string;
-      file: string;
-      lines: string;
-      target: "line" | "block";
-      body: string;
-      intent: AskIntent;
-      postedAt: string;
-      agentLabel?: string;
-    };
-
-interface QueueEntry {
-  pending: Interaction[];
-  delivered: DeliveredInteraction[];
+function wireFile(payload: Record<string, unknown>): string {
+  return payloadString(payload, "anchorPath") || payloadString(payload, "file");
 }
 
-const DELIVERED_HISTORY_CAP = 200;
-const REPLY_HISTORY_CAP = 200;
+function wireLines(payload: Record<string, unknown>): string | undefined {
+  const lines = payload.lines;
+  if (typeof lines === "string" && lines.length > 0) return lines;
+  const anchorLineNo = payload.anchorLineNo;
+  if (typeof anchorLineNo === "number") return String(anchorLineNo);
+  return undefined;
+}
 
-const queues = new Map<string, QueueEntry>();
-const replyStore = new Map<string, AgentReply[]>();
-
-function getOrCreate(worktreePath: string): QueueEntry {
-  let entry = queues.get(worktreePath);
-  if (!entry) {
-    entry = { pending: [], delivered: [] };
-    queues.set(worktreePath, entry);
+function wireHtmlUrl(payload: Record<string, unknown>): string | undefined {
+  const external = payload.external;
+  if (
+    external &&
+    typeof external === "object" &&
+    typeof (external as { htmlUrl?: unknown }).htmlUrl === "string"
+  ) {
+    return (external as { htmlUrl: string }).htmlUrl;
   }
-  return entry;
+  const direct = payload.htmlUrl;
+  return typeof direct === "string" && direct.length > 0 ? direct : undefined;
 }
 
-export function enqueue(
-  worktreePath: string,
-  interactions: Array<Omit<Interaction, "id" | "enqueuedAt">>,
-): string[] {
-  const entry = getOrCreate(worktreePath);
-  const ids: string[] = [];
-  for (const ix of interactions) {
-    const id = randomUUID();
-    const stamped: Interaction = {
-      ...ix,
-      id,
-      enqueuedAt: new Date().toISOString(),
-    };
-    entry.pending.push(stamped);
-    ids.push(id);
-  }
-  return ids;
+function toWire(row: StoredInteraction): Interaction {
+  const wire: Interaction = {
+    id: row.id,
+    target: row.target as InteractionTarget,
+    intent: row.intent as InteractionIntent,
+    author: row.author,
+    authorRole: row.authorRole as InteractionAuthorRole,
+    file: wireFile(row.payload),
+    body: row.body,
+    commitSha: payloadString(row.payload, "originSha"),
+    enqueuedAt: row.createdAt,
+  };
+  const lines = wireLines(row.payload);
+  if (lines !== undefined) wire.lines = lines;
+  const htmlUrl = wireHtmlUrl(row.payload);
+  if (htmlUrl !== undefined) wire.htmlUrl = htmlUrl;
+  return wire;
 }
+
+// Agent-authored rows are sorted by `created_at` in the store. Two posts in
+// the same millisecond would otherwise tie and fall back to a random-UUID id —
+// non-deterministic order. A monotonic clock keeps insertion order stable.
+let lastPostedMs = 0;
+function nextCreatedAt(): string {
+  const now = Math.max(Date.now(), lastPostedMs + 1);
+  lastPostedMs = now;
+  return new Date(now).toISOString();
+}
+
+// ─── Channel operations (DB-backed) ──────────────────────────────────────────
 
 /**
- * Atomic: read pending, resolve supersession, move resolved set to delivered,
- * clear pending, return the resolved interactions.
- *
- * Supersession is resolved at pull time (not enqueue time) so a freshly
- * enqueued edit can collapse with its predecessor even when both are still
- * pending — the queue only sees the final state of an edit chain.
+ * Atomic pull: drains the worktree's pending rows to `delivered` and returns
+ * them as wire interactions. The transaction lives in interaction-store.ts.
  */
 export function pullAndAck(worktreePath: string): Interaction[] {
-  const entry = getOrCreate(worktreePath);
-  if (entry.pending.length === 0) return [];
-
-  const resolved = resolveSupersessions(entry.pending);
-
-  const now = new Date().toISOString();
-  for (const ix of resolved) {
-    const delivered: DeliveredInteraction = { ...ix, deliveredAt: now };
-    entry.delivered.unshift(delivered);
-  }
-  if (entry.delivered.length > DELIVERED_HISTORY_CAP) {
-    entry.delivered.length = DELIVERED_HISTORY_CAP;
-  }
-  entry.pending = [];
-  return resolved;
+  return storePullAndAck(worktreePath).map(toWire);
 }
 
 export function listDelivered(worktreePath: string): DeliveredInteraction[] {
-  const entry = queues.get(worktreePath);
-  if (!entry) return [];
-  return entry.delivered.slice();
-}
-
-export function unenqueue(worktreePath: string, id: string): boolean {
-  const entry = queues.get(worktreePath);
-  if (!entry) return false;
-  const idx = entry.pending.findIndex((c) => c.id === id);
-  if (idx < 0) return false;
-  entry.pending.splice(idx, 1);
-  return true;
+  return storeListDelivered(worktreePath).map((row) => ({
+    ...toWire(row),
+    deliveredAt: row.createdAt,
+  }));
 }
 
 /**
@@ -207,17 +194,17 @@ export function postReply(
   },
 ): string {
   const id = randomUUID();
-  const reply: AgentReply = {
+  postAgentInteraction({
     id,
-    parentId: payload.parentId,
-    body: payload.body,
+    worktreePath,
+    threadKey: null,
+    target: "reply",
     intent: payload.intent,
-    postedAt: new Date().toISOString(),
-    ...(payload.agentLabel !== undefined
-      ? { agentLabel: payload.agentLabel }
-      : {}),
-  };
-  appendReply(worktreePath, reply);
+    author: payload.agentLabel ?? "agent",
+    body: payload.body,
+    createdAt: nextCreatedAt(),
+    payload: { parentId: payload.parentId },
+  });
   return id;
 }
 
@@ -238,34 +225,18 @@ export function postTopLevel(
   },
 ): string {
   const id = randomUUID();
-  const reply: AgentReply = {
+  postAgentInteraction({
     id,
-    file: payload.file,
-    lines: payload.lines,
+    worktreePath,
+    threadKey: null,
     target: payload.target,
-    body: payload.body,
     intent: payload.intent,
-    postedAt: new Date().toISOString(),
-    ...(payload.agentLabel !== undefined
-      ? { agentLabel: payload.agentLabel }
-      : {}),
-  };
-  appendReply(worktreePath, reply);
+    author: payload.agentLabel ?? "agent",
+    body: payload.body,
+    createdAt: nextCreatedAt(),
+    payload: { file: payload.file, lines: payload.lines },
+  });
   return id;
-}
-
-function appendReply(worktreePath: string, reply: AgentReply): void {
-  let list = replyStore.get(worktreePath);
-  if (!list) {
-    list = [];
-    replyStore.set(worktreePath, list);
-  }
-  list.push(reply);
-  // Bound the per-worktree reply list — a noisy agent in a long-lived
-  // process otherwise grows this without limit.
-  if (list.length > REPLY_HISTORY_CAP) {
-    list.splice(0, list.length - REPLY_HISTORY_CAP);
-  }
 }
 
 /**
@@ -281,7 +252,7 @@ export type AgentReplyWireItem =
       intent: AgentResponseIntent;
       author: string;
       authorRole: "agent";
-      target: InteractionTarget;
+      target: "reply";
       postedAt: string;
     }
   | {
@@ -297,31 +268,30 @@ export type AgentReplyWireItem =
     };
 
 export function listReplies(worktreePath: string): AgentReplyWireItem[] {
-  const list = replyStore.get(worktreePath);
-  if (!list) return [];
-  return list.map((r): AgentReplyWireItem => {
-    if ("parentId" in r) {
+  return listAgentReplies(worktreePath).map((row): AgentReplyWireItem => {
+    const parentId = row.payload.parentId;
+    if (typeof parentId === "string") {
       return {
-        id: r.id,
-        parentId: r.parentId,
-        body: r.body,
-        intent: r.intent,
-        author: r.agentLabel ?? "agent",
+        id: row.id,
+        parentId,
+        body: row.body,
+        intent: row.intent as AgentResponseIntent,
+        author: row.author,
         authorRole: "agent",
         target: "reply",
-        postedAt: r.postedAt,
+        postedAt: row.createdAt,
       };
     }
     return {
-      id: r.id,
-      file: r.file,
-      lines: r.lines,
-      body: r.body,
-      intent: r.intent,
-      author: r.agentLabel ?? "agent",
+      id: row.id,
+      file: payloadString(row.payload, "file"),
+      lines: payloadString(row.payload, "lines"),
+      body: row.body,
+      intent: row.intent as AskIntent,
+      author: row.author,
       authorRole: "agent",
-      target: r.target,
-      postedAt: r.postedAt,
+      target: row.target as "line" | "block",
+      postedAt: row.createdAt,
     };
   });
 }
@@ -335,29 +305,16 @@ export function isDeliveredInteractionId(
   worktreePath: string,
   id: string,
 ): boolean {
-  const entry = queues.get(worktreePath);
-  if (!entry) return false;
-  return entry.delivered.some((d) => d.id === id);
+  return storeIsDelivered(worktreePath, id);
 }
 
-/** Test-only: clear all queues. */
+/** Test-only: reset the backing database and the monotonic clock. */
 export function resetForTests(): void {
-  queues.clear();
-  replyStore.clear();
+  resetDb();
+  lastPostedMs = 0;
 }
 
-function resolveSupersessions(pending: Interaction[]): Interaction[] {
-  // A pending entry's `supersedes` points at the *immediate* predecessor. To
-  // collapse a chain {A → B → C} we drop every pending id that is the target
-  // of another pending entry's `supersedes`.
-  const supersededIds = new Set<string>();
-  for (const c of pending) {
-    if (c.supersedes && pending.some((p) => p.id === c.supersedes)) {
-      supersededIds.add(c.supersedes);
-    }
-  }
-  return pending.filter((c) => !supersededIds.has(c.id));
-}
+// ─── Wire envelope ───────────────────────────────────────────────────────────
 
 function lowerLineBound(lines: string | undefined): number {
   if (!lines) return Number.POSITIVE_INFINITY;
@@ -415,9 +372,6 @@ function renderInteraction(c: Interaction): string {
   }
   if (c.htmlUrl) {
     attrs.push(`htmlUrl="${escapeXmlAttr(c.htmlUrl)}"`);
-  }
-  if (c.supersedes) {
-    attrs.push(`supersedes="${escapeXmlAttr(c.supersedes)}"`);
   }
   // Wrap body in CDATA so a reviewer can't break out of the <interaction>
   // element by pasting `</interaction>` into their comment.

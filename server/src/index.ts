@@ -13,14 +13,6 @@ import type {
   AgentResponseIntent,
   AskIntent,
   Interaction,
-  InteractionAuthorRole,
-  InteractionIntent,
-  InteractionTarget,
-} from "./agent-queue.ts";
-import {
-  isInteractionTarget,
-  isInteractionIntent,
-  isAuthorRole,
 } from "./agent-queue.ts";
 import { removePortFile, writePortFile } from "./port-file.ts";
 import { getCredential, hasCredential } from "./auth/store.ts";
@@ -36,6 +28,7 @@ import {
   handleInteractionsUnenqueue,
   handleInteractionsDelete,
 } from "./db/interaction-endpoints.ts";
+import { initDb, getDbStatus } from "./db/index.ts";
 import {
   RequestBodyTooLargeError,
   readBody,
@@ -165,9 +158,6 @@ export function createApp(): Server {
     if (req.method === "POST" && req.url === "/api/github/pr/branch-lookup") {
       return await handleGithubPrBranchLookup(req, res, origin);
     }
-    if (req.method === "POST" && req.url === "/api/agent/enqueue") {
-      return await handleAgentEnqueue(req, res, origin);
-    }
     if (req.method === "POST" && req.url === "/api/agent/pull") {
       return await handleAgentPull(req, res, origin);
     }
@@ -177,9 +167,6 @@ export function createApp(): Server {
       req.url.startsWith("/api/agent/delivered")
     ) {
       return await handleAgentDelivered(req, res, origin);
-    }
-    if (req.method === "POST" && req.url === "/api/agent/unenqueue") {
-      return await handleAgentUnenqueue(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/agent/replies") {
       return await handleAgentPostReply(req, res, origin);
@@ -1049,131 +1036,6 @@ function isAgentResponseIntent(value: unknown): value is AgentResponseIntent {
   );
 }
 
-async function handleAgentEnqueue(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: {
-    worktreePath?: unknown;
-    commitSha?: unknown;
-    interaction?: unknown;
-  };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  const wtPath =
-    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
-  const commitSha =
-    typeof parsed.commitSha === "string" ? parsed.commitSha : "";
-  const ix = parsed.interaction as
-    | {
-        target?: unknown;
-        intent?: unknown;
-        author?: unknown;
-        authorRole?: unknown;
-        file?: unknown;
-        lines?: unknown;
-        body?: unknown;
-        supersedes?: unknown;
-        htmlUrl?: unknown;
-      }
-    | undefined;
-  if (!wtPath || !commitSha || !ix || typeof ix !== "object") {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error:
-          "expected { worktreePath: string, commitSha: string, interaction: { target, intent, author, authorRole, file, body, ... } }",
-      }),
-    );
-    return;
-  }
-  if (!isInteractionTarget(ix.target)) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid interaction.target" }));
-    return;
-  }
-  if (!isInteractionIntent(ix.intent)) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid interaction.intent" }));
-    return;
-  }
-  if (!agentQueue.isValidInteractionPair(ix.target, ix.intent)) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        error: `invalid (target, intent) pair: response intents only attach to reply-to-* targets`,
-      }),
-    );
-    return;
-  }
-  if (!isAuthorRole(ix.authorRole)) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid interaction.authorRole" }));
-    return;
-  }
-  if (typeof ix.author !== "string" || ix.author.length === 0) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "interaction.author must be a non-empty string" }));
-    return;
-  }
-  if (typeof ix.body !== "string") {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "interaction.body must be a string" }));
-    return;
-  }
-  try {
-    await assertGitDir(wtPath);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: message }));
-    return;
-  }
-  if (typeof ix.file !== "string" || ix.file.length === 0) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "interaction.file must be a non-empty string" }));
-    return;
-  }
-  const interaction: Omit<Interaction, "id" | "enqueuedAt"> = {
-    target: ix.target,
-    intent: ix.intent,
-    author: ix.author,
-    authorRole: ix.authorRole,
-    file: ix.file,
-    body: ix.body,
-    commitSha,
-    supersedes:
-      typeof ix.supersedes === "string" ? ix.supersedes : null,
-  };
-  if (typeof ix.lines === "string" && ix.lines.length > 0) {
-    interaction.lines = ix.lines;
-  }
-  if (typeof ix.htmlUrl === "string" && ix.htmlUrl.length > 0) {
-    interaction.htmlUrl = ix.htmlUrl;
-  }
-  const [id] = agentQueue.enqueue(wtPath, [interaction]);
-  writeCorsHeaders(res, origin);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ id }));
-}
-
 async function handleAgentPull(
   req: IncomingMessage,
   res: ServerResponse,
@@ -1414,47 +1276,6 @@ async function handleAgentListReplies(
   res.end(JSON.stringify({ replies }));
 }
 
-async function handleAgentUnenqueue(
-  req: IncomingMessage,
-  res: ServerResponse,
-  origin: string | null,
-) {
-  const body = await readBody(req);
-  let parsed: { worktreePath?: unknown; id?: unknown };
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "invalid JSON body" }));
-    return;
-  }
-  const wtPath =
-    typeof parsed.worktreePath === "string" ? parsed.worktreePath : "";
-  const id = typeof parsed.id === "string" ? parsed.id : "";
-  if (!wtPath || !id) {
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({ error: "expected { worktreePath: string, id: string }" }),
-    );
-    return;
-  }
-  try {
-    await assertGitDir(wtPath);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    writeCorsHeaders(res, origin);
-    res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: message }));
-    return;
-  }
-  const unenqueued = agentQueue.unenqueue(wtPath, id);
-  writeCorsHeaders(res, origin);
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ unenqueued }));
-}
-
 function parseOrigin(value: string): string | null {
   try {
     const url = new URL(value);
@@ -1547,11 +1368,18 @@ function isRequestAllowed(
   }
 }
 
-function main() {
+async function main() {
   if (process.env.ANTHROPIC_API_KEY) {
     console.warn(
       "[server] ANTHROPIC_API_KEY is set in the environment but is no longer used; configure via the Settings panel.",
     );
+  }
+  // Open + migrate the SQLite store before binding. initDb never throws — a
+  // failure is captured as the DB status and surfaced via /api/health.
+  await initDb();
+  const dbStatus = getDbStatus();
+  if (dbStatus.status === "error") {
+    console.error(`[server] database unavailable: ${dbStatus.error}`);
   }
   const server = createApp();
   server.listen(PORT, HOST, () => {
@@ -1582,5 +1410,5 @@ const isEntry =
   import.meta.url === `file://${process.argv[1]}` ||
   import.meta.url.endsWith(process.argv[1] ?? "");
 if (isEntry) {
-  main();
+  void main();
 }

@@ -25,8 +25,44 @@ process.env.ANTHROPIC_API_KEY = "test";
 let server: Server;
 let baseUrl: string;
 let worktreePath: string;
-let resetForTests: () => void;
+let initDb: (env?: NodeJS.ProcessEnv) => Promise<void>;
 let resetAuthStore: () => void;
+let ixSeq = 0;
+
+/**
+ * Seed a pending agent-queue entry the way the client does now: upsert a
+ * review interaction (client-authoritative id), then enqueue it to a worktree.
+ * Replaces the removed `/api/agent/enqueue` flow. Returns the interaction id.
+ */
+async function seedPending(
+  wtPath: string,
+  over: { body?: string; commitSha?: string } = {},
+): Promise<string> {
+  const id = `int-test-ix-${++ixSeq}`;
+  const up = await postJson(`${baseUrl}/api/interactions`, {
+    id,
+    changesetId: "cs-int-test",
+    target: "block",
+    intent: "comment",
+    author: "you",
+    authorRole: "user",
+    body: over.body ?? "hello",
+    anchorPath: "src/foo.ts",
+    anchorLineNo: 10,
+    originSha: over.commitSha ?? "abc123",
+  });
+  if (up.status !== 200) {
+    throw new Error(`seed upsert failed: ${up.status} ${JSON.stringify(up.body)}`);
+  }
+  const enq = await postJson(`${baseUrl}/api/interactions/enqueue`, {
+    id,
+    worktreePath: wtPath,
+  });
+  if (enq.status !== 200) {
+    throw new Error(`seed enqueue failed: ${enq.status} ${JSON.stringify(enq.body)}`);
+  }
+  return id;
+}
 
 interface JsonResponse {
   status: number;
@@ -54,9 +90,9 @@ beforeAll(async () => {
   await execFileAsync("git", ["init"], { cwd: worktreePath });
 
   const indexMod = await import("./index.ts");
-  const queueMod = await import("./agent-queue.ts");
+  const dbMod = await import("./db/index.ts");
   const authMod = await import("./auth/store.ts");
-  resetForTests = queueMod.resetForTests;
+  initDb = dbMod.initDb;
   resetAuthStore = authMod.resetForTests;
 
   server = indexMod.createApp();
@@ -77,91 +113,17 @@ afterAll(async () => {
   await fs.rm(worktreePath, { recursive: true, force: true });
 });
 
-beforeEach(() => {
-  resetForTests();
+beforeEach(async () => {
+  // Fresh in-memory DB per test — isolates the agent-queue + /api/interactions
+  // rows that several suites below depend on.
+  ixSeq = 0;
+  await initDb({ SHIPPABLE_DB_PATH: ":memory:" });
   resetAuthStore();
-});
-
-describe("POST /api/agent/enqueue", () => {
-  it("rejects an invalid JSON body", async () => {
-    const res = await fetch(`${baseUrl}/api/agent/enqueue`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "not json",
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it("rejects when worktreePath is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("rejects when worktreePath is not a git dir", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath: "/tmp/this-does-not-exist-xyz-123",
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("returns { id } on success", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc123",
-      interaction: {
-        target: "block",
-        intent: "comment",
-        author: "you",
-        authorRole: "user",
-        file: "src/foo.ts",
-        lines: "10-12",
-        body: "hello",
-      },
-    });
-    expect(r.status).toBe(200);
-    expect(typeof r.body.id).toBe("string");
-    expect(r.body.id.length).toBeGreaterThan(0);
-  });
-
-  it("rejects when interaction.target is missing", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      interaction: { body: "x" },
-    });
-    expect(r.status).toBe(400);
-  });
-
-  it("rejects when interaction.target is an unrecognised string", async () => {
-    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      interaction: { target: "not-a-real-target", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
-    });
-    expect(r.status).toBe(400);
-  });
 });
 
 describe("POST /api/agent/pull", () => {
   it("returns the formatted envelope", async () => {
-    await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "deadbeef",
-      interaction: {
-        target: "block",
-        intent: "comment",
-        author: "you",
-        authorRole: "user",
-        file: "src/foo.ts",
-        lines: "10",
-        body: "hello",
-      },
-    });
+    await seedPending(worktreePath, { commitSha: "deadbeef", body: "hello" });
     const r = await postJson(`${baseUrl}/api/agent/pull`, {
       worktreePath,
     });
@@ -174,11 +136,7 @@ describe("POST /api/agent/pull", () => {
   });
 
   it("first wins: a second pull returns an empty queue", async () => {
-    await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
-    });
+    await seedPending(worktreePath, { body: "x" });
     const [r1, r2] = await Promise.all([
       postJson(`${baseUrl}/api/agent/pull`, { worktreePath }),
       postJson(`${baseUrl}/api/agent/pull`, { worktreePath }),
@@ -197,18 +155,10 @@ describe("GET /api/agent/delivered", () => {
     expect(r.status).toBe(400);
   });
 
-  it("returns delivered comments newest-first", async () => {
-    await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "first" },
-    });
+  it("returns delivered comments oldest-first", async () => {
+    await seedPending(worktreePath, { body: "first" });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
-    await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "second" },
-    });
+    await seedPending(worktreePath, { body: "second" });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
     const r = await getJson(
@@ -216,8 +166,8 @@ describe("GET /api/agent/delivered", () => {
     );
     expect(r.status).toBe(200);
     expect(r.body.delivered).toHaveLength(2);
-    expect(r.body.delivered[0].body).toBe("second");
-    expect(r.body.delivered[1].body).toBe("first");
+    expect(r.body.delivered[0].body).toBe("first");
+    expect(r.body.delivered[1].body).toBe("second");
   });
 
   it("round-trips a worktree path containing spaces through URL encoding", async () => {
@@ -226,12 +176,7 @@ describe("GET /api/agent/delivered", () => {
     );
     try {
       await execFileAsync("git", ["init"], { cwd: spacedPath });
-      const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-        worktreePath: spacedPath,
-        commitSha: "abc",
-        interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "spaced" },
-      });
-      expect(enq.status).toBe(200);
+      await seedPending(spacedPath, { body: "spaced" });
       await postJson(`${baseUrl}/api/agent/pull`, { worktreePath: spacedPath });
 
       const r = await getJson(
@@ -374,15 +319,10 @@ describe("POST /api/agent/replies", () => {
   });
 
   it("returns { id } on success and persists via GET", async () => {
-    // Enqueue + pull to mint a real delivered parentId — the post-reply
+    // Seed + pull to mint a real delivered parentId — the post-reply
     // endpoint validates that parentId belongs to the worktree's
     // delivered set (defensive per spec § Data Flow).
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "deadbeef",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
-    });
-    const realCommentId = enq.body.id as string;
+    const realCommentId = await seedPending(worktreePath, { body: "hi" });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
     const r = await postJson(`${baseUrl}/api/agent/replies`, {
@@ -407,12 +347,7 @@ describe("POST /api/agent/replies", () => {
   });
 
   it("appends multiple replies to the same parentId", async () => {
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "deadbeef",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
-    });
-    const realCommentId = enq.body.id as string;
+    const realCommentId = await seedPending(worktreePath, { body: "hi" });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
     await postJson(`${baseUrl}/api/agent/replies`, {
@@ -437,19 +372,11 @@ describe("POST /api/agent/replies", () => {
     ]);
   });
 
-  it("caps the per-worktree reply list at REPLY_HISTORY_CAP", async () => {
-    // Mirror the delivered-history-cap regression test: post past the cap
-    // and confirm the oldest entries are dropped.
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
-      worktreePath,
-      commitSha: "deadbeef",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "hi" },
-    });
-    const realCommentId = enq.body.id as string;
+  it("persists the full reply list (DB-backed, no in-memory cap)", async () => {
+    const realCommentId = await seedPending(worktreePath, { body: "hi" });
     await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
 
-    // Cap is 200; post 205 to spill 5.
-    for (let i = 0; i < 205; i++) {
+    for (let i = 0; i < 30; i++) {
       await postJson(`${baseUrl}/api/agent/replies`, {
         worktreePath,
         parentId: realCommentId,
@@ -460,11 +387,9 @@ describe("POST /api/agent/replies", () => {
     const list = await getJson(
       `${baseUrl}/api/agent/replies?worktreePath=${encodeURIComponent(worktreePath)}`,
     );
-    expect(list.body.replies).toHaveLength(200);
-    // Oldest retained should be reply-5; reply-0..4 dropped. Newest is
-    // reply-204.
-    expect(list.body.replies[0].body).toBe("reply-5");
-    expect(list.body.replies[199].body).toBe("reply-204");
+    expect(list.body.replies).toHaveLength(30);
+    expect(list.body.replies[0].body).toBe("reply-0");
+    expect(list.body.replies[29].body).toBe("reply-29");
   });
 });
 
@@ -490,38 +415,24 @@ describe("GET /api/agent/replies", () => {
   });
 });
 
-describe("POST /api/agent/unenqueue", () => {
-  it("drops a pending comment", async () => {
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+describe("legacy /api/agent/enqueue + /api/agent/unenqueue routes are gone", () => {
+  // Replaced by /api/interactions + /api/interactions/enqueue (client-
+  // authoritative ids). Both old routes fall through the router to 404.
+  it("POST /api/agent/enqueue returns 404", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/enqueue`, {
       worktreePath,
       commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
+      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", body: "x" },
     });
-    const id = enq.body.id;
-    const un = await postJson(`${baseUrl}/api/agent/unenqueue`, {
-      worktreePath,
-      id,
-    });
-    expect(un.status).toBe(200);
-    expect(un.body.unenqueued).toBe(true);
-    const pull = await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
-    expect(pull.body.ids).toHaveLength(0);
+    expect(r.status).toBe(404);
   });
 
-  it("is a no-op for an already-delivered id", async () => {
-    const enq = await postJson(`${baseUrl}/api/agent/enqueue`, {
+  it("POST /api/agent/unenqueue returns 404", async () => {
+    const r = await postJson(`${baseUrl}/api/agent/unenqueue`, {
       worktreePath,
-      commitSha: "abc",
-      interaction: { target: "block", intent: "comment", author: "you", authorRole: "user", file: "a.ts", lines: "1", body: "x" },
+      id: "anything",
     });
-    const id = enq.body.id;
-    await postJson(`${baseUrl}/api/agent/pull`, { worktreePath });
-    const un = await postJson(`${baseUrl}/api/agent/unenqueue`, {
-      worktreePath,
-      id,
-    });
-    expect(un.status).toBe(200);
-    expect(un.body.unenqueued).toBe(false);
+    expect(r.status).toBe(404);
   });
 });
 
