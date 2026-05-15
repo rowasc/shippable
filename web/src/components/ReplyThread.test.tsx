@@ -291,12 +291,12 @@ describe("ReplyThread — errored pip + retry", () => {
     expect(container.querySelector(".reply__pip--delivered")).not.toBeNull();
   });
 
-  it("queued (pending, undelivered) wins over errored — pending means the latest enqueue landed", () => {
+  it("renders queued pip optimistically when agentQueueStatus is pending and no enqueue error", () => {
+    // Covers the submit→delivered window: the interaction is optimistically
+    // set to pending on submit before the server round-trip completes.
     const { container } = render(
       <ReplyThread
-        interactions={[
-          userIx({ agentQueueStatus: "pending", enqueueError: true }),
-        ]}
+        interactions={[userIx({ agentQueueStatus: "pending", enqueueError: false })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -309,8 +309,33 @@ describe("ReplyThread — errored pip + retry", () => {
         deliveredById={{}}
       />,
     );
-    expect(container.querySelector(".reply__pip--errored")).toBeNull();
-    expect(container.querySelector(".reply__pip--queued")).not.toBeNull();
+    const pip = container.querySelector(".reply__pip");
+    expect(pip).not.toBeNull();
+    expect(pip!.className).toContain("reply__pip--queued");
+    expect(pip!.textContent).toContain("queued");
+  });
+
+  it("errored wins over queued — covers the optimistic-pending-then-enqueue-failed case", () => {
+    const { container } = render(
+      <ReplyThread
+        interactions={[
+          userIx({ agentQueueStatus: "pending", enqueueError: true }),
+        ]}
+        isDrafting={false}
+        draftBody=""
+        onStartDraft={noop}
+        onCloseDraft={noop}
+        onChangeDraft={noop}
+        onSubmitReply={noop}
+        onDeleteReply={noop}
+        onRetryReply={noop}
+        symbols={emptySymbols()}
+        onJump={noop}
+        deliveredById={{}}
+      />,
+    );
+    expect(container.querySelector(".reply__pip--queued")).toBeNull();
+    expect(container.querySelector(".reply__pip--errored")).not.toBeNull();
   });
 
   it("renders no pip when neither enqueued nor errored", () => {

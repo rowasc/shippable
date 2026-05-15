@@ -319,10 +319,13 @@ function Composer({
  *   1. `✓ delivered` — `agentQueueStatus === "delivered"`, or the polling
  *      `deliveredById` map carries the interaction's own `id`. Wins over
  *      everything else; a delivered entry's stale local error shouldn't show.
- *   2. `◌ queued` — `agentQueueStatus === "pending"` and not delivered. A
- *      server-confirmed pending status means the entry is genuinely in the
- *      queue; showing retry would mislead.
- *   3. `⚠ retry` — `enqueueError === true`. Click to re-run the enqueue.
+ *   2. `⚠ retry` — `enqueueError === true`. Wins over queued. Covers the
+ *      optimistic-pending-then-enqueue-failed case: the interaction is
+ *      optimistically set to pending on submit, but if the enqueue POST
+ *      fails the user must see the error, not a false "queued" pip.
+ *   3. `◌ queued` — `agentQueueStatus === "pending"` and not delivered. Set
+ *      optimistically on submit (and confirmed server-side once enqueue
+ *      lands), so the pip appears immediately in the submit→delivered window.
  *   4. (no pip) — not enqueued and no error (entries authored on a
  *      non-worktree changeset, fresh fixture entries, etc.).
  */
@@ -353,16 +356,8 @@ function ReplyPip({
       </span>
     );
   }
-  if (ix.agentQueueStatus === "pending") {
-    return (
-      <span
-        className="reply__pip reply__pip--queued"
-        title={`Sent to your agent's queue at ${formatClock(ix.createdAt)}.`}
-      >
-        ◌ queued
-      </span>
-    );
-  }
+  // Error wins over queued: if the enqueue POST failed after an optimistic
+  // pending was set, the user must see the error instead of a false "queued".
   if (errored) {
     const title = "Couldn't reach your agent — click to retry.";
     if (onRetry) {
@@ -380,6 +375,16 @@ function ReplyPip({
     return (
       <span className="reply__pip reply__pip--errored" title={title}>
         ⚠ retry
+      </span>
+    );
+  }
+  if (ix.agentQueueStatus === "pending") {
+    return (
+      <span
+        className="reply__pip reply__pip--queued"
+        title={`Sent to your agent's queue at ${formatClock(ix.createdAt)}.`}
+      >
+        ◌ queued
       </span>
     );
   }

@@ -1370,6 +1370,10 @@ export function ReviewWorkspace({
                 body,
                 createdAt: createdAt.toISOString(),
                 ...buildReplyAnchor(key, cs),
+                // Optimistically mark as queued so the pip appears immediately
+                // in the submit→delivered window. The server's enqueue POST
+                // sets the same column server-side; no mismatch risk.
+                ...(activeWorktreeSource ? { agentQueueStatus: "pending" } : {}),
               };
               // Worktree path: bypass the sync hook — this code manages its
               // own upsert→enqueue sequence, and going through syncedDispatch
