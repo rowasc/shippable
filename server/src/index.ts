@@ -181,7 +181,7 @@ export function createApp(): Server {
     if (req.method === "GET" && req.url === "/api/health") {
       writeCorsHeaders(res, origin);
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ ok: true }));
+      res.end(JSON.stringify({ ok: true, db: getDbStatus() }));
       return;
     }
     writeCorsHeaders(res, origin);

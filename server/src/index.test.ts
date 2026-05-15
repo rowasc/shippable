@@ -729,10 +729,30 @@ describe("legacy /api/github/auth/* routes are gone", () => {
 });
 
 describe("GET /api/health", () => {
-  it("returns { ok: true } only — no anthropic field", async () => {
+  it("returns { ok: true, db: { status: 'ok' } } when DB is healthy", async () => {
+    // beforeEach already called initDb({ SHIPPABLE_DB_PATH: ":memory:" })
     const r = await getJson(`${baseUrl}/api/health`);
     expect(r.status).toBe(200);
-    expect(r.body).toEqual({ ok: true });
+    expect(r.body).toEqual({ ok: true, db: { status: "ok" } });
+  });
+
+  describe("DB error path", () => {
+    afterEach(async () => {
+      // Re-init with a working DB so subsequent tests are not poisoned.
+      await initDb({ SHIPPABLE_DB_PATH: ":memory:" });
+    });
+
+    it("reflects db error in /api/health when DB failed to initialise", async () => {
+      // Empty env has neither SHIPPABLE_DB_PATH nor HOME, so initDb captures
+      // the failure instead of throwing — same pattern as db/index.test.ts.
+      await initDb({});
+      const r = await getJson(`${baseUrl}/api/health`);
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.db.status).toBe("error");
+      expect(typeof r.body.db.error).toBe("string");
+      expect(r.body.db.error.length).toBeGreaterThan(0);
+    });
   });
 });
 
