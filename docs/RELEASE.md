@@ -4,12 +4,38 @@
 
 ## One-time setup
 
-On top of the desktop build prereqs in `README.md`:
-
 ```
+brew tap oven-sh/bun && brew install bun
+cargo install tauri-cli --version "^2.0"
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run desktop:setup
 gh auth login
 ```
+
+`bun` compiles `server/` into the bundled sidecar binary. `tauri-cli` is the Tauri 2 build driver. `rustup target add` covers cross-arch DMGs (Apple Silicon + Intel). `npm run desktop:setup` installs `web/` and `server/` deps. `gh auth login` is only needed for the publishing step.
+
+## Building a DMG without publishing
+
+```
+npm run build:dmg
+```
+
+Output:
+
+- `src-tauri/target/release/bundle/macos/Shippable.app`
+- `src-tauri/target/release/bundle/dmg/Shippable_<version>_aarch64.dmg`
+
+`build:dmg` runs `cargo tauri build -b app` first — `src-tauri/tauri.conf.json` wires in the pre-build steps (compile `server/` into the bundled sidecar, build `web/` into `web/dist`). The final `.dmg` is then packaged with `hdiutil` rather than Tauri's built-in DMG step (which relies on Finder AppleScript and is brittle in headless or sandboxed environments) — `scripts/build-dmg.mjs` handles this.
+
+## Iterating on the desktop shell
+
+For quick iteration on the Rust shell or the frontend:
+
+```
+npm run desktop:dev
+```
+
+Runs the React app via Vite in a native Tauri window with hot reload. The pre-dev hook in `src-tauri/tauri.conf.json` compiles the bundled sidecar first, so you don't need a separate `bun run build:sidecar` step.
 
 ## Cutting a release
 

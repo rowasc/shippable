@@ -50,7 +50,15 @@ GitHub Enterprise hosts require a one-time local trust confirmation before the t
 
 If GitHub rejects the token (expired, revoked, wrong scope), Shippable shows an auth-rejected banner with a "Re-enter token" affordance that re-opens the token modal.
 
-See `README.md` § "GitHub Personal Access Token" for the full setup reference and how to remove a stored token.
+**Behind a corporate proxy?** Set `HTTPS_PROXY` (or `https_proxy`) before starting the server and Shippable routes GitHub API calls through it. `NO_PROXY` is honored as a comma-separated list of hostnames (exact or `.suffix` match). Required for most GitHub Enterprise deployments that sit behind a network egress proxy.
+
+To remove a stored token from the desktop app's Keychain:
+
+```
+security delete-generic-password -s shippable -a GITHUB_TOKEN:github.com
+```
+
+Replace `github.com` with your GHE host as needed.
 
 ## Design notes
 
