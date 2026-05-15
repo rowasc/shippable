@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import "./App.css";
 import { findStub } from "./fixtures";
 import { initialState, reducer } from "./state";
@@ -6,7 +6,13 @@ import { Welcome } from "./components/Welcome";
 import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
 import { FindBar } from "./components/FindBar";
+import { Toast } from "./components/Toast";
 import { useTauriMenu } from "./useTauriMenu";
+import {
+  focusIfDuplicate,
+  onToastEvent,
+  setWindowChangeset,
+} from "./multiWindow";
 import type {
   ChangeSet,
   DetachedInteraction,
@@ -62,6 +68,17 @@ function resolveBoot(): BootSeed {
         interactions: { ...stub.interactions },
         applyPersisted: false,
         source: { kind: "stub", code: stub.code },
+      };
+    }
+    // "Open in new window" routes here: the spawning window pushes the
+    // changeset to recents and the new window picks it up by id.
+    const recent = loadRecents().find((r) => r.id === wanted);
+    if (recent && isResumableChangeset(recent.changeset)) {
+      return {
+        changesets: [recent.changeset],
+        interactions: {},
+        applyPersisted: true,
+        source: recent.source,
       };
     }
   }
@@ -147,6 +164,11 @@ export default function App() {
   const [drafts, setDrafts] = useState<Record<string, string>>(
     () => hydrated.drafts,
   );
+  const [toast, setToast] = useState<string | null>(null);
+  const dismissToast = useCallback(() => setToast(null), []);
+  // Cross-component toast bus — lets Welcome / LoadModal / multiWindow
+  // surface a notification without prop-drilling. App owns the state.
+  useEffect(() => onToastEvent(setToast), []);
 
   // Debounced persist of state + drafts. The reducer guards against
   // non-LOAD actions when changesets is empty, so saving the welcome
@@ -157,7 +179,8 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [state, drafts]);
 
-  function handleLoadChangeset(
+
+  async function handleLoadChangeset(
     cs: ChangeSet,
     interactions: Record<string, Interaction[]>,
     source: RecentSource,
@@ -166,6 +189,14 @@ export default function App() {
       prDetached: DetachedInteraction[];
     },
   ) {
+    // Duplicate guard: if another window is already showing this id,
+    // focus it and skip the in-place swap. No "open anyway" — having the
+    // same review live in two windows would diverge progress / comments
+    // / marks with no recovery.
+    if (await focusIfDuplicate(cs.id)) {
+      setToast("Already open in another window — focused it");
+      return;
+    }
     // Loads coming through this path (paste, URL, PR, worktree) carry no
     // ingest-derived AI annotations today — `interactions` is whatever
     // user-authored / stub-seeded state the caller threads in.
@@ -217,6 +248,14 @@ export default function App() {
     changesetsRef.current = state.changesets;
   });
   const activeCsId = activeCs?.id ?? null;
+
+  // Multi-window: tell Rust which changeset this window is showing so a
+  // peer window can refuse to open the same id twice. `null` resets the
+  // entry when this window goes back to welcome. No-op outside Tauri.
+  useEffect(() => {
+    void setWindowChangeset(activeCsId);
+  }, [activeCsId]);
+
   const appliedCsIds = useRef(new Set<string>());
   useEffect(() => {
     if (!activeCsId || appliedCsIds.current.has(activeCsId)) return;
@@ -369,6 +408,7 @@ export default function App() {
           onRecentsChange={setRecents}
         />
         <FindBar open={findOpen} onClose={closeFind} />
+        {toast && <Toast message={toast} onClose={dismissToast} />}
       </>
     );
   }
@@ -388,6 +428,7 @@ export default function App() {
         liveReloadBar={liveReloadBar}
       />
       <FindBar open={findOpen} onClose={closeFind} />
+      {toast && <Toast message={toast} onClose={dismissToast} />}
     </>
   );
 }

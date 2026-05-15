@@ -107,7 +107,7 @@
   min-width: 0;
   background: transparent;
   border: 0;
-  padding: 8px 28px 8px 10px;
+  padding: 8px 56px 8px 10px;
   text-align: left;
   font: inherit;
   color: var(--fg);
@@ -129,10 +129,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.welcome__recent-x {
+.welcome__recent-x,
+.welcome__recent-newwin {
   position: absolute;
   top: 2px;
-  right: 2px;
   width: 24px;
   height: 24px;
   display: inline-flex;
@@ -148,15 +148,30 @@
   cursor: pointer;
   opacity: 0.55;
 }
+.welcome__recent-x {
+  right: 2px;
+}
+.welcome__recent-newwin {
+  right: 28px;
+  font-size: 12px;
+}
 .welcome__recent:hover .welcome__recent-x,
+.welcome__recent:hover .welcome__recent-newwin,
 .welcome__recent-x:hover,
-.welcome__recent-x:focus-visible {
+.welcome__recent-x:focus-visible,
+.welcome__recent-newwin:hover,
+.welcome__recent-newwin:focus-visible {
   opacity: 1;
 }
 .welcome__recent-x:hover,
 .welcome__recent-x:focus-visible {
   color: var(--red);
   border-color: var(--red);
+}
+.welcome__recent-newwin:hover,
+.welcome__recent-newwin:focus-visible {
+  color: var(--fg);
+  border-color: var(--accent);
 }
 
 /* ── Hero (primary action) ─────────────────────────────────────────── */

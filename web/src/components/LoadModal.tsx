@@ -8,11 +8,15 @@ import type {
 import { parseDiff } from "../parseDiff";
 import type { RecentSource } from "../recents";
 import { useWorktreeLoader } from "../useWorktreeLoader";
+import type { Worktree } from "../useWorktreeLoader";
 import type { LoadOpts } from "../worktreeChangeset";
 import { CopyButton } from "./CopyButton";
 import { RangePicker } from "./RangePicker";
 import { useGithubPrLoad, isGithubPrUrl } from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
+import { isTauri } from "../keychain";
+import { openChangesetInWindow } from "../multiWindow";
+import { pushRecent } from "../recents";
 
 interface Props {
   /**
@@ -78,8 +82,26 @@ export function LoadModal({ onLoad, onClose }: Props) {
   }
 
   const worktrees = useWorktreeLoader({
-    onLoad: (cs: ChangeSet, source: RecentSource) => onLoad(cs, source),
+    onLoad: (cs: ChangeSet, source: RecentSource, target) => {
+      if (target === "new-window") {
+        // The spawning window writes the changeset into recents so the
+        // new window can hydrate by id (resolveBoot reads recents when
+        // ?cs=<id> doesn't match a stub). openChangesetInWindow handles
+        // the focus-existing / open-new branch and toasts on conflict.
+        pushRecent(cs, source);
+        void openChangesetInWindow(cs.id);
+        onClose();
+        return;
+      }
+      onLoad(cs, source);
+    },
   });
+
+  const supportsNewWindow = isTauri();
+
+  function openWorktreeInNewWindow(wt: Worktree, opts?: LoadOpts) {
+    void worktrees.loadFromWorktree(wt, opts, "new-window");
+  }
 
   // Empty-diff loads (branch at parity, picked merge commit, etc.) auto-open
   // the range picker for that row — let the user choose a different slice
@@ -271,6 +293,18 @@ export function LoadModal({ onLoad, onClose }: Props) {
                           {worktrees.wtLoadingPath === wt.path && " · loading…"}
                         </span>
                       </button>
+                      {supportsNewWindow && (
+                        <button
+                          type="button"
+                          className="modal__wt-newwin"
+                          onClick={() => openWorktreeInNewWindow(wt)}
+                          disabled={worktrees.wtLoadingPath !== null}
+                          aria-label={`open ${wt.branch ?? "(detached)"} in a new window`}
+                          title="open in new window"
+                        >
+                          ↗
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="modal__wt-pick-range"

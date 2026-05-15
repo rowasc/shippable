@@ -16,6 +16,8 @@ import { GitHubTokenModal } from "./GitHubTokenModal";
 import { RangePicker } from "./RangePicker";
 import { SettingsModal } from "./SettingsModal";
 import { useCredentials } from "../auth/useCredentials";
+import { isTauri } from "../keychain";
+import { openChangesetInWindow } from "../multiWindow";
 
 interface Props {
   recents: RecentEntry[];
@@ -147,6 +149,8 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
 
 
   const worktrees = useWorktreeLoader({
+    // Welcome's worktree rows have no "open in new window" affordance —
+    // only recents do — so target is always "current" here.
     onLoad: (cs, source) => deliver(cs, {}, source),
   });
 
@@ -171,9 +175,18 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
     deliver(r.changeset, {}, r.source);
   }
 
+  function openRecentInNewWindow(r: RecentEntry) {
+    // Hands off to the shared helper so "already open here" and "already
+    // open elsewhere" both fold into focus + toast — never a second
+    // window on the same review.
+    void openChangesetInWindow(r.id);
+  }
+
   function dismissRecent(id: string) {
     onRecentsChange(removeRecent(id));
   }
+
+  const supportsNewWindow = isTauri();
 
   return (
     <div className="welcome">
@@ -213,6 +226,17 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
                       {sourceLabel(r.source)} · {timeAgo(r.addedAt)}
                     </span>
                   </button>
+                  {supportsNewWindow && (
+                    <button
+                      type="button"
+                      className="welcome__recent-newwin"
+                      aria-label={`open ${r.title} in a new window`}
+                      title="open in new window"
+                      onClick={() => openRecentInNewWindow(r)}
+                    >
+                      ↗
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="welcome__recent-x"

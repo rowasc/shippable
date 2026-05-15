@@ -10,6 +10,9 @@ use tauri::menu::{AboutMetadataBuilder, Menu, MenuId, MenuItemBuilder, SubmenuBu
 use tauri::{AppHandle, Runtime};
 
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let new_window = MenuItemBuilder::with_id("shippable:new-window", "New Window")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)?;
     let find = MenuItemBuilder::with_id("shippable:find", "Find")
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
@@ -35,6 +38,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .quit()
         .build()?;
 
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&new_window)
+        .separator()
+        .close_window()
+        .build()?;
+
     let edit_menu = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -56,11 +65,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let window_menu = SubmenuBuilder::new(app, "Window")
         .minimize()
         .maximize()
-        .separator()
-        .close_window()
         .build()?;
 
-    Menu::with_items(app, &[&app_menu, &edit_menu, &view_menu, &window_menu])
+    Menu::with_items(
+        app,
+        &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu],
+    )
 }
 
 /// Maps a menu item id to the action string we emit to the frontend.
@@ -72,6 +82,7 @@ pub fn action_for(id: &MenuId) -> Option<&'static str> {
         "shippable:zoom-in" => Some("zoom-in"),
         "shippable:zoom-out" => Some("zoom-out"),
         "shippable:zoom-reset" => Some("zoom-reset"),
+        "shippable:new-window" => Some("new-window"),
         _ => None,
     }
 }

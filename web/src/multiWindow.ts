@@ -1,0 +1,138 @@
+// Bridge to the Rust-side window registry and window-spawn command.
+// Mirrors the shape of `keychain.ts` — `isTauri()` guard means every export
+// degrades to a no-op (or empty result) under browser dev, so callers
+// don't need to branch.
+
+import { isTauri } from "./keychain";
+
+export interface WindowEntry {
+  label: string;
+  changesetId: string | null;
+}
+
+const TOAST_EVENT = "shippable:toast";
+
+let cachedLabel: string | null = null;
+
+/** Tauri window label of the current page. `null` in browser dev. */
+export async function currentWindowLabel(): Promise<string | null> {
+  if (!isTauri()) return null;
+  if (cachedLabel) return cachedLabel;
+  const { getCurrentWebviewWindow } = await import(
+    "@tauri-apps/api/webviewWindow"
+  );
+  cachedLabel = getCurrentWebviewWindow().label;
+  return cachedLabel;
+}
+
+/** Spawn a new OS window. Pre-loads with `?cs=<id>` when given so the
+ *  new window boots straight into the review. */
+export async function openNewWindow(changesetId?: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("open_new_window", { changesetId: changesetId ?? null });
+}
+
+/** Tell Rust which changeset this window is currently showing. Pass null
+ *  when the window goes back to the picker / welcome. */
+export async function setWindowChangeset(
+  changesetId: string | null,
+): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("set_window_changeset", { changesetId });
+}
+
+export async function listWindowChangesets(): Promise<WindowEntry[]> {
+  if (!isTauri()) return [];
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<WindowEntry[]>("list_window_changesets");
+}
+
+export async function focusWindow(label: string): Promise<void> {
+  if (!isTauri()) return;
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("focus_window", { label });
+}
+
+/**
+ * Look up which window — if any — already shows `changesetId`. Returns
+ * the label or null. `excludeSelf` is true for in-place loads (re-loading
+ * the same id in the current window is a no-op, not a duplicate) and
+ * false for new-window spawns (opening a second copy when *this* window
+ * already has it is itself a duplicate, just focus self).
+ */
+export async function findWindowWith(
+  changesetId: string,
+  { excludeSelf }: { excludeSelf: boolean },
+): Promise<string | null> {
+  if (!isTauri()) return null;
+  const [self, entries] = await Promise.all([
+    currentWindowLabel(),
+    listWindowChangesets(),
+  ]);
+  for (const e of entries) {
+    if (e.changesetId !== changesetId) continue;
+    if (excludeSelf && e.label === self) continue;
+    return e.label;
+  }
+  return null;
+}
+
+/**
+ * In-place load guard. If another window already has `changesetId`,
+ * focus that window and return true so callers can skip the dispatch
+ * that would put the current window onto the same review. Returns false
+ * otherwise. No-op in browser dev.
+ */
+export async function focusIfDuplicate(
+  changesetId: string,
+): Promise<boolean> {
+  const label = await findWindowWith(changesetId, { excludeSelf: true });
+  if (!label) return false;
+  await focusWindow(label);
+  return true;
+}
+
+/**
+ * Used by "open in new window" affordances. Three outcomes:
+ *  - if *any* window (including self) already has the id, focus that
+ *    window and surface a toast in the current window — no new window.
+ *  - otherwise, spawn a new window pointed at the id.
+ *
+ * Folds "already loaded here" and "already loaded somewhere else" into
+ * one path so the user can't accidentally end up with two windows on
+ * the same review by spamming the ↗ button.
+ */
+export async function openChangesetInWindow(
+  changesetId: string,
+): Promise<"focused-self" | "focused-other" | "opened-new" | "not-tauri"> {
+  if (!isTauri()) return "not-tauri";
+  const self = await currentWindowLabel();
+  const existing = await findWindowWith(changesetId, { excludeSelf: false });
+  if (existing) {
+    if (existing === self) {
+      emitToast("Already open in this window");
+      return "focused-self";
+    }
+    await focusWindow(existing);
+    emitToast("Already open in another window — focused it");
+    return "focused-other";
+  }
+  await openNewWindow(changesetId);
+  return "opened-new";
+}
+
+/** Listener-side helper: hand back the unsubscribe fn. */
+export function onToastEvent(handler: (message: string) => void): () => void {
+  function listener(e: Event) {
+    const ce = e as CustomEvent<{ message: string }>;
+    if (ce.detail?.message) handler(ce.detail.message);
+  }
+  window.addEventListener(TOAST_EVENT, listener);
+  return () => window.removeEventListener(TOAST_EVENT, listener);
+}
+
+function emitToast(message: string): void {
+  window.dispatchEvent(new CustomEvent(TOAST_EVENT, { detail: { message } }));
+}

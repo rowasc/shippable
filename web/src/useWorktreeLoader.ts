@@ -20,8 +20,14 @@ export interface Worktree {
   isMain: boolean;
 }
 
+/** "current" (default): deliver to the active window via onLoad as normal.
+ *  "new-window": caller wants the result handed off to a fresh window
+ *  instead — onLoad gets the same args plus this hint and decides what
+ *  to do. */
+export type LoadTarget = "current" | "new-window";
+
 interface Props {
-  onLoad: (cs: ChangeSet, source: RecentSource) => void;
+  onLoad: (cs: ChangeSet, source: RecentSource, target: LoadTarget) => void;
 }
 
 export function useWorktreeLoader({ onLoad }: Props) {
@@ -101,7 +107,11 @@ export function useWorktreeLoader({ onLoad }: Props) {
     }
   }
 
-  async function loadFromWorktree(wt: Worktree, opts?: LoadOpts) {
+  async function loadFromWorktree(
+    wt: Worktree,
+    opts?: LoadOpts,
+    target: LoadTarget = "current",
+  ) {
     setErr(null);
     setWtLoadingPath(wt.path);
     try {
@@ -112,7 +122,11 @@ export function useWorktreeLoader({ onLoad }: Props) {
       void warmCodeGraph(wt.path, "HEAD");
       const cs = await fetchWorktreeChangeset(wt, opts);
       setWtEmpty(null);
-      onLoad(cs, { kind: "worktree", path: wt.path, branch: wt.branch });
+      onLoad(
+        cs,
+        { kind: "worktree", path: wt.path, branch: wt.branch },
+        target,
+      );
     } catch (e) {
       if (e instanceof EmptyDiffError) {
         // Don't pre-clear before the fetch — repeat-clicks on a row already
