@@ -19,6 +19,7 @@ import type {
 } from "../view";
 import { RichText } from "./RichText";
 import { ReplyThread } from "./ReplyThread";
+import { DetachedThreadCard } from "./DetachedThreadCard";
 import { AgentContextSection } from "./AgentContextSection";
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent, RefObject } from "react";
@@ -513,6 +514,44 @@ export function Inspector({
         onDeleteReply={onDeleteReply}
         onRetryReply={onRetryReply}
       />
+
+      {vm.detachedThreads.length > 0 && (
+        <section className="inspector__sec">
+          <div
+            className="inspector__sec-h"
+            title="comments on lines that are no longer in this diff (the file was rewritten or moved)"
+          >
+            Detached
+            <span className="inspector__sec-count">
+              {vm.detachedThreads.length} on this file
+            </span>
+          </div>
+          <ul className="notes">
+            {vm.detachedThreads.map((row) => (
+              <DetachedThreadCard
+                key={row.threadKey}
+                row={row}
+                symbols={symbols}
+                worktreePath={worktreePath}
+                deliveredById={deliveredById}
+                isDrafting={row.isDrafting}
+                draftBody={draftFor(row.threadKey)}
+                onJump={onJump}
+                onStartDraft={() => onStartDraft(row.threadKey)}
+                onCloseDraft={onCloseDraft}
+                onChangeDraft={(body) => onChangeDraft(row.threadKey, body)}
+                onSubmitReply={(body) => onSubmitReply(row.threadKey, body)}
+                onDeleteReply={(replyId) =>
+                  onDeleteReply(row.threadKey, replyId)
+                }
+                onRetryReply={(replyId) =>
+                  onRetryReply(row.threadKey, replyId)
+                }
+              />
+            ))}
+          </ul>
+        </section>
+      )}
     </aside>
   );
 }

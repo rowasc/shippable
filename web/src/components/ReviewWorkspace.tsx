@@ -1168,7 +1168,6 @@ export function ReviewWorkspace({
               readLines: state.readLines,
               reviewedFiles: state.reviewedFiles,
               interactions: state.interactions,
-              detachedInteractions: state.detachedInteractions,
             })}
             onPickFile={(fileId) => {
               const f = cs.files.find((ff) => ff.id === fileId)!;
@@ -1201,7 +1200,6 @@ export function ReviewWorkspace({
             onCloseRun={closePromptRun}
             wide={sidebarWide}
             onToggleWide={() => setSidebarWide((v) => !v)}
-            worktreePath={wtPath}
           />
         )}
         <div className="reviewpane">
@@ -1337,6 +1335,7 @@ export function ReviewWorkspace({
               replies: state.interactions,
               draftingKey,
               signals: ingestSignals,
+              detachedInteractions: state.detachedInteractions,
             })}
             commentCount={buildCommentStops(cs, state.interactions).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}

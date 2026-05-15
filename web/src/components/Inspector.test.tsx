@@ -60,6 +60,7 @@ function minimalViewModel() {
     currentLineNo: 1,
     showDraftStub: false,
     draftStubRow: null,
+    detachedThreads: [],
   };
 }
 

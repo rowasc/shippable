@@ -416,49 +416,8 @@ export interface SidebarFileItem {
   commentCount: number;
 }
 
-export interface SidebarDetachedEntry {
-  /** Stable id for React keys — combines threadKey + reply id. */
-  id: string;
-  body: string;
-  /** Timestamp formatted as hh:mm for the dirty-origin caption. */
-  authoredHHMM: string;
-  /** "committed" | "dirty" — drives the caption text. */
-  originType: "committed" | "dirty";
-  /** First 7 chars of originSha; empty for replies that didn't store one. */
-  originSha7: string;
-  /**
-   * Full origin sha — needed by the "view at" panel to fetch the historical
-   * file. Empty when the reply didn't store one (legacy or non-worktree).
-   */
-  originSha: string;
-  /**
-   * Repo-relative path the reply was anchored to, when the reply has it.
-   * Empty for legacy replies; the view-at affordance only renders for
-   * committed entries that have both this and `originSha`.
-   */
-  anchorPath: string;
-  /**
-   * Anchor line number captured at write time (1-based), driving the
-   * scroll-to-line behavior in the view-at panel. Undefined for legacy
-   * replies — the panel falls back to the top of the file.
-   */
-  anchorLineNo?: number;
-  /** Lines from the comment's anchorContext, ready to render in a snippet. */
-  snippetLines: { kind: LineKind; text: string; sign: string }[];
-}
-
-export interface SidebarDetachedFile {
-  path: string;
-  entries: SidebarDetachedEntry[];
-}
-
 export interface SidebarViewModel {
   files: SidebarFileItem[];
-  /**
-   * Per-file groups of detached replies. Empty when no replies are
-   * detached; the Sidebar hides the entire section in that case.
-   */
-  detached: SidebarDetachedFile[];
 }
 
 function fileStatusChar(s: string): string {
@@ -483,11 +442,6 @@ export interface BuildSidebarViewModelArgs {
    * Defaults to none.
    */
   interactions?: Record<string, Interaction[]>;
-  /**
-   * Interactions whose anchor didn't survive the latest reload. Grouped by
-   * file path in the output. Pass `[]` when nothing is detached.
-   */
-  detachedInteractions?: DetachedInteraction[];
 }
 
 /**
@@ -523,51 +477,12 @@ function buildCommentCounts(
   return counts;
 }
 
-function buildDetachedGroups(
-  detached: DetachedInteraction[],
-): SidebarDetachedFile[] {
-  if (detached.length === 0) return [];
-  const groups = new Map<string, SidebarDetachedEntry[]>();
-  for (const d of detached) {
-    const ix = d.interaction;
-    const path = ix.anchorPath ?? "(unknown file)";
-    let arr = groups.get(path);
-    if (!arr) {
-      arr = [];
-      groups.set(path, arr);
-    }
-    const t = new Date(ix.createdAt);
-    const hh = String(t.getHours()).padStart(2, "0");
-    const mm = String(t.getMinutes()).padStart(2, "0");
-    const snippetLines = (ix.anchorContext ?? []).map((l) => ({
-      kind: l.kind,
-      text: l.text,
-      sign: l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ",
-    }));
-    arr.push({
-      id: `${d.threadKey}::${ix.id}`,
-      body: ix.body,
-      authoredHHMM: `${hh}:${mm}`,
-      originType: ix.originType ?? "committed",
-      originSha7: ix.originSha ? ix.originSha.slice(0, 7) : "",
-      originSha: ix.originSha ?? "",
-      anchorPath: ix.anchorPath ?? "",
-      anchorLineNo: ix.anchorLineNo,
-      snippetLines,
-    });
-  }
-  return Array.from(groups, ([path, entries]) => ({ path, entries })).sort(
-    (a, b) => a.path.localeCompare(b.path),
-  );
-}
-
 export function buildSidebarViewModel({
   files,
   currentFileId,
   readLines,
   reviewedFiles,
   interactions = {},
-  detachedInteractions = [],
 }: BuildSidebarViewModelArgs): SidebarViewModel {
   const commentCounts = buildCommentCounts(files, interactions);
   const fileItems: SidebarFileItem[] = files.map((f) => {
@@ -593,7 +508,6 @@ export function buildSidebarViewModel({
 
   return {
     files: fileItems,
-    detached: buildDetachedGroups(detachedInteractions),
   };
 }
 
@@ -908,6 +822,40 @@ export interface InspectorViewModel {
   /** True when a draft is open on the current line but no thread exists yet. */
   showDraftStub: boolean;
   draftStubRow: UserCommentRowItem | null;
+
+  // ── Detached threads (file-scoped) ─────────────────────────────────────
+  /**
+   * Threads on this file whose anchor didn't survive the latest reload.
+   * Grouped by their original threadKey so multi-reply threads stay
+   * together. Empty when nothing on this file is detached.
+   */
+  detachedThreads: DetachedThreadRowItem[];
+}
+
+/**
+ * A detached-thread card in the Inspector. The line anchor is gone, so we
+ * surface what we still have: the captured snippet, the original line ref,
+ * and the original SHA for the "view at" affordance.
+ */
+export interface DetachedThreadRowItem {
+  /** Original thread key the messages were posted to. Stable React key. */
+  threadKey: string;
+  /** All messages on this detached thread, in author order. */
+  replies: Interaction[];
+  /** Repo-relative path the thread was anchored to; "" for anchorless legacy entries. */
+  anchorPath: string;
+  /** 1-based anchor line if the original interaction captured one. */
+  anchorLineNo?: number;
+  /** Captured code context, ready to render in a snippet block. */
+  snippetLines: { kind: LineKind; text: string; sign: string }[];
+  /** "committed" | "dirty" from the head interaction — drives the caption. */
+  originType: "committed" | "dirty";
+  /** Full origin sha; "" when none was captured (view-at hides itself). */
+  originSha: string;
+  /** First 7 chars of `originSha`; "" when none. */
+  originSha7: string;
+  /** True when a draft composer is open on this thread. */
+  isDrafting: boolean;
 }
 
 export interface BuildInspectorViewModelArgs {
@@ -934,6 +882,11 @@ export interface BuildInspectorViewModelArgs {
    * harnesses still pass {}).
    */
   signals?: IngestSignals;
+  /**
+   * Interactions whose anchor didn't survive the latest reload. The
+   * Inspector filters down to those on the current file. Defaults to none.
+   */
+  detachedInteractions?: DetachedInteraction[];
 }
 
 export function buildInspectorViewModel({
@@ -945,6 +898,7 @@ export function buildInspectorViewModel({
   replies,
   draftingKey,
   signals,
+  detachedInteractions = [],
 }: BuildInspectorViewModelArgs): InspectorViewModel {
   const aiNoteByLine = signals?.aiNoteByLine ?? {};
   const aiSummaryByHunk = signals?.aiSummaryByHunk ?? {};
@@ -1113,6 +1067,66 @@ export function buildInspectorViewModel({
       ? "none"
       : `${userCommentRows.length} thread${userCommentRows.length > 1 ? "s" : ""}`;
 
+  // ── Detached threads on this file ──────────────────────────────────────
+  // Group by original threadKey so multi-reply threads render together.
+  // Caption/snippet come from the head (oldest) interaction in the group;
+  // later replies inherit the same anchor by construction.
+  //
+  // Two buckets surface here: interactions whose anchorPath matches the
+  // current file, and "anchorless" entries with no anchorPath at all
+  // (legacy persisted shape). The anchorless ones appear on every file
+  // because we have no better home for them.
+  const detachedByThread = new Map<string, Interaction[]>();
+  for (const d of detachedInteractions) {
+    const p = d.interaction.anchorPath;
+    const anchorless = !p;
+    if (!anchorless && p !== file.path) continue;
+    let arr = detachedByThread.get(d.threadKey);
+    if (!arr) {
+      arr = [];
+      detachedByThread.set(d.threadKey, arr);
+    }
+    arr.push(d.interaction);
+  }
+  const detachedThreads: DetachedThreadRowItem[] = [];
+  for (const [threadKey, msgs] of detachedByThread) {
+    // Local replies posted after the thread was detached land in the
+    // normal interactions map under the same key — pull them in so the
+    // conversation reads as one thread.
+    const liveReplies = replies[threadKey] ?? [];
+    const merged = [...msgs, ...liveReplies].sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+    const head = merged[0];
+    const snippetLines = (head.anchorContext ?? []).map((l) => ({
+      kind: l.kind,
+      text: l.text,
+      sign: l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ",
+    }));
+    detachedThreads.push({
+      threadKey,
+      replies: merged,
+      anchorPath: head.anchorPath ?? "",
+      anchorLineNo: head.anchorLineNo,
+      snippetLines,
+      originType: head.originType ?? "committed",
+      originSha: head.originSha ?? "",
+      originSha7: head.originSha ? head.originSha.slice(0, 7) : "",
+      isDrafting: draftingKey === threadKey,
+    });
+  }
+  // Sort anchored rows first (by their line), then anchorless ones at the
+  // end (no useful order — fall back to threadKey).
+  detachedThreads.sort((a, b) => {
+    const aAnchored = !!a.anchorPath;
+    const bAnchored = !!b.anchorPath;
+    if (aAnchored !== bAnchored) return aAnchored ? -1 : 1;
+    return (
+      (a.anchorLineNo ?? 0) - (b.anchorLineNo ?? 0) ||
+      a.threadKey.localeCompare(b.threadKey)
+    );
+  });
+
   return {
     locationLabel,
     language: file.language,
@@ -1140,5 +1154,7 @@ export function buildInspectorViewModel({
     currentLineNo,
     showDraftStub,
     draftStubRow,
+
+    detachedThreads,
   };
 }

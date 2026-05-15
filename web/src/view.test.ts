@@ -51,7 +51,6 @@ function commentCountByFileId(
     readLines: {},
     reviewedFiles: new Set(),
     interactions,
-    detachedInteractions: [],
   });
   return new Map(vm.files.map((f) => [f.fileId, f.commentCount]));
 }

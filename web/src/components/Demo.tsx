@@ -1703,7 +1703,6 @@ function WorkspaceStage({
               readLines: state.readLines,
               reviewedFiles: state.reviewedFiles,
               interactions: state.interactions,
-              detachedInteractions: state.detachedInteractions,
             })}
             onPickFile={(fileId) => {
               const f = cs.files.find((ff) => ff.id === fileId);
@@ -1778,6 +1777,7 @@ function WorkspaceStage({
               replies: state.interactions,
               draftingKey,
               signals: demoIngestSignals,
+              detachedInteractions: state.detachedInteractions,
             })}
             commentCount={buildCommentStops(cs, state.interactions).length}
             onPrevComment={() => dispatch({ type: "MOVE_TO_COMMENT", delta: -1 })}
