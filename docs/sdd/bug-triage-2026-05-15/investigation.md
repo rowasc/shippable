@@ -19,7 +19,7 @@ and the matching `web/e2e/journey-{n}-*.spec.ts` Playwright suites.
 | B1 | PIP queued display + agent-delivery flow lacks e2e | Coverage gap | Add e2e |
 | B6 | Prompt runs don't persist | Acknowledged limitation | Document; defer |
 | B7 | "Accepted" guides don't persist | Not a bug | Close |
-| B10 | Worktree sign-offs lost on reload | Not reproduced | Document; defer |
+| B10 | Worktree sign-offs lost on reload | Fixed on `main` (commit `866e8bc`) before this branch landed | Resolved upstream |
 | B4 | Merge LoadModal into Welcome | Refactor not worth it | Decline |
 
 Shipping order (smallest blast radius first): B9 → B5 → B2 → B3 → B8 → B1.
@@ -363,38 +363,19 @@ removed from the Known Bugs list.
 
 ---
 
-## B10 — Worktree sign-offs lost on reload (J2) — needs repro
+## B10 — Worktree sign-offs lost on reload (J2) — resolved upstream
 
-**Disposition**: not reproduced. Document and defer.
+**Disposition**: fixed on `main` before this branch was rebased.
 
-The usability test (`docs/usability-test.md:218`) reports that
-`Shift+M`-ing a worktree file, then reopening at `/`, restores cursor and
-read marks but loses the sign-off. A recent attempt to reproduce this
-didn't pan out, so the mechanism remains unclear and the bug may have been
-masked or fixed by another change.
+Commit `866e8bc` ("test: cover worktree sign-off persistence") on `main`
+landed both an implementation fix and an e2e (now passing in J2 as
+"worktree sign-off persists across reload"). The Known Bugs entry in
+`docs/usability-test.md` was removed in that same commit and a separate
+plan was added at `docs/plans/reviewed-targets.md`.
 
-The strongest standing theory: file IDs (shape `${csId}/${path}`) and hunk
-IDs (shape `${csId}/${path}#h${idx}`) share the same csId+path prefix; if
-read marks survive (they do, per the report) then hunks match and files
-should too. A divergence point must exist — candidates include:
-
-- Worktree live-reload (`useWorktreeLiveReload`) re-parsing produces
-  subtly different file IDs (hunk count, path normalization, rename
-  detection). Most likely.
-- Recents-cache serialization round-trip normalizes paths.
-- Range pick vs. default-view csId shape mismatch.
-
-The boot-resume path (`App.tsx:69-83`) loads `recent.changeset` directly
-from localStorage without re-parsing, so a pure hard-reload shouldn't
-exhibit this — the bug is more likely live-reload-triggered than
-hard-reload-triggered.
-
-The entry in `docs/usability-test.md` carries a "if you hit this again,
-capture X" note: which reload event fired, the persisted `reviewedFiles`
-array, and the resumed changeset's `validFileIds`. That diff would pin
-the divergence point.
-
-Re-open when a fresh repro lands.
+No further action needed here. Earlier theories (file-id divergence,
+live-reload re-parse, csId mismatch) are moot; the actual fix lives in
+that commit and its surrounding work.
 
 ---
 
