@@ -65,6 +65,22 @@ export async function mockAuthSetRejects(
   );
 }
 
+/** Fail the next N enqueue requests so the comment-author flow renders the
+ *  ⚠ retry pip. Used by the pip-lifecycle e2e to drive the error path
+ *  without spinning up a broken server. */
+export async function mockEnqueueRejects(
+  page: Page,
+  status = 500,
+): Promise<void> {
+  await page.route("**/api/interactions/enqueue", (route) =>
+    route.fulfill({
+      status,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "enqueue failed" }),
+    }),
+  );
+}
+
 export async function mockPromptsEmpty(page: Page): Promise<void> {
   await page.route("**/api/prompts", (route) => json(route, 200, { prompts: [] }));
 }

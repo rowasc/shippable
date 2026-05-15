@@ -13,6 +13,7 @@ import {
   expectWorkspaceLoaded,
   dismissPlanOverlay,
 } from "./_lib/fixtures";
+import { mockEnqueueRejects } from "./_lib/mocks";
 import {
   createWorktreeRepo,
   addCommit,
@@ -180,6 +181,122 @@ test.describe("Journey 2 — local worktree", () => {
 
     // The saved comment renders back in the Inspector.
     await expect(inspector).toContainText("e2e: needs a guard here");
+  });
+
+  test("pip lifecycle: a worktree comment goes from ◌ queued to ✓ delivered when the agent claims it", async ({
+    visit,
+    page,
+    request,
+  }) => {
+    // Drives the real two-step server lifecycle: the UI authors a pip, then
+    // we stand in for the agent worker by calling /api/agent/pull (claims +
+    // moves to delivered) and /api/agent/replies (posts the agent's
+    // response). Catches regressions in interaction-sync, the enqueue path,
+    // the delivered-polling loop, and the pip render order.
+    const own = createWorktreeRepo();
+    try {
+      await visit("/?cs=42");
+      await expectWorkspaceLoaded(page);
+      await loadFixtureWorktree(page, own.path);
+      await dismissPlanOverlay(page);
+
+      const inspector = page.getByRole("complementary", { name: "inspector" });
+      await page.keyboard.press("c");
+      const composer = inspector.getByRole("textbox");
+      await expect(composer).toBeVisible();
+      await composer.fill("e2e: please confirm");
+      await composer.press("ControlOrMeta+Enter");
+
+      // Optimistic queued pip appears immediately on submit, before any
+      // round-trip — that's the bug commit 3d448ed fixed.
+      await expect(inspector.locator(".reply__pip--queued")).toBeVisible();
+
+      // Stand in for the agent worker. The enqueue POST is asynchronous —
+      // the optimistic pip lights up before it lands server-side — so poll
+      // /api/agent/pull until it actually claims something. Each pull is
+      // destructive (the server moves entries from pending to delivered);
+      // empty responses just mean "not enqueued yet" and we keep waiting.
+      let parentId: string | null = null;
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const r = await request.post("/api/agent/pull", {
+          data: { worktreePath: own.path },
+        });
+        if (r.ok()) {
+          const body = (await r.json()) as { ids: string[] };
+          if (body.ids[0]) {
+            parentId = body.ids[0];
+            break;
+          }
+        }
+        await page.waitForTimeout(200);
+      }
+      expect(parentId, "agent pull never claimed an interaction").not.toBeNull();
+
+      const reply = await request.post("/api/agent/replies", {
+        data: {
+          worktreePath: own.path,
+          parentId,
+          body: "agent ack — looks fine",
+          intent: "ack",
+        },
+      });
+      expect(reply.ok()).toBeTruthy();
+
+      // The 2s delivered-polling loop picks up the new state: the original
+      // pip flips to ✓ delivered and the agent's reply appears in the
+      // thread. 12s timeout absorbs poll-cycle jitter on a busy CI host.
+      await expect(inspector.locator(".reply__pip--delivered")).toBeVisible({
+        timeout: 12_000,
+      });
+      await expect(inspector).toContainText("agent ack — looks fine", {
+        timeout: 12_000,
+      });
+      await expect(inspector.locator(".reply__pip--queued")).toHaveCount(0);
+    } finally {
+      own.cleanup();
+    }
+  });
+
+  test("pip lifecycle: enqueue failure shows ⚠ retry; clicking it succeeds", async ({
+    visit,
+    page,
+  }) => {
+    // Forces the enqueue POST to 500 so the optimistic ◌ queued is replaced
+    // by the ⚠ retry pip. The retry button is the click target the user
+    // sees; clicking it after the enqueue endpoint recovers must flip the
+    // pip back to ◌ queued without a duplicate comment.
+    const own = createWorktreeRepo();
+    try {
+      await mockEnqueueRejects(page);
+      await visit("/?cs=42");
+      await expectWorkspaceLoaded(page);
+      await loadFixtureWorktree(page, own.path);
+      await dismissPlanOverlay(page);
+
+      const inspector = page.getByRole("complementary", { name: "inspector" });
+      await page.keyboard.press("c");
+      const composer = inspector.getByRole("textbox");
+      await expect(composer).toBeVisible();
+      await composer.fill("e2e: needs a retry");
+      await composer.press("ControlOrMeta+Enter");
+
+      // Error precedence: the failed enqueue dispatches
+      // SET_INTERACTION_ENQUEUE_ERROR and the ⚠ retry pip wins over the
+      // optimistic ◌ queued.
+      await expect(inspector.locator(".reply__pip--errored")).toBeVisible();
+      // Exactly one comment in the thread — the failure didn't double-post.
+      await expect(inspector.getByText("e2e: needs a retry")).toHaveCount(1);
+
+      // Drop the failure stub so the retry succeeds against the real server.
+      await page.unroute("**/api/interactions/enqueue");
+
+      await inspector.locator(".reply__pip--errored").click();
+      await expect(inspector.locator(".reply__pip--queued")).toBeVisible();
+      await expect(inspector.locator(".reply__pip--errored")).toHaveCount(0);
+    } finally {
+      own.cleanup();
+    }
   });
 
   test("worktree review progress persists across reload", async ({
