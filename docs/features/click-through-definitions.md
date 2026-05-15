@@ -17,7 +17,7 @@ JS/TS uses [`typescript-language-server`](https://github.com/typescript-language
 PHP works against either:
 
 - **Intelephense** (recommended; free tier is enough for definition lookup):
-  `composer global require intelephense/intelephense`
+  `npm install -g intelephense`
 - **Phpactor** (pure-OSS fallback):
   `composer global require phpactor/phpactor`
 

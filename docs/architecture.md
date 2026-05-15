@@ -227,7 +227,7 @@ A `ChangeSet` can enter the app five ways:
 Beyond components, the load-bearing modules in `web/src/`:
 
 - `promptRun.ts` + `promptStore.ts` — prompt-run state machine and persistence; what `PromptRunsPanel` renders.
-- `symbols.ts` — symbol metadata attached to hunks; basis for the symbol-navigation work tracked in `docs/plan-symbols.md`.
+- `symbols.ts` — symbol metadata attached to hunks; basis for the symbol-navigation work tracked in `docs/plans/plan-symbols.md`.
 - `feature-docs.tsx` — entry point for `/feature-docs.html`, paired with per-feature markdown under `docs/features/`.
 - `parseDiff.ts`, `highlight.ts`, `tokens.ts` — diff parsing and Shiki-based highlighting feeding `DiffView`.
 - `codeGraph.ts`, `codeGraphClient.ts` — regex graph builder used as the fallback path; the client wrapper that POSTs to `/api/code-graph` for the LSP-resolved version when a worktree is attached. Demo / paste-load callers stay on the regex path.
