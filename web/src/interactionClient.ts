@@ -19,19 +19,18 @@ interface StoredInteraction {
   createdAt: string;
   changesetId: string | null;
   worktreePath: string | null;
-  // Server types this "pending" | "delivered" | null, but the web layer drops
-  // it entirely, so a loose string | null avoids importing the server enum.
-  agentQueueStatus: string | null;
+  agentQueueStatus: "pending" | "delivered" | null;
   payload: Record<string, unknown>;
 }
 
 // Map a server row → web Interaction. The server stores optional fields
 // (anchorPath, anchorHash, etc.) in a nested `payload` object; flatten them
-// back out. Drop the storage-only columns (changesetId, worktreePath,
-// agentQueueStatus) — they have no meaning in the web layer.
+// back out. `agentQueueStatus` is preserved — the pip reads it. The other
+// storage-only columns (changesetId, worktreePath) carry no web meaning.
 function storedToInteraction(row: StoredInteraction): Interaction {
   return {
     id: row.id,
+    agentQueueStatus: row.agentQueueStatus,
     // null = stored without a thread anchor; "" groups it separately —
     // consumers must not treat "" as "no thread". Revisit if thread grouping
     // changes (the next task rewires this).

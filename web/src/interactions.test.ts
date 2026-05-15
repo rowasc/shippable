@@ -32,7 +32,7 @@ interface UserReplyLiteral {
   author: string;
   body: string;
   createdAt: string;
-  enqueuedCommentId?: string | null;
+  agentQueueStatus?: "pending" | "delivered" | null;
   enqueueError?: boolean;
   anchorPath?: string;
   anchorContext?: DiffLine[];
@@ -65,7 +65,7 @@ function userInteraction(
     authorRole: "user",
     body: literal.body,
     createdAt: literal.createdAt,
-    enqueuedCommentId: literal.enqueuedCommentId,
+    agentQueueStatus: literal.agentQueueStatus,
     enqueueError: literal.enqueueError,
     anchorPath: literal.anchorPath,
     anchorHash: literal.anchorHash,
@@ -487,7 +487,7 @@ describe("selectInteractions — user replies", () => {
     expect(ix.threadKey).toBe(key);
   });
 
-  it("carries Interaction provenance fields (anchorPath, external, enqueuedCommentId) through", () => {
+  it("carries Interaction provenance fields (anchorPath, external, agentQueueStatus) through", () => {
     const cs = makeChangeset("cs1", [makeFile("cs1/f1", [baseHunk()])]);
     const key = userCommentKey(HUNK_ID, 0);
     const reply: UserReplyLiteral = {
@@ -496,13 +496,13 @@ describe("selectInteractions — user replies", () => {
       body: "x",
       createdAt: "2026-05-06T10:00:00Z",
       anchorPath: "f1.ts",
-      enqueuedCommentId: "cmt_42",
+      agentQueueStatus: "pending",
       external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#1" },
     };
     const state = withReplies(initialState([cs]), { [key]: [reply] });
     const [ix] = selectInteractions(state).all;
     expect(ix.anchorPath).toBe("f1.ts");
-    expect(ix.enqueuedCommentId).toBe("cmt_42");
+    expect(ix.agentQueueStatus).toBe("pending");
     expect(ix.external).toEqual({
       source: "pr",
       htmlUrl: "https://github.com/x/y/pull/1#1",

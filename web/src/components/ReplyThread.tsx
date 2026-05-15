@@ -41,9 +41,9 @@ interface Props {
   onJump: (c: Cursor) => void;
   /**
    * Map keyed by delivered Interaction id of items the agent has fetched.
-   * Drives the `✓ delivered` pip on each user Interaction whose
-   * `enqueuedCommentId` is in the map. Empty/missing → no entries render
-   * the delivered glyph (only ◌ queued).
+   * Drives the `✓ delivered` pip on each user Interaction whose own `id`
+   * is in the map. Empty/missing → the pip falls back to the
+   * interaction's persisted `agentQueueStatus`.
    */
   deliveredById?: Record<string, DeliveredInteraction>;
 }
@@ -105,8 +105,8 @@ export function ReplyThread({
             );
           }
           // user-authored entry
-          const enqueuedId = ix.enqueuedCommentId ?? null;
-          const isDelivered = !!(enqueuedId && deliveredById?.[enqueuedId]);
+          const isDelivered =
+            ix.agentQueueStatus === "delivered" || !!deliveredById?.[ix.id];
           const deleteTitle = isDelivered
             ? "the agent already saw this; deleting only removes it from your view."
             : "delete reply";
@@ -316,15 +316,15 @@ function Composer({
 /**
  * Per-interaction pip. Four possible states; the precedence order is fixed:
  *
- *   1. `✓ delivered` — when `deliveredById` carries the entry's
- *      `enqueuedCommentId`. Wins over everything else; if an interaction
- *      was delivered, any prior local error is stale and shouldn't render.
- *   2. `⚠ retry` — when `enqueueError === true` and there's no
- *      `enqueuedCommentId` yet. Click to re-POST `/api/agent/enqueue`
- *      *without* `supersedes` (the original POST never landed an id).
- *   3. `◌ queued` — id is set but not delivered.
- *   4. (no pip) — null id and no error (entries authored on a non-worktree
- *      changeset, fresh fixture entries, etc.).
+ *   1. `✓ delivered` — `agentQueueStatus === "delivered"`, or the polling
+ *      `deliveredById` map carries the interaction's own `id`. Wins over
+ *      everything else; a delivered entry's stale local error shouldn't show.
+ *   2. `◌ queued` — `agentQueueStatus === "pending"` and not delivered. A
+ *      server-confirmed pending status means the entry is genuinely in the
+ *      queue; showing retry would mislead.
+ *   3. `⚠ retry` — `enqueueError === true`. Click to re-run the enqueue.
+ *   4. (no pip) — not enqueued and no error (entries authored on a
+ *      non-worktree changeset, fresh fixture entries, etc.).
  */
 function ReplyPip({
   ix,
@@ -338,22 +338,22 @@ function ReplyPip({
    *  (so the user knows something went wrong), but as inert text. */
   onRetry?: () => void;
 }) {
-  const enqueuedId = ix.enqueuedCommentId ?? null;
   const errored = !!ix.enqueueError;
+  const delivered =
+    ix.agentQueueStatus === "delivered" ? null : deliveredById?.[ix.id] ?? null;
   // Delivered wins over everything: the agent has already seen this entry,
   // so any local error flag is stale.
-  if (enqueuedId) {
-    const delivered = deliveredById?.[enqueuedId] ?? null;
-    if (delivered) {
-      return (
-        <span
-          className="reply__pip reply__pip--delivered"
-          title={`Fetched by your agent at ${formatClock(delivered.deliveredAt)}.`}
-        >
-          ✓ delivered
-        </span>
-      );
-    }
+  if (ix.agentQueueStatus === "delivered" || delivered) {
+    const title = delivered
+      ? `Fetched by your agent at ${formatClock(delivered.deliveredAt)}.`
+      : "Fetched by your agent.";
+    return (
+      <span className="reply__pip reply__pip--delivered" title={title}>
+        ✓ delivered
+      </span>
+    );
+  }
+  if (ix.agentQueueStatus === "pending") {
     return (
       <span
         className="reply__pip reply__pip--queued"

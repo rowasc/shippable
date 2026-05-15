@@ -53,7 +53,7 @@ describe("fetchInteractions", () => {
       createdAt: "2026-01-01T00:00:00.000Z",
       changesetId: "cs-1",       // storage-only — must be dropped
       worktreePath: "/tmp/wt",   // storage-only — must be dropped
-      agentQueueStatus: "pending", // storage-only — must be dropped
+      agentQueueStatus: "pending", // preserved — the pip reads it
       payload: {
         anchorPath: "src/foo.ts",
         anchorHash: "abc123",
@@ -81,10 +81,12 @@ describe("fetchInteractions", () => {
     expect(ix.anchorLineNo).toBe(42);
     expect(ix.external).toEqual({ source: "pr", htmlUrl: "https://github.com/o/r/pull/1#discussion_r1" });
 
-    // Storage-only columns absent.
+    // agentQueueStatus is preserved — the pip needs it.
+    expect(ix.agentQueueStatus).toBe("pending");
+
+    // The other storage-only columns are absent.
     expect(ix).not.toHaveProperty("changesetId");
     expect(ix).not.toHaveProperty("worktreePath");
-    expect(ix).not.toHaveProperty("agentQueueStatus");
     expect(ix).not.toHaveProperty("payload");
   });
 

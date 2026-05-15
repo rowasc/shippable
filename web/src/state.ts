@@ -27,9 +27,9 @@ import { enrichWithFileContent } from "./expandContext";
  * Wire shape returned by `GET /api/agent/replies` — one envelope serves
  * both shapes the agent posts:
  *   - reply-shaped (`parentId` set) — a response to a delivered reviewer
- *     interaction. The reducer resolves parentId → threadKey via
- *     `state.interactions[*].enqueuedCommentId` and merges the entry into
- *     that thread.
+ *     interaction. `parentId` is the client-authoritative interaction id
+ *     the agent saw; the reducer resolves it → threadKey by matching
+ *     `state.interactions[*].id` and merges the entry into that thread.
  *   - Top-level-shaped (`file` + `lines` set) — a fresh thread the agent
  *     started, anchored at (file, lines). The reducer resolves (file,
  *     lines) → hunkId by walking the active changeset, then builds the
@@ -171,20 +171,10 @@ export type Action =
   | { type: "ADD_INTERACTION"; targetKey: string; interaction: Interaction }
   | { type: "DELETE_INTERACTION"; targetKey: string; interactionId: string }
   | {
-      // Patch the server-assigned enqueue id onto a previously-added
-      // Interaction. Fired after the parallel /api/agent/enqueue POST
-      // resolves. No-op if the targetKey or id is gone.
-      type: "PATCH_INTERACTION_ENQUEUED_ID";
-      targetKey: string;
-      interactionId: string;
-      enqueuedCommentId: string | null;
-    }
-  | {
       // Mark an Interaction's enqueue attempt as errored / cleared. Drives
-      // the ⚠ errored pip in ReplyThread; toggled by the catch path of
-      // `enqueueComment` and cleared before retry. Coexists with
-      // `enqueuedCommentId === null` — once an id lands the delivered pip
-      // wins regardless of any stale error flag.
+      // the ⚠ retry pip in ReplyThread; set by the catch path of an
+      // enqueue/sync request and cleared before retry. A delivered or
+      // pending `agentQueueStatus` wins over a stale error flag.
       type: "SET_INTERACTION_ENQUEUE_ERROR";
       targetKey: string;
       interactionId: string;
@@ -192,8 +182,8 @@ export type Action =
     }
   | {
       // Merge a polled batch of agent responses into state.interactions,
-      // resolving each entry against the user Interaction whose
-      // enqueuedCommentId matches. Idempotent: existing ids update in
+      // resolving each reply-shaped entry against the user Interaction
+      // whose `id` matches `parentId`. Idempotent: existing ids update in
       // place, new ids append on the same thread, sorted by createdAt.
       type: "MERGE_AGENT_REPLIES";
       polled: PolledAgentReply[];
@@ -435,19 +425,6 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
       if (filtered.length === 0) delete next[action.targetKey];
       else next[action.targetKey] = filtered;
       return { ...state, interactions: next };
-    }
-    case "PATCH_INTERACTION_ENQUEUED_ID": {
-      const existing = state.interactions[action.targetKey];
-      if (!existing) return state;
-      const idx = existing.findIndex((ix) => ix.id === action.interactionId);
-      if (idx < 0) return state;
-      const patched = existing.map((ix, i) =>
-        i === idx ? { ...ix, enqueuedCommentId: action.enqueuedCommentId } : ix,
-      );
-      return {
-        ...state,
-        interactions: { ...state.interactions, [action.targetKey]: patched },
-      };
     }
     case "SET_INTERACTION_ENQUEUE_ERROR": {
       const existing = state.interactions[action.targetKey];
@@ -999,9 +976,10 @@ function applyCursor(
 
 /**
  * Translate polled agent responses into top-level Interactions with
- * `authorRole: "agent"`, keyed against the user Interaction whose
- * `enqueuedCommentId` matches `commentId`. Idempotent: existing agent
- * Interactions update in place; new ids append on the same thread.
+ * `authorRole: "agent"`. Reply-shaped entries key against the user
+ * Interaction whose `id` matches `parentId` (the client-authoritative id
+ * the agent saw). Idempotent: existing agent Interactions update in place;
+ * new ids append on the same thread.
  */
 function mergeAgentInteractions(
   state: ReviewState,
@@ -1010,27 +988,27 @@ function mergeAgentInteractions(
   if (polled.length === 0) return state;
 
   // Active changeset is the only one we can resolve top-level entries
-  // against. reply-shaped polled entries don't need it — they ride parentId →
-  // enqueuedCommentId, which already encodes the thread location.
+  // against. reply-shaped polled entries don't need it — they ride
+  // parentId → interaction id, which already encodes the thread location.
   const activeCs = state.changesets.find(
     (c) => c.id === state.cursor.changesetId,
   );
 
-  // Index parentId → existing threadKey for reply-shaped entries.
-  const threadKeyByCommentId = new Map<string, string>();
+  // Index parentId → existing threadKey for reply-shaped entries, matching
+  // the agent's `parentId` against each interaction's own `id`.
+  const threadKeyByParentId = new Map<string, string>();
   let anyReplyShaped = false;
   for (const p of polled) {
     if ("parentId" in p) {
       anyReplyShaped = true;
-      threadKeyByCommentId.set(p.parentId, "");
+      threadKeyByParentId.set(p.parentId, "");
     }
   }
   if (anyReplyShaped) {
     for (const [key, list] of Object.entries(state.interactions)) {
       for (const ix of list) {
-        const cid = ix.enqueuedCommentId;
-        if (cid != null && threadKeyByCommentId.has(cid)) {
-          threadKeyByCommentId.set(cid, key);
+        if (threadKeyByParentId.has(ix.id)) {
+          threadKeyByParentId.set(ix.id, key);
         }
       }
     }
@@ -1045,7 +1023,7 @@ function mergeAgentInteractions(
 
   for (const p of polled) {
     if ("parentId" in p) {
-      const threadKey = threadKeyByCommentId.get(p.parentId);
+      const threadKey = threadKeyByParentId.get(p.parentId);
       if (!threadKey) continue;
       resolved.push({
         threadKey,

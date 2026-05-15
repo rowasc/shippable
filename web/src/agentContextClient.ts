@@ -6,9 +6,6 @@ import type {
   AgentContextSlice,
   AgentSessionRef,
   DeliveredInteraction,
-  InteractionAuthorRole,
-  InteractionIntent,
-  InteractionTarget,
 } from "./types";
 import type { PolledAgentReply } from "./state";
 
@@ -53,41 +50,11 @@ export async function fetchAgentContext(args: {
   return slice;
 }
 
-// ── Agent comment queue (slice 2) ────────────────────────────────────────
-// Thin wrappers over /api/agent/{enqueue,unenqueue,delivered}. The pull
-// endpoint is consumed by the MCP server (slice 3), not the web client.
-
-export async function enqueueComment(args: {
-  worktreePath: string;
-  commitSha: string;
-  interaction: {
-    target: InteractionTarget;
-    intent: InteractionIntent;
-    author: string;
-    authorRole: InteractionAuthorRole;
-    file: string;
-    lines?: string;
-    body: string;
-    supersedes?: string | null;
-    htmlUrl?: string;
-  };
-}): Promise<{ id: string }> {
-  return postJson<{ id: string }>("/api/agent/enqueue", {
-    worktreePath: args.worktreePath,
-    commitSha: args.commitSha,
-    interaction: args.interaction,
-  });
-}
-
-export async function unenqueueComment(args: {
-  worktreePath: string;
-  id: string;
-}): Promise<{ unenqueued: boolean }> {
-  return postJson<{ unenqueued: boolean }>("/api/agent/unenqueue", {
-    worktreePath: args.worktreePath,
-    id: args.id,
-  });
-}
+// ── Agent comment queue ──────────────────────────────────────────────────
+// Enqueue / unenqueue now live in `interactionClient` — the DB row IS the
+// queue entry. These two are the read side: `/api/agent/delivered` and
+// `/api/agent/replies`, polled by `useDeliveredPolling`. The pull endpoint
+// is consumed by the MCP server, not the web client.
 
 export async function fetchDelivered(
   worktreePath: string,

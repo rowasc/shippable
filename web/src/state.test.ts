@@ -37,7 +37,7 @@ interface UserInteractionLiteral {
   author: string;
   body: string;
   createdAt: string;
-  enqueuedCommentId?: string | null;
+  agentQueueStatus?: "pending" | "delivered" | null;
   enqueueError?: boolean;
   originSha?: string;
   originType?: "committed" | "dirty";
@@ -62,7 +62,7 @@ function mkUserInteraction(
     authorRole: "user",
     body: literal.body,
     createdAt: literal.createdAt,
-    enqueuedCommentId: literal.enqueuedCommentId,
+    agentQueueStatus: literal.agentQueueStatus,
     enqueueError: literal.enqueueError,
     anchorPath: literal.anchorPath,
     anchorHash: literal.anchorHash,
@@ -118,7 +118,7 @@ function legacyReplyFromInteraction(ix: Interaction): LegacyReply {
     author: ix.author,
     body: ix.body,
     createdAt: ix.createdAt,
-    enqueuedCommentId: ix.enqueuedCommentId,
+    agentQueueStatus: ix.agentQueueStatus,
     enqueueError: ix.enqueueError,
     anchorPath: ix.anchorPath,
     anchorHash: ix.anchorHash,
@@ -1059,96 +1059,18 @@ describe("ADD_REPLY", () => {
     expect(viewReplies(s)["k"]).toEqual([r1, r2]);
   });
 
-  it("preserves an Interaction's enqueuedCommentId on add (defaults to null)", () => {
-    // The App-level submit handler attaches `enqueuedCommentId: null` before
-    // dispatching; the reducer just spreads the reply, so this should pass
-    // verbatim. The patch action below sets the id once the server responds.
+  it("preserves an Interaction's agentQueueStatus on add", () => {
+    // The reducer just spreads the interaction, so a producer-supplied
+    // `agentQueueStatus` passes through verbatim.
     const reply = {
       id: "r1",
       author: "a",
       body: "hi",
       createdAt: "now",
-      enqueuedCommentId: null,
+      agentQueueStatus: "pending" as const,
     };
     const s = reducer(s0, addReplyAction(s0, "k", reply));
-    expect(viewReplies(s)["k"][0].enqueuedCommentId).toBeNull();
-  });
-});
-
-// ── PATCH_REPLY_ENQUEUED_ID ────────────────────────────────────────────────
-
-describe("PATCH_REPLY_ENQUEUED_ID", () => {
-  it("sets the enqueuedCommentId on the matching reply", () => {
-    const reply = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "now",
-      enqueuedCommentId: null,
-    };
-    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
-    const s2 = reducer(s1, {
-      type: "PATCH_INTERACTION_ENQUEUED_ID",
-      targetKey: "k",
-      interactionId: "r1",
-      enqueuedCommentId: "cmt_42",
-    });
-    expect(viewReplies(s2)["k"][0].enqueuedCommentId).toBe("cmt_42");
-  });
-
-  it("is a no-op when the targetKey is unknown", () => {
-    const s = reducer(s0, {
-      type: "PATCH_INTERACTION_ENQUEUED_ID",
-      targetKey: "missing",
-      interactionId: "r1",
-      enqueuedCommentId: "cmt_42",
-    });
-    expect(s).toBe(s0);
-  });
-
-  it("is a no-op when the replyId does not match", () => {
-    const reply = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "now",
-      enqueuedCommentId: null,
-    };
-    const s1 = reducer(s0, addReplyAction(s0, "k", reply));
-    const s2 = reducer(s1, {
-      type: "PATCH_INTERACTION_ENQUEUED_ID",
-      targetKey: "k",
-      interactionId: "nope",
-      enqueuedCommentId: "cmt_42",
-    });
-    expect(s2).toBe(s1);
-  });
-
-  it("leaves sibling replies untouched", () => {
-    const r1 = {
-      id: "r1",
-      author: "a",
-      body: "hi",
-      createdAt: "t1",
-      enqueuedCommentId: null,
-    };
-    const r2 = {
-      id: "r2",
-      author: "b",
-      body: "yo",
-      createdAt: "t2",
-      enqueuedCommentId: null,
-    };
-    let s = reducer(s0, addReplyAction(s0, "k", r1));
-    s = reducer(s, addReplyAction(s, "k", r2));
-    s = reducer(s, {
-      type: "PATCH_INTERACTION_ENQUEUED_ID",
-      targetKey: "k",
-      interactionId: "r2",
-      enqueuedCommentId: "cmt_99",
-    });
-    expect(viewReplies(s)["k"][0].enqueuedCommentId).toBeNull();
-    expect(viewReplies(s)["k"][1].enqueuedCommentId).toBe("cmt_99");
+    expect(viewReplies(s)["k"][0].agentQueueStatus).toBe("pending");
   });
 });
 
@@ -1161,7 +1083,6 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       author: "a",
       body: "hi",
       createdAt: "now",
-      enqueuedCommentId: null,
     };
     const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
@@ -1179,7 +1100,6 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       author: "a",
       body: "hi",
       createdAt: "now",
-      enqueuedCommentId: null,
       enqueueError: true,
     };
     const s1 = reducer(s0, addReplyAction(s0, "k", reply));
@@ -1208,7 +1128,6 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       author: "a",
       body: "hi",
       createdAt: "now",
-      enqueuedCommentId: null,
     };
     const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
@@ -1229,7 +1148,6 @@ describe("SET_REPLY_ENQUEUE_ERROR", () => {
       author: "a",
       body: "hi",
       createdAt: "now",
-      enqueuedCommentId: null,
     };
     const s1 = reducer(s0, addReplyAction(s0, "k", reply));
     const s2 = reducer(s1, {
@@ -1278,7 +1196,6 @@ describe("MERGE_AGENT_REPLIES", () => {
   function withReply(
     state: ReviewState,
     targetKey: string,
-    enqueuedCommentId: string | null,
     replyId = "r1",
   ): ReviewState {
     return reducer(
@@ -1288,18 +1205,17 @@ describe("MERGE_AGENT_REPLIES", () => {
         author: "you",
         body: "x",
         createdAt: "2026-04-30T00:00:00Z",
-        enqueuedCommentId,
       }),
     );
   }
 
-  // Builds an Interaction-shaped polled-reply entry from the legacy
-  // (commentId, outcome) inputs the tests author. Maps outcome → intent
-  // (addressed → accept, declined → reject, noted → ack) and fills in the
-  // wire fields the new shape requires.
+  // Builds an Interaction-shaped polled-reply entry. `parentId` is the
+  // client-authoritative interaction id the agent replied to — the reducer
+  // matches it against each interaction's own `id`. Maps outcome → intent
+  // (addressed → accept, declined → reject, noted → ack).
   function polled(args: {
     id: string;
-    commentId: string;
+    parentId: string;
     body: string;
     outcome: "addressed" | "declined" | "noted";
     postedAt: string;
@@ -1312,7 +1228,7 @@ describe("MERGE_AGENT_REPLIES", () => {
           : "ack";
     return {
       id: args.id,
-      parentId: args.commentId,
+      parentId: args.parentId,
       body: args.body,
       intent,
       author: "agent",
@@ -1322,14 +1238,14 @@ describe("MERGE_AGENT_REPLIES", () => {
     };
   }
 
-  it("attaches a polled agent entry to the matching reviewer Interaction by enqueuedCommentId", () => {
-    const s1 = withReply(s0, "k", "cmt_1");
+  it("attaches a polled agent entry to the matching reviewer Interaction by id", () => {
+    const s1 = withReply(s0, "k");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         polled({
           id: "ar1",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "fixed",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",
@@ -1347,20 +1263,20 @@ describe("MERGE_AGENT_REPLIES", () => {
   });
 
   it("sorts by postedAt ascending after the merge", () => {
-    const s1 = withReply(s0, "k", "cmt_1");
+    const s1 = withReply(s0, "k");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         polled({
           id: "b",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "B",
           outcome: "addressed",
           postedAt: "2026-04-30T00:02:00Z",
         }),
         polled({
           id: "a",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "A",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
@@ -1371,13 +1287,13 @@ describe("MERGE_AGENT_REPLIES", () => {
   });
 
   it("updates existing entries in place (matched by id) and appends new ones", () => {
-    const s1 = withReply(s0, "k", "cmt_1");
+    const s1 = withReply(s0, "k");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         polled({
           id: "ar1",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "first",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
@@ -1390,14 +1306,14 @@ describe("MERGE_AGENT_REPLIES", () => {
         // Same id with updated body should overwrite.
         polled({
           id: "ar1",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "first (edited)",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",
         }),
         polled({
           id: "ar2",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "second",
           outcome: "addressed",
           postedAt: "2026-04-30T00:02:00Z",
@@ -1411,14 +1327,14 @@ describe("MERGE_AGENT_REPLIES", () => {
     expect(replies[1].id).toBe("ar2");
   });
 
-  it("is a no-op when no Interaction matches the polled commentId", () => {
-    const s1 = withReply(s0, "k", "cmt_1");
+  it("is a no-op when no Interaction matches the polled parentId", () => {
+    const s1 = withReply(s0, "k");
     const s2 = reducer(s1, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         polled({
           id: "ar1",
-          commentId: "cmt_other",
+          parentId: "r_other",
           body: "orphan",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
@@ -1428,29 +1344,12 @@ describe("MERGE_AGENT_REPLIES", () => {
     expect(s2).toBe(s1);
   });
 
-  it("ignores Replies with null enqueuedCommentId (defensive)", () => {
-    const s1 = withReply(s0, "k", null);
-    const s2 = reducer(s1, {
-      type: "MERGE_AGENT_REPLIES",
-      polled: [
-        polled({
-          id: "ar1",
-          commentId: "cmt_1",
-          body: "x",
-          outcome: "noted",
-          postedAt: "2026-04-30T00:01:00Z",
-        }),
-      ],
-    });
-    expect(s2).toBe(s1);
-  });
-
   it("is idempotent — repeated merges of the same data leave state unchanged", () => {
-    const s1 = withReply(s0, "k", "cmt_1");
+    const s1 = withReply(s0, "k");
     const batch = [
       polled({
         id: "ar1",
-        commentId: "cmt_1",
+        parentId: "r1",
         body: "x",
         outcome: "addressed",
         postedAt: "2026-04-30T00:01:00Z",
@@ -1461,22 +1360,22 @@ describe("MERGE_AGENT_REPLIES", () => {
     expect(s3).toBe(s2);
   });
 
-  it("groups polled entries across multiple commentIds onto distinct Replies", () => {
-    let s = withReply(s0, "k1", "cmt_1", "r1");
-    s = withReply(s, "k2", "cmt_2", "r2");
+  it("groups polled entries across multiple parentIds onto distinct Replies", () => {
+    let s = withReply(s0, "k1", "r1");
+    s = withReply(s, "k2", "r2");
     const merged = reducer(s, {
       type: "MERGE_AGENT_REPLIES",
       polled: [
         polled({
           id: "ar_a",
-          commentId: "cmt_1",
+          parentId: "r1",
           body: "a",
           outcome: "noted",
           postedAt: "2026-04-30T00:01:00Z",
         }),
         polled({
           id: "ar_b",
-          commentId: "cmt_2",
+          parentId: "r2",
           body: "b",
           outcome: "addressed",
           postedAt: "2026-04-30T00:01:00Z",

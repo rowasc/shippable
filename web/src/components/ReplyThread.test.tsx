@@ -18,7 +18,6 @@ function userIx(over: Partial<Interaction> = {}): Interaction {
     authorRole: "user",
     body: "hello",
     createdAt: "2026-05-06T12:34:56.000Z",
-    enqueuedCommentId: null,
     ...over,
   };
 }
@@ -65,10 +64,10 @@ function emptySymbols() {
 }
 
 describe("ReplyThread — pip state machine", () => {
-  it("renders no pip when enqueuedCommentId is null", () => {
+  it("renders no pip when the interaction is not enqueued", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: null })]}
+        interactions={[userIx()]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -83,10 +82,10 @@ describe("ReplyThread — pip state machine", () => {
     expect(container.querySelector(".reply__pip")).toBeNull();
   });
 
-  it("renders the queued pip when enqueuedCommentId is set but not delivered", () => {
+  it("renders the queued pip when agentQueueStatus is pending and not delivered", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -105,11 +104,11 @@ describe("ReplyThread — pip state machine", () => {
     expect(pip!.textContent).toContain("queued");
   });
 
-  it("renders the delivered pip when the id is in the delivered map", () => {
-    const d = delivered("cmt_1", "2026-05-06T12:35:01.000Z");
+  it("renders the delivered pip when the interaction id is in the delivered map", () => {
+    const d = delivered("r1", "2026-05-06T12:35:01.000Z");
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -119,13 +118,34 @@ describe("ReplyThread — pip state machine", () => {
         onDeleteReply={noop}
         symbols={emptySymbols()}
         onJump={noop}
-        deliveredById={{ cmt_1: d }}
+        deliveredById={{ r1: d }}
       />,
     );
     const pip = container.querySelector(".reply__pip");
     expect(pip).not.toBeNull();
     expect(pip!.className).toContain("reply__pip--delivered");
     expect(pip!.textContent).toContain("delivered");
+  });
+
+  it("renders the delivered pip when agentQueueStatus is delivered, even without a delivered map entry", () => {
+    const { container } = render(
+      <ReplyThread
+        interactions={[userIx({ agentQueueStatus: "delivered" })]}
+        isDrafting={false}
+        draftBody=""
+        onStartDraft={noop}
+        onCloseDraft={noop}
+        onChangeDraft={noop}
+        onSubmitReply={noop}
+        onDeleteReply={noop}
+        symbols={emptySymbols()}
+        onJump={noop}
+        deliveredById={{}}
+      />,
+    );
+    const pip = container.querySelector(".reply__pip");
+    expect(pip).not.toBeNull();
+    expect(pip!.className).toContain("reply__pip--delivered");
   });
 });
 
@@ -134,10 +154,10 @@ describe("ReplyThread — delete-button tooltip", () => {
     "the agent already saw this; deleting only removes it from your view.";
 
   it("uses the spec string when the reply is in the delivered set", () => {
-    const d = delivered("cmt_1", "2026-05-06T12:35:01.000Z");
+    const d = delivered("r1", "2026-05-06T12:35:01.000Z");
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -147,7 +167,7 @@ describe("ReplyThread — delete-button tooltip", () => {
         onDeleteReply={noop}
         symbols={emptySymbols()}
         onJump={noop}
-        deliveredById={{ cmt_1: d }}
+        deliveredById={{ r1: d }}
       />,
     );
     const del = container.querySelector(".reply__delete") as HTMLElement;
@@ -157,7 +177,7 @@ describe("ReplyThread — delete-button tooltip", () => {
   it("uses the generic 'delete reply' title when the reply is queued but not yet delivered", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -174,10 +194,10 @@ describe("ReplyThread — delete-button tooltip", () => {
     expect(del.getAttribute("title")).toBe("delete reply");
   });
 
-  it("uses the generic 'delete reply' title when the reply has no enqueued id", () => {
+  it("uses the generic 'delete reply' title when the reply is not enqueued", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: null })]}
+        interactions={[userIx()]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -197,11 +217,11 @@ describe("ReplyThread — delete-button tooltip", () => {
 describe("ReplyThread — errored pip + retry", () => {
   const ERR_TITLE = "Couldn't reach your agent — click to retry.";
 
-  it("renders the errored pip with the spec glyph + title when enqueueError is true and no id is set", () => {
+  it("renders the errored pip with the spec glyph + title when enqueueError is true and not enqueued", () => {
     const onRetry = vi.fn();
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: null, enqueueError: true })]}
+        interactions={[userIx({ enqueueError: true })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -225,7 +245,6 @@ describe("ReplyThread — errored pip + retry", () => {
     const onRetry = vi.fn();
     const r = userIx({
       id: "r-bad",
-      enqueuedCommentId: null,
       enqueueError: true,
     });
     const { container } = render(
@@ -250,11 +269,11 @@ describe("ReplyThread — errored pip + retry", () => {
   });
 
   it("delivered wins over errored when both are technically true (delivered is the source of truth)", () => {
-    const d = delivered("cmt_1", "2026-05-06T12:35:01.000Z");
+    const d = delivered("r1", "2026-05-06T12:35:01.000Z");
     const { container } = render(
       <ReplyThread
         interactions={[
-          userIx({ enqueuedCommentId: "cmt_1", enqueueError: true }),
+          userIx({ agentQueueStatus: "pending", enqueueError: true }),
         ]}
         isDrafting={false}
         draftBody=""
@@ -265,18 +284,18 @@ describe("ReplyThread — errored pip + retry", () => {
         onDeleteReply={noop}
         symbols={emptySymbols()}
         onJump={noop}
-        deliveredById={{ cmt_1: d }}
+        deliveredById={{ r1: d }}
       />,
     );
     expect(container.querySelector(".reply__pip--errored")).toBeNull();
     expect(container.querySelector(".reply__pip--delivered")).not.toBeNull();
   });
 
-  it("queued (id set, undelivered) wins over errored — id-set means the latest attempt succeeded", () => {
+  it("queued (pending, undelivered) wins over errored — pending means the latest enqueue landed", () => {
     const { container } = render(
       <ReplyThread
         interactions={[
-          userIx({ enqueuedCommentId: "cmt_1", enqueueError: true }),
+          userIx({ agentQueueStatus: "pending", enqueueError: true }),
         ]}
         isDrafting={false}
         draftBody=""
@@ -294,10 +313,10 @@ describe("ReplyThread — errored pip + retry", () => {
     expect(container.querySelector(".reply__pip--queued")).not.toBeNull();
   });
 
-  it("renders no pip when neither id nor error is set", () => {
+  it("renders no pip when neither enqueued nor errored", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: null })]}
+        interactions={[userIx()]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -315,7 +334,7 @@ describe("ReplyThread — errored pip + retry", () => {
   it("after a successful retry the pip flips back to ◌ queued", () => {
     const { container, rerender } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: null, enqueueError: true })]}
+        interactions={[userIx({ enqueueError: true })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -332,7 +351,7 @@ describe("ReplyThread — errored pip + retry", () => {
     rerender(
       <ReplyThread
         interactions={[
-          userIx({ enqueuedCommentId: "cmt_99", enqueueError: false }),
+          userIx({ agentQueueStatus: "pending", enqueueError: false }),
         ]}
         isDrafting={false}
         draftBody=""
@@ -356,7 +375,7 @@ describe("ReplyThread — agent replies as sibling Interactions", () => {
   it("renders nothing extra when no agent Interactions sit alongside the user one", () => {
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -372,7 +391,7 @@ describe("ReplyThread — agent replies as sibling Interactions", () => {
   });
 
   it("renders one row per agent Interaction with intent glyph, label, body and timestamp", () => {
-    const user = userIx({ enqueuedCommentId: "cmt_1" });
+    const user = userIx({ agentQueueStatus: "pending" });
     const agents = [
       agentIx({
         id: "ar1",
@@ -422,7 +441,7 @@ describe("ReplyThread — agent replies as sibling Interactions", () => {
   });
 
   it("renders agent rows in input order — callers (selectInteractions) sort by createdAt", () => {
-    const user = userIx({ enqueuedCommentId: "cmt_1" });
+    const user = userIx({ agentQueueStatus: "pending" });
     const a = agentIx({
       id: "a",
       body: "A",
@@ -462,7 +481,7 @@ describe("ReplyThread — pip tooltips", () => {
       <ReplyThread
         interactions={[
           userIx({
-            enqueuedCommentId: "cmt_1",
+            agentQueueStatus: "pending",
             createdAt: "2026-05-06T12:34:56.000Z",
           }),
         ]}
@@ -484,10 +503,10 @@ describe("ReplyThread — pip tooltips", () => {
   });
 
   it("delivered tooltip uses the exact 'Fetched by your agent at HH:MM:SS.' prefix", () => {
-    const d = delivered("cmt_1", "2026-05-06T12:35:01.000Z");
+    const d = delivered("r1", "2026-05-06T12:35:01.000Z");
     const { container } = render(
       <ReplyThread
-        interactions={[userIx({ enqueuedCommentId: "cmt_1" })]}
+        interactions={[userIx({ agentQueueStatus: "pending" })]}
         isDrafting={false}
         draftBody=""
         onStartDraft={noop}
@@ -497,7 +516,7 @@ describe("ReplyThread — pip tooltips", () => {
         onDeleteReply={noop}
         symbols={emptySymbols()}
         onJump={noop}
-        deliveredById={{ cmt_1: d }}
+        deliveredById={{ r1: d }}
       />,
     );
     const pip = container.querySelector(".reply__pip--delivered") as HTMLElement;

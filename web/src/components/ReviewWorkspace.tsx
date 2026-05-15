@@ -61,12 +61,14 @@ import type {
 } from "../types";
 import { blockCommentKey, lineNoteReplyKey, userCommentKey } from "../types";
 import {
-  enqueueComment,
   fetchAgentContextForWorktree,
   fetchMcpStatus,
-  unenqueueComment,
 } from "../agentContextClient";
-import { deriveCommentPayload } from "../agentCommentPayload";
+import {
+  enqueueInteraction,
+  unenqueueInteraction,
+  upsertInteraction,
+} from "../interactionClient";
 import { buildReplyAnchor } from "../anchor";
 import {
   fetchWorktreeChangeset,
@@ -94,6 +96,10 @@ import { selectIngestSignals } from "../interactions";
 interface Props {
   state: ReviewState;
   dispatch: Dispatch<Action>;
+  /** Raw (unsynced) reducer dispatch. Used only by the worktree submit path,
+   *  which manages its own upsert→enqueue sequence; going through the synced
+   *  dispatch there would fire a concurrent duplicate upsert. */
+  rawDispatch: Dispatch<Action>;
   drafts: Record<string, string>;
   setDrafts: (
     updater: (prev: Record<string, string>) => Record<string, string>,
@@ -122,6 +128,7 @@ interface Props {
 export function ReviewWorkspace({
   state,
   dispatch,
+  rawDispatch,
   drafts,
   setDrafts,
   themeId,
@@ -1362,14 +1369,23 @@ export function ReviewWorkspace({
                 authorRole: "user",
                 body,
                 createdAt: createdAt.toISOString(),
-                enqueuedCommentId: null,
                 ...buildReplyAnchor(key, cs),
               };
-              dispatch({
-                type: "ADD_INTERACTION",
+              // Worktree path: bypass the sync hook — this code manages its
+              // own upsert→enqueue sequence, and going through syncedDispatch
+              // would fire a concurrent duplicate upsert for the same row.
+              // Non-worktree path: go through the sync hook (its upsert is the
+              // only persistence path for paste/url/upload changesets).
+              const addAction = {
+                type: "ADD_INTERACTION" as const,
                 targetKey: key,
                 interaction,
-              });
+              };
+              if (activeWorktreeSource) {
+                rawDispatch(addAction);
+              } else {
+                dispatch(addAction);
+              }
               setDrafts((prev) => {
                 if (!(key in prev)) return prev;
                 const next = { ...prev };
@@ -1377,88 +1393,48 @@ export function ReviewWorkspace({
                 return next;
               });
               setDraftingKey(null);
-              // Fire-and-forget enqueue when a worktree is loaded.
-              // Non-worktree loads (paste/url/upload) save the Interaction
-              // locally only; the pip never appears.
+              // When a worktree is loaded, enqueue the interaction for the
+              // agent. The DB row must exist before /enqueue can reference
+              // it, so upsert here and enqueue on success rather than
+              // racing the background sync. Non-worktree loads (paste/url/
+              // upload) just persist the interaction; no pip appears.
               if (activeWorktreeSource) {
-                const derived = deriveCommentPayload(key, cs);
-                if (derived) {
-                  enqueueComment({
-                    worktreePath: activeWorktreeSource.worktreePath,
-                    commitSha: activeWorktreeSource.commitSha,
-                    interaction: {
-                      ...derived,
-                      intent: "comment",
-                      author: "you",
-                      authorRole: "user",
-                      body,
-                    },
-                  })
-                    .then((r) =>
-                      dispatch({
-                        type: "PATCH_INTERACTION_ENQUEUED_ID",
-                        targetKey: key,
-                        interactionId,
-                        enqueuedCommentId: r.id,
-                      }),
-                    )
-                    .catch((err: unknown) => {
-                      console.error("[shippable] enqueueComment failed:", err);
-                      // Surface the failure as an errored pip; the user can
-                      // click it to retry. The interaction itself stays in
-                      // place so nothing is lost.
-                      dispatch({
-                        type: "SET_INTERACTION_ENQUEUE_ERROR",
-                        targetKey: key,
-                        interactionId,
-                        error: true,
-                      });
+                const worktreePath = activeWorktreeSource.worktreePath;
+                upsertInteraction(interaction, cs.id)
+                  .then(() => enqueueInteraction(interactionId, worktreePath))
+                  .catch((err: unknown) => {
+                    console.error("[shippable] enqueue failed:", err);
+                    // Surface the failure as a retry pip; the interaction
+                    // itself stays in place so nothing is lost.
+                    dispatch({
+                      type: "SET_INTERACTION_ENQUEUE_ERROR",
+                      targetKey: key,
+                      interactionId,
+                      error: true,
                     });
-                }
+                  });
               }
             }}
             onRetryReply={(key, replyId) => {
-              // Errored-pip retry path. Looks up the Interaction by id,
-              // derives the same {kind,file,lines} the original submit
-              // produced, and re-POSTs /api/agent/enqueue. NO supersedes
-              // here — the original POST never landed an id, so there's
-              // no predecessor to replace. Mirrors the spec from the v0
-              // task list.
+              // Errored-pip retry. The original upsert may have failed too
+              // (that's why we're retrying), so re-upsert first to guarantee
+              // the row exists before re-enqueueing.
               if (!activeWorktreeSource) return;
               const ix = state.interactions[key]?.find((entry) => entry.id === replyId);
               if (!ix) return;
-              const derived = deriveCommentPayload(key, cs);
-              if (!derived) return;
+              const worktreePath = activeWorktreeSource.worktreePath;
               // Optimistically clear the error so the pip flips back to ◌
-              // queued the moment the user clicks; if the retry fails we set
-              // it again on the catch.
+              // queued the moment the user clicks; restore it on failure.
               dispatch({
                 type: "SET_INTERACTION_ENQUEUE_ERROR",
                 targetKey: key,
                 interactionId: replyId,
                 error: false,
               });
-              enqueueComment({
-                worktreePath: activeWorktreeSource.worktreePath,
-                commitSha: activeWorktreeSource.commitSha,
-                interaction: {
-                  ...derived,
-                  intent: "comment",
-                  author: "you",
-                  authorRole: "user",
-                  body: ix.body,
-                },
-              })
-                .then((r) =>
-                  dispatch({
-                    type: "PATCH_INTERACTION_ENQUEUED_ID",
-                    targetKey: key,
-                    interactionId: replyId,
-                    enqueuedCommentId: r.id,
-                  }),
-                )
+              upsertInteraction(ix, cs.id)
+                .then(() => enqueueInteraction(replyId, worktreePath))
                 .catch((err: unknown) => {
-                  console.error("[shippable] retry enqueueComment failed:", err);
+                  console.error("[shippable] retry enqueue failed:", err);
                   dispatch({
                     type: "SET_INTERACTION_ENQUEUE_ERROR",
                     targetKey: key,
@@ -1468,14 +1444,19 @@ export function ReviewWorkspace({
                 });
             }}
             onDeleteReply={(key, replyId) => {
+              // Unenqueue first when the interaction is still pending — the
+              // agent hasn't pulled it, so it should leave the queue
+              // cleanly. (DELETE_INTERACTION's sync would drop the row too,
+              // but unenqueue is the explicit, race-free signal and a
+              // no-op 404 if the row's already gone.) Delivered entries
+              // stay in the agent's hands; we only drop the local view.
               const target = state.interactions[key]?.find((ix) => ix.id === replyId);
-              const enqueuedId = target?.enqueuedCommentId ?? null;
-              if (enqueuedId && activeWorktreeSource) {
-                unenqueueComment({
-                  worktreePath: activeWorktreeSource.worktreePath,
-                  id: enqueuedId,
-                }).catch((err: unknown) => {
-                  console.error("[shippable] unenqueueComment failed:", err);
+              if (
+                target?.agentQueueStatus === "pending" &&
+                activeWorktreeSource
+              ) {
+                unenqueueInteraction(replyId).catch((err: unknown) => {
+                  console.error("[shippable] unenqueue failed:", err);
                 });
               }
               dispatch({ type: "DELETE_INTERACTION", targetKey: key, interactionId: replyId });

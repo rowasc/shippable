@@ -112,7 +112,7 @@ const userLineInteraction: Interaction = {
   authorRole: "user",
   body: "Move this guard above the queue lookup so we don't allocate an entry for a bad path.",
   createdAt: "2026-05-06T09:32:00Z",
-  enqueuedCommentId: "cmt_luiz_1",
+  agentQueueStatus: "delivered",
 };
 
 const agentReplyToUser: Interaction = {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import "./App.css";
 import { findStub } from "./fixtures";
 import { initialState, reducer } from "./state";
@@ -33,6 +33,8 @@ import { useWorktreeLiveReload } from "./useWorktreeLiveReload";
 import { parseDiff } from "./parseDiff";
 import { postJson } from "./apiClient";
 import { fetchDiffCodeGraph } from "./codeGraphClient";
+import { fetchInteractions } from "./interactionClient";
+import { useInteractionSync } from "./useInteractionSync";
 
 interface BootSeed {
   changesets: ChangeSet[];
@@ -71,7 +73,8 @@ function resolveBoot(): BootSeed {
     if (recent && isResumableChangeset(recent.changeset)) {
       return {
         changesets: [recent.changeset],
-        // Interactions are fetched from the DB by changeset id (wired in a later task).
+        // Interactions are fetched from the DB per changeset once it
+        // becomes active — see the fetch effect in App.
         interactions: {},
         applyPersisted: true,
         source: recent.source,
@@ -187,6 +190,45 @@ export default function App() {
   // banner; null for non-worktree loads (paste/url/upload/stub).
   const activeCs =
     state.changesets.find((c) => c.id === state.cursor.changesetId) ?? null;
+
+  // ── Per-changeset interaction fetch ───────────────────────────────────
+  // Interactions live in the server DB, keyed by changeset id. Fetch them
+  // once per changeset the first time it becomes active and merge them in
+  // via LOAD_CHANGESET, whose reducer keeps any locally-authored entries
+  // (`{ ...fetched, ...state.interactions }`) and only fills in keys the
+  // client doesn't already hold. Stub fixtures still seed inline; their
+  // keys win over the (empty) DB fetch.
+  const activeCsId = activeCs?.id ?? null;
+  const fetchedCsIds = useRef(new Set<string>());
+  useEffect(() => {
+    if (!activeCsId || fetchedCsIds.current.has(activeCsId)) return;
+    fetchedCsIds.current.add(activeCsId);
+    const cs = state.changesets.find((c) => c.id === activeCsId);
+    if (!cs) return;
+    let cancelled = false;
+    fetchInteractions(activeCsId)
+      .then((fetched) => {
+        if (cancelled || fetched.length === 0) return;
+        const byThread: Record<string, Interaction[]> = {};
+        for (const ix of fetched) {
+          (byThread[ix.threadKey] ??= []).push(ix);
+        }
+        dispatch({ type: "LOAD_CHANGESET", changeset: cs, interactions: byThread });
+      })
+      .catch((err: unknown) => {
+        // Leave the id un-marked so a later re-render retries the fetch.
+        fetchedCsIds.current.delete(activeCsId);
+        console.error("[shippable] interaction fetch failed:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCsId, state.changesets]);
+
+  // Mirror local user-authored interaction mutations back to the DB. The
+  // wrapped dispatch is what the review UI uses; App's own LOAD_CHANGESET /
+  // RELOAD_CHANGESET dispatches pass through it untouched.
+  const syncedDispatch = useInteractionSync(state, dispatch, activeCsId);
   const provenance: WorktreeProvenance | null = useMemo(() => {
     const src = activeCs?.worktreeSource;
     if (!src || !src.state) return null;
@@ -318,7 +360,8 @@ export default function App() {
     <>
       <ReviewWorkspace
         state={state}
-        dispatch={dispatch}
+        dispatch={syncedDispatch}
+        rawDispatch={dispatch}
         drafts={drafts}
         setDrafts={setDrafts}
         themeId={themeId}

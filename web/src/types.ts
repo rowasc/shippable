@@ -548,10 +548,18 @@ export interface Interaction {
   /** Verifier hook — present on some AI-authored interactions. */
   runRecipe?: { source: string; inputs: Record<string, string> };
 
-  /** Queue bookkeeping — once enqueued to the agent. */
-  enqueuedCommentId?: string | null;
+  /**
+   * Queue state mirrored from the server's StoredInteraction:
+   *   `pending`   — enqueued to a worktree agent, not yet pulled
+   *   `delivered` — the agent has fetched it
+   *   absent/null — not enqueued
+   */
+  agentQueueStatus?: "pending" | "delivered" | null;
+  /**
+   * Transient client-only flag — the last enqueue request failed at the
+   * network level. Drives the ⚠ retry pip; never persisted server-side.
+   */
   enqueueError?: boolean;
-  enqueueOptIn?: boolean;
 }
 
 export function isAskIntent(i: InteractionIntent): i is AskIntent {
@@ -667,8 +675,9 @@ export function parseReplyKey(key: string): ParsedReplyKey | null {
 /**
  * Wire shape of a delivered interaction returned by GET /api/agent/delivered.
  * Mirrors `DeliveredInteraction` in server/src/agent-queue.ts. The web only
- * uses the `id` (to match against an Interaction's `enqueuedCommentId`) and
- * `deliveredAt` (to render the ✓ delivered pip tooltip).
+ * uses the `id` (the client-authoritative interaction id, matched against a
+ * local Interaction) and `deliveredAt` (to render the ✓ delivered pip
+ * tooltip).
  */
 export interface DeliveredInteraction {
   id: string;

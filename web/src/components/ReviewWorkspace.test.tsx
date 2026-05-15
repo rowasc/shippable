@@ -212,6 +212,7 @@ describe("ReviewWorkspace symbol navigation", () => {
         <ReviewWorkspace
           state={state}
           dispatch={dispatch}
+          rawDispatch={dispatch}
           drafts={{}}
           setDrafts={() => ({})}
           themeId="light"
@@ -308,6 +309,7 @@ function renderPrWorkspace(over: Partial<{ dispatch: Dispatch<Action> }> = {}) {
       <ReviewWorkspace
         state={state}
         dispatch={dispatch}
+        rawDispatch={dispatch}
         drafts={{}}
         setDrafts={() => ({})}
         themeId="light"
@@ -501,6 +503,7 @@ describe("ReviewWorkspace — PR auth-rejected banner", () => {
         <ReviewWorkspace
           state={state}
           dispatch={vi.fn() as Dispatch<Action>}
+          rawDispatch={vi.fn() as Dispatch<Action>}
           drafts={{}}
           setDrafts={() => ({})}
           themeId="light"

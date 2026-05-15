@@ -211,7 +211,7 @@ interface WorkspaceFrame extends BaseFrame {
    * agent-integration surface. Present only on the agent-flow frames; absent
    * frames render Inspector without the agent panel (current behavior).
    * Drives the Delivered (N) block — pip glyphs come from each Interaction's
-   * `enqueuedCommentId` matched against `delivered`.
+   * own `id` matched against `delivered`, plus its `agentQueueStatus`.
    */
   agentSnapshot?: AgentSnapshot;
   /**
@@ -502,7 +502,7 @@ function buildFrames(): Frame[] {
     authorRole: "user",
     body: "`assertGitDir` reads like it returns void — rename to `assertWorktreeIsGitDir`?",
     createdAt: "2026-05-06T10:01:30Z",
-    enqueuedCommentId: "cmt_a1",
+    agentQueueStatus: "pending",
   };
   const replyLine2: Interaction = {
     id: "demo-r-a2",
@@ -513,7 +513,7 @@ function buildFrames(): Frame[] {
     authorRole: "user",
     body: "this should throw — `{ id: \"\" }` reads as success on the wire.",
     createdAt: "2026-05-06T10:02:10Z",
-    enqueuedCommentId: "cmt_a2",
+    agentQueueStatus: "pending",
   };
   const agentReplyLine1: Interaction = {
     id: "ar-1",
@@ -537,7 +537,7 @@ function buildFrames(): Frame[] {
   };
 
   const deliveredA1: DeliveredInteraction = {
-    id: "cmt_a1",
+    id: replyLine1.id,
     target: "line",
     intent: "comment",
     author: replyLine1.author,
@@ -551,7 +551,7 @@ function buildFrames(): Frame[] {
     deliveredAt: "2026-05-06T10:04:00Z",
   };
   const deliveredA2: DeliveredInteraction = {
-    id: "cmt_a2",
+    id: replyLine2.id,
     target: "line",
     intent: "comment",
     author: replyLine2.author,
@@ -606,8 +606,8 @@ function buildFrames(): Frame[] {
   // Frame agent-1 — fresh worktree-loaded view, no comments yet.
   const fAgent1State: ReviewState = { ...agentBase };
 
-  // Frame agent-2 — both line comments seeded with `enqueuedCommentId` set
-  // → both render the ◌ queued pip. No delivered ids yet.
+  // Frame agent-2 — both line comments seeded with `agentQueueStatus:
+  // "pending"` → both render the ◌ queued pip. No delivered ids yet.
   const fAgent2State: ReviewState = {
     ...agentBase,
     interactions: {
@@ -1808,7 +1808,6 @@ function WorkspaceStage({
                 authorRole: "user",
                 body,
                 createdAt: new Date().toISOString(),
-                enqueuedCommentId: null,
                 ...buildReplyAnchor(key, cs),
               };
               dispatch({

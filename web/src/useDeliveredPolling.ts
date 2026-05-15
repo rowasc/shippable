@@ -28,10 +28,10 @@ export const POLL_INTERVAL_MS = 2000;
 export interface DeliveredPollingResult {
   delivered: DeliveredInteraction[];
   /**
-   * Polled agent replies (flat list with `commentId` on each entry). The
-   * caller dispatches `MERGE_AGENT_REPLIES` with this on change so the
-   * reducer reconciles them into the matching thread by parentId →
-   * enqueuedCommentId, or by (file, lines) → hunkId for top-level entries.
+   * Polled agent replies (flat list). The caller dispatches
+   * `MERGE_AGENT_REPLIES` with this on change so the reducer reconciles
+   * them into the matching thread by `parentId` → interaction `id`, or by
+   * (file, lines) → hunkId for top-level entries.
    */
   agentReplies: PolledAgentReply[];
   /** ISO of the last successful fetch; null until the first one lands. */
