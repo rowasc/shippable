@@ -11,7 +11,7 @@
  * a nice-to-have, never load-bearing.
  */
 
-import type { ChangeSet, Interaction } from "./types";
+import type { ChangeSet } from "./types";
 
 const STORAGE_KEY = "shippable:recents:v1";
 const MAX_RECENTS = 5;
@@ -32,7 +32,6 @@ export interface RecentEntry {
   addedAt: number;
   source: RecentSource;
   changeset: ChangeSet;
-  interactions: Record<string, Interaction[]>;
 }
 
 interface PersistedRecents {
@@ -60,7 +59,6 @@ export function loadRecents(): RecentEntry[] {
 
 export function pushRecent(
   changeset: ChangeSet,
-  interactions: Record<string, Interaction[]>,
   source: RecentSource,
 ): RecentEntry[] {
   // Don't persist an empty changeset — a clean worktree reload produces
@@ -75,7 +73,6 @@ export function pushRecent(
     addedAt: Date.now(),
     source,
     changeset,
-    interactions,
   };
   const next = [entry, ...existing].slice(0, MAX_RECENTS);
   save(next);

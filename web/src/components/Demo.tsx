@@ -172,7 +172,6 @@ const DEMO_RECENTS: RecentEntry[] = [
       branch: DEMO_WORKTREES[1].branch,
     },
     changeset: PREVIEW_CS,
-    interactions: { ...INTERACTIONS_72 },
   },
   {
     id: CS.id,
@@ -180,7 +179,6 @@ const DEMO_RECENTS: RecentEntry[] = [
     addedAt: Date.parse("2026-05-04T11:05:00Z"),
     source: { kind: "paste" },
     changeset: CS,
-    interactions: { ...INTERACTIONS_42 },
   },
 ];
 

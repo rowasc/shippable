@@ -47,19 +47,19 @@ describe("pushRecent — poisoned-recent guard", () => {
   // A clean worktree reload calls parseDiff("") → files: []. Storing that
   // changeset poisoned the next boot (see persist.test.ts coverage).
   it("refuses to persist a changeset with no files", () => {
-    expect(pushRecent(makeCs("wt-clean", []), {}, source)).toEqual([]);
+    expect(pushRecent(makeCs("wt-clean", []), source)).toEqual([]);
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("refuses to persist a changeset whose files all have empty hunks", () => {
     const cs = makeCs("wt-empty-hunks", [makeFile("f1", []), makeFile("f2", [])]);
-    expect(pushRecent(cs, {}, source)).toEqual([]);
+    expect(pushRecent(cs, source)).toEqual([]);
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
   });
 
   it("persists a normal changeset", () => {
     const cs = makeCs("cs1", [makeFile("f1", [makeHunk("f1#h1")])]);
-    const next = pushRecent(cs, {}, source);
+    const next = pushRecent(cs, source);
     expect(next).toHaveLength(1);
     expect(next[0].id).toBe("cs1");
     expect(loadRecents()).toHaveLength(1);

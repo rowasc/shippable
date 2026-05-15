@@ -36,7 +36,7 @@ import { fetchDiffCodeGraph } from "./codeGraphClient";
 
 interface BootSeed {
   changesets: ChangeSet[];
-  /** Pre-seeded Interactions for this changeset (stub fixtures or recents). */
+  /** Pre-seeded interactions for this changeset (stub fixtures only). */
   interactions: Record<string, Interaction[]>;
   /** Whether to overlay the persisted snapshot onto initialState. */
   applyPersisted: boolean;
@@ -71,7 +71,8 @@ function resolveBoot(): BootSeed {
     if (recent && isResumableChangeset(recent.changeset)) {
       return {
         changesets: [recent.changeset],
-        interactions: { ...recent.interactions },
+        // Interactions are fetched from the DB by changeset id (wired in a later task).
+        interactions: {},
         applyPersisted: true,
         source: recent.source,
       };
@@ -133,7 +134,7 @@ export default function App() {
     // next welcome shows it at the top. For the welcome boot (no source)
     // just return the persisted list as-is.
     if (boot.source && boot.changesets.length > 0) {
-      return pushRecent(boot.changesets[0], boot.interactions, boot.source);
+      return pushRecent(boot.changesets[0], boot.source);
     }
     return loadRecents();
   });
@@ -177,7 +178,7 @@ export default function App() {
       });
     }
     setCurrentSource(source);
-    setRecents(pushRecent(cs, interactions, source));
+    setRecents(pushRecent(cs, source));
   }
 
   // ── Live reload ───────────────────────────────────────────────────────
@@ -277,7 +278,7 @@ export default function App() {
         changeset: newCs,
       });
       setCurrentSource(source);
-      setRecents(pushRecent(newCs, {}, source));
+      setRecents(pushRecent(newCs, source));
       setStaleNext(null);
     } catch (err) {
       console.error("[shippable] live-reload reload failed:", err);

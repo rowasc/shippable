@@ -167,7 +167,8 @@ export function Welcome({ recents, onLoad, onRecentsChange }: Props) {
   }
 
   function loadFromRecent(r: RecentEntry) {
-    deliver(r.changeset, r.interactions, r.source);
+    // Interactions are fetched from the DB by changeset id (wired in a later task).
+    deliver(r.changeset, {}, r.source);
   }
 
   function dismissRecent(id: string) {
