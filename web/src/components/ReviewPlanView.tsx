@@ -410,7 +410,12 @@ function MapSection({
   includeMarkdown: boolean;
   onToggleMarkdown: () => void;
 }) {
-  const entryFileIds = new Set(entryPoints.map((e) => e.fileId));
+  // Mirror ClaimRow's invariant: a "claim" with no evidence breaches the
+  // evidence-mandatory promise. Drop the rank, the file still appears below.
+  const rankedEntries = entryPoints.filter(
+    (e) => e.reason.evidence.length > 0,
+  );
+  const entryFileIds = new Set(rankedEntries.map((e) => e.fileId));
   const otherFiles = map.files.filter((f) => !entryFileIds.has(f.fileId));
 
   return (
@@ -425,15 +430,15 @@ function MapSection({
           {showDiagram ? "hide diagram" : "generate diagram"}
         </button>
       </div>
-      {entryPoints.length === 0 && (
+      {rankedEntries.length === 0 && (
         <div className="plan__empty plan__map-empty">
           No clear entry point — the diff is flat. Review files below in any
           order.
         </div>
       )}
-      {entryPoints.length > 0 && (
+      {rankedEntries.length > 0 && (
         <ul className="plan__files plan__files--priority">
-          {entryPoints.map((entry, i) => {
+          {rankedEntries.map((entry, i) => {
             const file = map.files.find((x) => x.fileId === entry.fileId);
             return (
               <EntryFileRow
@@ -449,7 +454,7 @@ function MapSection({
           })}
         </ul>
       )}
-      {entryPoints.length > 0 && otherFiles.length > 0 && (
+      {rankedEntries.length > 0 && otherFiles.length > 0 && (
         <div className="plan__files-divider">other changes</div>
       )}
       {otherFiles.length > 0 && (

@@ -177,6 +177,45 @@ describe("buildStructureMap reference backfill", () => {
     expect(entry.referencedIn).toEqual([]);
   });
 
+  it("filters yml hits but keeps code hits when both files mention the symbol", () => {
+    // Tighter than the two cases above: the same symbol is mentioned in both
+    // a non-code and a code file in one diff. Asserts the extension filter
+    // doesn't also exclude legitimate code references in the same pass.
+    const yamlHunk: Hunk = {
+      id: "h-yml",
+      header: "@@ h-yml @@",
+      oldStart: 1,
+      oldCount: 0,
+      newStart: 1,
+      newCount: 1,
+      lines: [{ kind: "add", text: "name: rusty" }],
+      definesSymbols: [],
+      exportedSymbols: [],
+      referencesSymbols: [],
+    };
+    const jsHunk: Hunk = {
+      id: "h-js",
+      header: "@@ h-js @@",
+      oldStart: 1,
+      oldCount: 0,
+      newStart: 1,
+      newCount: 1,
+      lines: [{ kind: "add", text: "use(name);" }],
+      definesSymbols: [],
+      exportedSymbols: [],
+      referencesSymbols: [],
+    };
+    const map = buildStructureMap(
+      cs([
+        file("ui.js", [hunk("h1", ["name"], ["name"])]),
+        { ...file(".lando.yml", [yamlHunk]), language: "yaml" },
+        file("consumer.js", [jsHunk]),
+      ]),
+    );
+    const entry = map.symbols.find((s) => s.name === "name")!;
+    expect(entry.referencedIn).toEqual(["consumer.js"]);
+  });
+
   it("still picks up real references in code files via backfill", () => {
     // Same shape, but the reference lives in a .js file — backfill should
     // catch it even though referencesSymbols isn't declared on the hunk.
