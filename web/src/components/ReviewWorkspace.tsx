@@ -81,6 +81,10 @@ import { clearSession } from "../persist";
 import type { ThemeId } from "../tokens";
 import type { RecentSource } from "../recents";
 import { loadGithubPr, GithubFetchError } from "../githubPrClient";
+import {
+  asTokenRejectionHint,
+  type TokenRejectionHint,
+} from "../useGithubPrLoad";
 import { GitHubTokenModal } from "./GitHubTokenModal";
 import { isTauri, keychainGet } from "../keychain";
 import { fetchFileAt } from "../fileAt";
@@ -254,6 +258,9 @@ export function ReviewWorkspace({
     pendingHtmlUrl: string;
     /** When set, runs instead of re-fetching pendingHtmlUrl after token entry. */
     pendingAction?: () => Promise<void>;
+    /** Server-side hint for the rejection (rate-limit / scope / invalid-token);
+     *  threaded through so the modal renders accurate copy. */
+    hint?: TokenRejectionHint;
   } | null>(null);
 
   // MCP-install status with retry+backoff. The dev server's port briefly
@@ -407,6 +414,7 @@ export function ReviewWorkspace({
             reason: "first-time",
             pendingHtmlUrl: htmlUrl,
             pendingAction: () => handlePrRefresh(htmlUrl),
+            // first-time prompts carry no hint
           });
         }
         // Other discriminators: swallow silently; button becomes available again.
@@ -1125,6 +1133,7 @@ export function ReviewWorkspace({
                 host: prAuthRejected.host,
                 reason: "rejected",
                 pendingHtmlUrl: cs.prSource?.htmlUrl ?? "",
+                hint: asTokenRejectionHint(prAuthRejected.hint),
               })
             }
           >
@@ -1144,6 +1153,7 @@ export function ReviewWorkspace({
         <GitHubTokenModal
           host={prRefreshTokenModal.host}
           reason={prRefreshTokenModal.reason}
+          hint={prRefreshTokenModal.hint}
           onSubmit={handlePrRefreshTokenSubmit}
           onCancel={() => setPrRefreshTokenModal(null)}
         />
@@ -1508,12 +1518,13 @@ export function ReviewWorkspace({
                 prDetached,
               });
             }}
-            onAuthError={(host, reason, retry) => {
+            onAuthError={(host, reason, retry, hint) => {
               setPrRefreshTokenModal({
                 host,
                 reason,
                 pendingHtmlUrl: "",
                 pendingAction: retry,
+                hint,
               });
             }}
           />

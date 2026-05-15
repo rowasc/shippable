@@ -180,6 +180,7 @@ export function LoadModal({ onLoad, onClose }: Props) {
           <GitHubTokenModal
             host={pr.tokenModal.host}
             reason={pr.tokenModal.reason}
+            hint={pr.tokenModal.hint}
             onSubmit={pr.submitToken}
             onCancel={pr.dismissTokenModal}
           />

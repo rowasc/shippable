@@ -29,6 +29,10 @@ import {
   GithubFetchError,
   GH_ERROR_MESSAGES,
 } from "../githubPrClient";
+import {
+  asTokenRejectionHint,
+  type TokenRejectionHint,
+} from "../useGithubPrLoad";
 import type { PrMatch } from "../githubPrClient";
 
 /**
@@ -170,6 +174,7 @@ interface Props {
     host: string,
     reason: "first-time" | "rejected",
     retry: () => Promise<void>,
+    hint?: TokenRejectionHint,
   ) => void;
   /**
    * The changeset id of the active worktree-loaded ChangeSet. Used as the
@@ -291,7 +296,12 @@ export function Inspector({
         if (err.discriminator === "github_token_required") {
           onAuthError?.(err.host ?? "github.com", "first-time", () => handlePillClick());
         } else if (err.discriminator === "github_auth_failed") {
-          onAuthError?.(err.host ?? "github.com", "rejected", () => handlePillClick());
+          onAuthError?.(
+            err.host ?? "github.com",
+            "rejected",
+            () => handlePillClick(),
+            asTokenRejectionHint(err.hint),
+          );
         } else {
           setPillError(
             GH_ERROR_MESSAGES[err.discriminator] ?? "Couldn't load PR overlay.",

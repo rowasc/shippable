@@ -26,10 +26,15 @@ export interface UseGithubPrLoadOptions {
   onResult: (result: PrLoadResult, prUrl: string) => void;
 }
 
+export type TokenRejectionHint = "rate-limit" | "scope" | "invalid-token";
+
 export interface TokenModalState {
   host: string;
   reason: "first-time" | "rejected";
   pendingPrUrl: string;
+  /** Why the token was rejected (when known). Drives modal copy so a
+   *  rate-limited user isn't sent to regenerate a perfectly valid PAT. */
+  hint?: TokenRejectionHint;
 }
 
 export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
@@ -100,6 +105,7 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
           host: err.host ?? "github.com",
           reason: "rejected",
           pendingPrUrl: prUrl,
+          hint: asHint(err.hint),
         });
         return;
       }
@@ -145,10 +151,9 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
           err.discriminator === "github_token_required");
       if (isRejection) {
         const e = err as GithubFetchError;
-        throw new Error(
-          `Token rejected by ${e.host ?? host}. Check the PAT scopes (repo + read:org for private repos) and try again.`,
-          { cause: err },
-        );
+        throw new Error(rejectionThrowMessage(e.host ?? host, asHint(e.hint)), {
+          cause: err,
+        });
       }
       if (err instanceof GithubFetchError) {
         setTokenModal(null);
@@ -176,6 +181,42 @@ export function useGithubPrLoad({ onResult }: UseGithubPrLoadOptions) {
     /** Set an inline error from outside (e.g., URL validation). */
     setError,
   };
+}
+
+/**
+ * Narrow an untrusted hint string from `GithubFetchError` to the typed
+ * `TokenRejectionHint` union. The server controls the wire shape, but
+ * defensive narrowing keeps a future server-side rename from rendering
+ * mystery copy at the user. Exported so other surfaces (the topbar
+ * banner, the Inspector PR overlay's onAuthError plumbing) narrow the
+ * same way.
+ */
+export function asTokenRejectionHint(
+  raw: string | undefined,
+): TokenRejectionHint | undefined {
+  return asHint(raw);
+}
+
+function asHint(raw: string | undefined): TokenRejectionHint | undefined {
+  if (raw === "rate-limit" || raw === "scope" || raw === "invalid-token") {
+    return raw;
+  }
+  return undefined;
+}
+
+function rejectionThrowMessage(
+  host: string,
+  hint: TokenRejectionHint | undefined,
+): string {
+  switch (hint) {
+    case "rate-limit":
+      return `GitHub rate-limited requests for ${host}. The token may be fine — wait until the limit resets and try again.`;
+    case "invalid-token":
+      return `Token rejected by ${host}. It may be revoked or expired — generate a new PAT and try again.`;
+    case "scope":
+    default:
+      return `Token rejected by ${host}. Check the PAT scopes (repo + read:org for private repos) and try again.`;
+  }
 }
 
 /**

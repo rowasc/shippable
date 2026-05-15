@@ -6,16 +6,27 @@ import {
   readTrustedGithubHosts,
   trustGithubHost,
 } from "../githubHostTrust";
+import type { TokenRejectionHint } from "../useGithubPrLoad";
 import "./LoadModal.css";
 
 interface Props {
   host: string;
   reason: "first-time" | "rejected";
+  /** Narrows the rejection copy when known: a rate-limited user shouldn't be
+   *  told to "check the PAT scopes." Absent on first-time prompts and on
+   *  rejections without a server-side hint. */
+  hint?: TokenRejectionHint;
   onSubmit: (host: string, token: string) => Promise<void>;
   onCancel: () => void;
 }
 
-export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
+export function GitHubTokenModal({
+  host,
+  reason,
+  hint,
+  onSubmit,
+  onCancel,
+}: Props) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -103,11 +114,11 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
                 // Render the rejection prominently so the user can't miss it
                 // — this same modal is the destination for *both* the
                 // first-time prompt and a wrong-PAT retry, and a subtle
-                // .modal__hint got mistaken for fresh-prompt copy.
+                // .modal__hint got mistaken for fresh-prompt copy. Hint
+                // selects the copy so a rate-limited user isn't sent to
+                // regenerate a perfectly valid token.
                 <p className="modal__hint modal__hint--error" role="alert">
-                  GitHub rejected the saved token for {host}. Re-enter the
-                  PAT (or generate a new one with `repo` + `read:org` scopes
-                  for private repos).
+                  {rejectionCopy(host, hint)}
                 </p>
               ) : (
                 <p className="modal__hint">
@@ -157,4 +168,17 @@ export function GitHubTokenModal({ host, reason, onSubmit, onCancel }: Props) {
   // in the DOM — prevents double backdrops when GitHubTokenModal opens from
   // inside LoadModal.
   return createPortal(content, document.body);
+}
+
+function rejectionCopy(host: string, hint: TokenRejectionHint | undefined): string {
+  switch (hint) {
+    case "rate-limit":
+      return `GitHub rate-limited requests for ${host}. The token may be fine — wait until the limit resets and try again.`;
+    case "invalid-token":
+      return `GitHub rejected the saved token for ${host}. It may be revoked or expired — generate a new PAT and re-enter it.`;
+    case "scope":
+      return `GitHub rejected the saved token for ${host}. The token is likely missing required scopes — re-enter a PAT with \`repo\` + \`read:org\` for private repos.`;
+    default:
+      return `GitHub rejected the saved token for ${host}. Re-enter the PAT (or generate a new one with \`repo\` + \`read:org\` scopes for private repos).`;
+  }
 }

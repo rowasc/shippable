@@ -61,6 +61,69 @@ describe("GitHubTokenModal", () => {
     expect(msg.className).toContain("modal__hint--error");
   });
 
+  it("renders rate-limit copy when hint is rate-limit", () => {
+    render(
+      <GitHubTokenModal
+        host="github.com"
+        reason="rejected"
+        hint="rate-limit"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    // Rate-limit advice should NOT tell the user to regenerate a token —
+    // their token is probably fine.
+    expect(screen.getByText(/rate-limited/i)).toBeTruthy();
+    expect(screen.getByText(/wait until the limit resets/i)).toBeTruthy();
+    expect(screen.queryByText(/repo. \+ .read:org/i)).toBeNull();
+  });
+
+  it("renders invalid-token copy when hint is invalid-token", () => {
+    render(
+      <GitHubTokenModal
+        host="github.com"
+        reason="rejected"
+        hint="invalid-token"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/revoked or expired/i)).toBeTruthy();
+    expect(screen.getByText(/generate a new PAT/i)).toBeTruthy();
+  });
+
+  it("renders scope copy when hint is scope", () => {
+    render(
+      <GitHubTokenModal
+        host="github.com"
+        reason="rejected"
+        hint="scope"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/missing required scopes/i)).toBeTruthy();
+    expect(screen.getByText(/repo. \+ .read:org. for private repos/i)).toBeTruthy();
+  });
+
+  it("renders generic rejection copy when hint is undefined", () => {
+    render(
+      <GitHubTokenModal
+        host="github.com"
+        reason="rejected"
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    // The fallback should mention scopes since that's the most actionable
+    // default advice for a 403 we don't have a hint for.
+    expect(screen.getByText(/repo. \+ .read:org. scopes/i)).toBeTruthy();
+  });
+
   it("shows the error inline and keeps the modal mounted when onSubmit rejects", async () => {
     const onSubmit = vi
       .fn()
