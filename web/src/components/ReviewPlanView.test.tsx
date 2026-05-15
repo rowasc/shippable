@@ -71,7 +71,7 @@ describe("ReviewPlanView map split", () => {
     // Priority list contains the ranked entries; "other changes" divider
     // appears; non-ranked files render in a second list.
     const priorityList = html.match(
-      /class="plan__files plan__files--priority"[\s\S]*?<\/ul>/,
+      /class="plan__files plan__files--priority"[\s\S]*?<\/ol>/,
     )?.[0];
     expect(priorityList).toBeTruthy();
     expect(priorityList).toContain("src/b.ts");
@@ -136,7 +136,7 @@ describe("ReviewPlanView map split", () => {
       />,
     );
     const priorityList = html.match(
-      /class="plan__files plan__files--priority"[\s\S]*?<\/ul>/,
+      /class="plan__files plan__files--priority"[\s\S]*?<\/ol>/,
     )?.[0];
     expect(priorityList).toContain("ghost-id");
     // No counts span renders without a backing file.

@@ -365,7 +365,7 @@
 }
 .plan__entry-reason {
   flex-basis: 100%;
-  margin-left: 22px;
+  margin-left: 44px;
   display: flex;
   flex-direction: column;
   gap: 3px;

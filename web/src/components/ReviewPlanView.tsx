@@ -437,7 +437,7 @@ function MapSection({
         </div>
       )}
       {rankedEntries.length > 0 && (
-        <ul className="plan__files plan__files--priority">
+        <ol className="plan__files plan__files--priority">
           {rankedEntries.map((entry, i) => {
             const file = map.files.find((x) => x.fileId === entry.fileId);
             return (
@@ -452,7 +452,7 @@ function MapSection({
               />
             );
           })}
-        </ul>
+        </ol>
       )}
       {rankedEntries.length > 0 && otherFiles.length > 0 && (
         <div className="plan__files-divider">other changes</div>
@@ -555,7 +555,14 @@ function EntryFileRow({
 }) {
   return (
     <li className="plan__file plan__file--entry">
-      <span className="plan__entry-rank">{rank}</span>
+      <span className="plan__entry-rank" aria-hidden="true">
+        {rank}
+      </span>
+      {file && (
+        <span className={`plan__file-status plan__file-status--${file.status}`}>
+          {statusGlyph(file.status)}
+        </span>
+      )}
       <button
         type="button"
         className="plan__file-jump"
