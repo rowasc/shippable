@@ -129,6 +129,54 @@ describe("ServerHealthGate", () => {
     await waitFor(() => expect(waitForSidecarReadyMock).toHaveBeenCalled());
   });
 
+  it("falls through to children when /api/health returns db.status ok", async () => {
+    stubFetch(200, { ok: true, db: { status: "ok" } });
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+    render(
+      <CredentialsProvider>
+        <ServerHealthGate>
+          <span data-testid="content">app</span>
+        </ServerHealthGate>
+      </CredentialsProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+  });
+
+  it("renders database error screen when /api/health returns db.status error", async () => {
+    stubFetch(200, {
+      ok: true,
+      db: { status: "error", error: "no app-data directory available: set HOME" },
+    });
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+    render(
+      <CredentialsProvider>
+        <ServerHealthGate>
+          <span data-testid="content">app</span>
+        </ServerHealthGate>
+      </CredentialsProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/database unavailable/i)).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/no app-data directory available: set HOME/i),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("content")).toBeNull();
+  });
+
+  it("falls through when /api/health body has no db field (old server)", async () => {
+    stubFetch(200, { ok: true });
+    vi.mocked(client.authList).mockResolvedValue([{ kind: "anthropic" }]);
+    render(
+      <CredentialsProvider>
+        <ServerHealthGate>
+          <span data-testid="content">app</span>
+        </ServerHealthGate>
+      </CredentialsProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("content")).toBeTruthy());
+  });
+
   it("does not re-show the boot panel if the anthropic credential is cleared mid-session", async () => {
     // First render: anthropic present → gate renders children.
     stubFetch(200, { ok: true });

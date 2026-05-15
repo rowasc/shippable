@@ -5,7 +5,7 @@ import { CopyButton } from "./CopyButton";
 import { CredentialsPanel } from "./CredentialsPanel";
 import { useCredentials } from "../auth/useCredentials";
 
-type GateState = "checking" | "ready" | "unreachable";
+type GateState = "checking" | "ready" | "unreachable" | "db-error";
 
 /**
  * Boot-time gate. The local Node sidecar is a hard dependency in every
@@ -56,7 +56,14 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
         const res = await fetch(await apiUrl("/api/health"));
         if (cancelled) return;
         if (res.ok) {
-          setState("ready");
+          const body = await res.json().catch(() => ({}));
+          // db field absent means an older server — don't block (pragmatic for a prototype).
+          if (body?.db?.status === "error") {
+            setState("db-error");
+            setError(body.db.error ?? "database unavailable");
+          } else {
+            setState("ready");
+          }
         } else {
           setState("unreachable");
           setError(`HTTP ${res.status} ${res.statusText}`);
@@ -85,6 +92,45 @@ export function ServerHealthGate({ children }: { children: ReactNode }) {
   // Guarded with !bootResolved to avoid infinite re-render loops.
   if (passingThrough && !bootResolved) {
     setBootResolved(true);
+  }
+
+  if (state === "db-error") {
+    return (
+      <div className="boot-gate">
+        <div
+          className="boot-gate__box"
+          role="dialog"
+          aria-modal="true"
+          aria-label="server status"
+        >
+          <div className="boot-gate__label">shippable</div>
+          <h1 className="boot-gate__h">Database unavailable</h1>
+          <p className="boot-gate__msg">
+            The server started but its database couldn't be opened. Review
+            storage and persistence depend on it.
+          </p>
+          {error && (
+            <div className="boot-gate__err errrow">
+              <span className="errrow__msg">{error}</span>
+              <CopyButton text={error} />
+            </div>
+          )}
+          <p className="boot-gate__hint">
+            Fix the underlying problem (e.g. set <code>HOME</code> or check
+            disk permissions), then restart the server.
+          </p>
+          <div className="boot-gate__actions">
+            <button
+              type="button"
+              className="boot-gate__btn"
+              onClick={() => setAttempt((n) => n + 1)}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (gateReady) {
