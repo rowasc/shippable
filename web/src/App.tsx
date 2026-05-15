@@ -12,6 +12,7 @@ import {
   focusIfDuplicate,
   onToastEvent,
   setWindowChangeset,
+  setWindowTitle,
 } from "./multiWindow";
 import type {
   ChangeSet,
@@ -126,6 +127,28 @@ function isResumableChangeset(cs: ChangeSet): boolean {
     if (f.hunks.length > 0) return true;
   }
   return false;
+}
+
+const TITLE_PREFIX = "Shippable";
+const TITLE_MAX = 60;
+
+function windowTitleFor(cs: ChangeSet | null): string {
+  if (!cs) return TITLE_PREFIX;
+  // Prefer branch — what a reviewer asks for when naming a window.
+  // Fall back to the worktree directory basename for detached HEADs so
+  // a row of detached windows isn't all "Shippable — (detached)".
+  const wt = cs.worktreeSource;
+  const label = wt ? (wt.branch ?? basename(wt.worktreePath)) : cs.title;
+  return `${TITLE_PREFIX} — ${truncate(label, TITLE_MAX)}`;
+}
+
+function basename(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts[parts.length - 1] || path;
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
 export default function App() {
@@ -255,6 +278,15 @@ export default function App() {
   useEffect(() => {
     void setWindowChangeset(activeCsId);
   }, [activeCsId]);
+
+  // Surface a short identifier — branch / path / title — in the OS
+  // window title so users can tell windows apart in the dock and the
+  // ⌘` switcher. No-op in browser dev (browser tab title still updates
+  // via document.title elsewhere).
+  const windowTitle = useMemo(() => windowTitleFor(activeCs), [activeCs]);
+  useEffect(() => {
+    void setWindowTitle(windowTitle);
+  }, [windowTitle]);
 
   const appliedCsIds = useRef(new Set<string>());
   useEffect(() => {

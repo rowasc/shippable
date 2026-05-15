@@ -55,6 +55,15 @@ export async function focusWindow(label: string): Promise<void> {
   await invoke("focus_window", { label });
 }
 
+/** Set the OS window title for this webview. No-op in browser dev. */
+export async function setWindowTitle(title: string): Promise<void> {
+  if (!isTauri()) return;
+  const { getCurrentWebviewWindow } = await import(
+    "@tauri-apps/api/webviewWindow"
+  );
+  await getCurrentWebviewWindow().setTitle(title);
+}
+
 /**
  * Look up which window — if any — already shows `changesetId`. Returns
  * the label or null. `excludeSelf` is true for in-place loads (re-loading
