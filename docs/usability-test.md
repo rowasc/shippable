@@ -214,7 +214,6 @@ These are real defects discovered while validating this spec against the code. T
 1. **Token-rejected modal swallows scope and rate-limit hints (J3).** `githubPrClient.ts:36-52, 77-96` parses the server's hint into `GithubFetchError.hint`, but `useGithubPrLoad.ts:98-105, 137-147` never reads it — scope errors, invalid-token, and rate-limit all collapse into the same rejected-token modal. Users see "wrong token" for tokens that are correct but missing scope, or for hosts that are rate-limited.
 2. **Prompt runs don't persist across reload (J5).** `runs` is plain `useState` in `ReviewWorkspace.tsx:163`; no persistence hook. Streaming results vanish on reload.
 3. **`ServerHealthGate` doesn't re-engage mid-session (J6).** `bootResolved` latches (`ServerHealthGate.tsx:29-34, 86-88`) and the gate has no ongoing health probe; a server that dies after boot is only re-detected on app reload.
-4. **AI-off chip doesn't return after clearing a configured key (J1).** The chip is gated on `anthropicSkipped` (`ReviewWorkspace.tsx:137-138`), but `clear` in `auth/useCredentials.tsx:130-153` never sets that flag. A user who configured a key and then cleared it leaves `anthropicSkipped` false, so the chip stays absent and there's no visible signal that AI is off.
 
 ---
 

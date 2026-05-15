@@ -192,6 +192,35 @@ describe("clear", () => {
     expect(keychain.keychainRemove).not.toHaveBeenCalled();
     expect(client.authClear).toHaveBeenCalled();
   });
+
+  it("sets the anthropic skip flag when clearing an anthropic credential", async () => {
+    // Reproduces the set → clear → chip-stays-hidden bug: a user who
+    // configured a key (which clears the skip flag) and then cleared
+    // it would otherwise leave anthropicSkipped at `false`, so the
+    // "AI off" chip stays absent.
+    vi.mocked(client.authList)
+      .mockResolvedValueOnce([{ kind: "anthropic" }])
+      .mockResolvedValueOnce([]);
+    const hook = renderHook();
+    await waitFor(() => expect(hook.value?.status).toBe("ready"));
+    expect(hook.value?.anthropicSkipped).toBe(false);
+    await act(async () => {
+      await hook.value!.clear({ kind: "anthropic" });
+    });
+    expect(window.localStorage.getItem(SKIP_KEY)).toBe("true");
+    expect(hook.value?.anthropicSkipped).toBe(true);
+  });
+
+  it("does not touch the skip flag when clearing a non-anthropic credential", async () => {
+    window.localStorage.setItem(SKIP_KEY, "true");
+    const hook = renderHook();
+    await waitFor(() => expect(hook.value?.status).toBe("ready"));
+    await act(async () => {
+      await hook.value!.clear({ kind: "github", host: "github.com" });
+    });
+    expect(window.localStorage.getItem(SKIP_KEY)).toBe("true");
+    expect(hook.value?.anthropicSkipped).toBe(true);
+  });
 });
 
 describe("skipAnthropic", () => {

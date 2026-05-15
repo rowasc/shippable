@@ -147,6 +147,14 @@ export function CredentialsProvider({ children }: { children: ReactNode }) {
         }
       }
       await refresh();
+      // Clearing the anthropic key is an explicit opt-out — restore the
+      // skip flag so the "AI off" chip resurfaces. Mirrors `set`'s flag
+      // handling above; without it, set-then-clear leaves the flag stale
+      // and the chip stays hidden until reload.
+      if (credential.kind === "anthropic") {
+        writeSkip(true);
+        if (mounted.current) setAnthropicSkipped(true);
+      }
       if (keychainErr) throw keychainErr;
     },
     [refresh],
