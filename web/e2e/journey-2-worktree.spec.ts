@@ -99,6 +99,8 @@ test.describe("Journey 2 — local worktree", () => {
     await loadFixtureWorktree(page, repo.path);
     await page.keyboard.press("Escape").catch(() => {}); // dismiss plan overlay
 
+    await expect(page.getByLabel("reviewed", { exact: true })).toHaveCount(0);
+
     await page.keyboard.press("Shift+M");
     await expect(
       page.getByLabel("reviewed", { exact: true }).first(),
@@ -184,9 +186,8 @@ test.describe("Journey 2 — local worktree", () => {
     visit,
     page,
   }) => {
-    // Asserts read-mark persistence specifically: worktree file sign-offs do
-    // NOT survive a reload — see "Known product bugs" #6 in
-    // docs/usability-test.md.
+    // Asserts read-mark persistence specifically. Worktree file sign-offs have
+    // their own test below so this case stays narrow.
     await visit("/?cs=42");
     await expectWorkspaceLoaded(page);
     await loadFixtureWorktree(page, repo.path);
@@ -218,6 +219,41 @@ test.describe("Journey 2 — local worktree", () => {
     await dismissPlanOverlay(page);
     await expect(
       page.getByRole("button", { name: /[1-9]\d*% read/ }).first(),
+    ).toBeVisible();
+  });
+
+  test("worktree sign-off persists across reload", async ({
+    visit,
+    page,
+  }) => {
+    await visit("/?cs=42");
+    await expectWorkspaceLoaded(page);
+    await loadFixtureWorktree(page, repo.path);
+    await dismissPlanOverlay(page);
+
+    await expect(page.getByLabel("reviewed", { exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Shift+M");
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
+    ).toBeVisible();
+
+    // Wait for the debounced session save before navigating away.
+    await page.waitForFunction(() => {
+      const raw = localStorage.getItem("shippable:review:v1");
+      if (!raw) return false;
+      try {
+        return (JSON.parse(raw).reviewedFiles ?? []).length > 0;
+      } catch {
+        return false;
+      }
+    });
+
+    await visit("/");
+    await expectWorkspaceLoaded(page);
+    await dismissPlanOverlay(page);
+    await expect(
+      page.getByLabel("reviewed", { exact: true }).first(),
     ).toBeVisible();
   });
 
