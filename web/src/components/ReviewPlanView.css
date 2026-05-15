@@ -331,32 +331,6 @@
   font-size: 12px;
 }
 
-.plan__symbols {
-  list-style: none;
-  margin: 0;
-  padding: 8px 0 0;
-  border-top: 1px dashed var(--border);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.plan__symbol {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: baseline;
-  font-size: 12px;
-}
-.plan__symbol-arrow {
-  color: var(--fg-mute);
-}
-.plan__symbol-refs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: baseline;
-}
-
 /* priority entries inline with the map */
 .plan__files--priority {
   margin-bottom: 10px;

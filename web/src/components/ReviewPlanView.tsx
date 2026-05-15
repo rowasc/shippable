@@ -464,37 +464,6 @@ function MapSection({
           ))}
         </ul>
       )}
-      {map.symbols.length > 0 && (
-        <ul className="plan__symbols">
-          {map.symbols.map((s) => (
-            <li key={s.name} className="plan__symbol">
-              <Reference
-                ev={{ kind: "symbol", name: s.name, definedIn: s.definedIn }}
-                onNavigate={onNavigate}
-              />
-              <span className="plan__symbol-arrow">defined in</span>
-              <Reference
-                ev={{ kind: "file", path: s.definedIn }}
-                onNavigate={onNavigate}
-              />
-              {s.referencedIn.length > 0 && (
-                <>
-                  <span className="plan__symbol-arrow">→</span>
-                  <span className="plan__symbol-refs">
-                    {s.referencedIn.map((p) => (
-                      <Reference
-                        key={p}
-                        ev={{ kind: "file", path: p }}
-                        onNavigate={onNavigate}
-                      />
-                    ))}
-                  </span>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
       {diagram && (
         <PlanDiagramView
           diagram={diagram}
