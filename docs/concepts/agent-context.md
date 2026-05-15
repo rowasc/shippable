@@ -12,7 +12,7 @@ The local source of truth is the Claude Code CLI's own transcript files:
 ~/.claude/projects/<project-path-hash>/<session-id>.jsonl
 ```
 
-These are append-only JSONL records — one event per turn (user message, assistant message, tool call, tool result). They are written live as the session runs, so we get "live" for free by tailing the file. Each record carries a `cwd` field, which is how we map a transcript back to a worktree on disk.
+These are append-only JSONL records — one event per turn (user message, assistant message, tool call, tool result). Each record carries a `cwd` field, which is how we map a transcript back to a worktree on disk. The reviewer UI reads slices on fetch; it does not tail transcript files into a live feed.
 
 We deliberately **do not** ask the agent to write a sidecar metadata file into the worktree. The transcript already exists; duplicating it would mean two sources of truth and a coordination bug waiting to happen. The richer `.claude/worktrees/index.json` registry described in `docs/plans/worktrees.md:93-96` remains a future option — additive, not load-bearing.
 
@@ -21,10 +21,10 @@ We deliberately **do not** ask the agent to write a sidecar metadata file into t
 The match is fuzzy on purpose. A worktree's path is matched against the `cwd` field of recent transcript files. Three cases:
 
 1. **One match.** Use it. This is the common case.
-2. **Multiple matches** (the user ran several Claude Code sessions in the same worktree). Show a session picker — most recent first, with task summary and time range — and remember the choice per worktree.
+2. **Multiple matches** (the user ran several Claude Code sessions in the same worktree). Show a session picker — most recent first, with task summary and time range.
 3. **No match.** Show the panel in an empty state with "pick a session manually" — don't pretend there's no agent context if the user wants to attach one anyway.
 
-The choice is durable per `(repo-root, branch)` so renaming the worktree directory doesn't lose the link.
+The current manual choice is transient UI state. It overrides auto-match for the active review view, clears when the user loads a different worktree, and a page reload falls back to auto-match.
 
 ## Commit-aligned slicing
 
@@ -55,7 +55,7 @@ The same panel hosts the reverse direction. Two MCP tools wire the loop end-to-e
 1. **Reviewer → agent (pull).** The reviewer authors structured comments (line, block, replies) on the diff; each authoring gesture stages the comment on the local server's queue keyed by `worktreePath`. The agent fetches by calling `shippable_check_review_comments` — typically when prompted with `check shippable` — and the tool returns a `<reviewer-feedback>` envelope wrapping every pending comment. The response also carries a trailing next-step hint in-band so the post-back expectation doesn't rely solely on the tool description, which fades from a model's working focus after the call.
 2. **Agent → reviewer (post-back).** `shippable_post_review_comment` accepts two shapes through one schema:
    - *Reply mode* — `parentId` + `outcome ∈ { addressed, declined, noted }`. Threads under the reviewer comment with the matching id; surfaces nested under the original entry in the panel.
-   - *Top-level mode* — `file` + `lines`. Posts a fresh, agent-authored comment anchored to the diff. Renders as a new root in the agent-context panel under "Agent comments"; the reviewer can reply to it via the standard composer, and the resulting `reply-to-agent-comment` kind enqueues for the agent. The pull envelope inlines the parent agent comment's body as a `<parent>` child so the agent has context for its response.
+   - *Top-level mode* — `file` + `lines`. Posts a fresh, agent-authored comment anchored to the diff. Renders as a new root in the agent-context panel under "Comments"; the reviewer can reply to it via the standard composer, and the resulting `reply-to-agent-comment` kind enqueues for the agent. The pull envelope inlines the parent agent comment's body as a `<parent>` child so the agent has context for its response.
 
    The fallback magic phrase for both modes is `report back to shippable`.
 
@@ -65,19 +65,23 @@ See `docs/plans/share-review-comments.md` for the original pull design, `docs/sd
 
 Concretely:
 
-- **Transport:** `POST /api/agent/pull`, `POST /api/agent/comments`, `GET /api/agent/comments` on the local server ← `mcp-server/` shim ← agent's MCP client. Localhost-only bind; no LAN exposure, no token in v0. (The earlier `/api/agent/replies` endpoints were replaced by `/api/agent/comments` when top-level mode landed — both shapes share one store.)
-- **Latency model:** comments arrive when the agent calls the tool — typically when the user says `check shippable`. Replies and top-level comments arrive when the agent calls `shippable_post_review_comment`, or when prompted with `report back to shippable`. The reviewer UI polls `/api/agent/comments` while the panel is mounted AND the tab is visible; mid-turn delivery is deliberately not in scope, but as soon as the agent posts the reviewer sees it within a poll cycle.
+- **Transport:** `POST /api/agent/pull`, `POST /api/agent/replies`, `GET /api/agent/replies` on the local server ← `mcp-server/` shim ← agent's MCP client. Localhost-only bind; no LAN exposure, no token in v0. One replies endpoint pair covers both reply-shaped (`parentId`) and top-level (`file` + `lines`) post-back entries.
+- **Latency model:** comments arrive when the agent calls the tool — typically when the user says `check shippable`. Replies and top-level comments arrive when the agent calls `shippable_post_review_comment`, or when prompted with `report back to shippable`. The reviewer UI polls `/api/agent/replies` every 2s while the active worktree is loaded and the tab is visible; mid-turn delivery is deliberately not in scope, but as soon as the agent posts the reviewer sees it within a poll cycle.
 - **Install affordance:** the panel renders the per-harness install line and the two magic phrases (`check shippable`, `report back to shippable`) as click-to-copy chips. The server detects a configured `shippable` MCP entry in `~/.claude/settings.json` / `~/.claude/settings.local.json` and collapses the install affordance to a one-line ✓ when present.
 - **Threading shape:** one level of nested threading on each axis.
   - For reply-mode entries: each reviewer `Reply` carries an optional `agentReplies: AgentReply[]` array; the merge step keys on `Reply.enqueuedCommentId ↔ parent.commentId` and is idempotent on re-poll.
-  - For top-level entries: a new root in `state.agentComments`, each with its own `ReplyThread` for reviewer responses keyed `agentComment:<id>`.
+  - For top-level entries: a new root in the existing `state.interactions` map when the thread head is authored by the agent; the panel's `Comments (N)` rollup is derived from those agent-started threads.
   - Users cannot reply *to* an agent reply within Shippable; pushback flows out-of-band. The threading limitation is intentional — see the specs for forward-compat notes.
 
 Why pull (and now structured post-back) instead of writing to `CLAUDE.md` or a hook: it collapses the explicit "Send" gesture into the user's natural next prompt, covers every MCP-speaking harness with one transport, and aligns with Shippable as a passive workspace rather than a tool that wedges itself into the build loop. The earlier hook-based file inbox at `<worktree>/.shippable/inbox.md` was built once on `worktree-agent-context-panel`, kept as a record, and replaced.
 
 ## Refresh model
 
-When a new commit lands on the worktree's branch, the slice advances. The reviewer detects this by polling `/api/worktrees/changeset` for the worktree's HEAD on a low cadence (every few seconds while the panel is open). When HEAD changes, we re-fetch the changeset and the agent context together so they stay in lockstep.
+The slice fetch is keyed on `(worktreePath, commitSha, pinnedSession, refreshTick)`.
+
+- **Manual refresh:** the panel's `↻` button bumps `refreshTick` and re-runs the fetch.
+- **Commit-boundary refresh:** when the loaded worktree advances to a new commit through the existing live-reload flow, `commitSha` changes and the agent-context slice is re-fetched for that commit.
+- **Reply/delivery polling:** the side channel is separate. Delivered comments and agent post-backs poll every 2s while the active worktree is loaded and the tab is visible.
 
 We deliberately do not file-watch the JSONL transcripts themselves. The reviewer is interested in *commits*, not *agent keystrokes*. Streaming every tool call into the UI would be noisy, and once we have it the temptation to build "live agent feed" creeps the surface area. Commit-boundary refresh keeps the interface aligned with what reviewers actually do.
 
@@ -93,9 +97,9 @@ We deliberately do not file-watch the JSONL transcripts themselves. The reviewer
 - **State lives outside `ReviewState`.** The reviewer's `ReviewState` is persisted to localStorage and reflects review work-in-progress; agent context is async-fetched, transient, and per-changeset. Putting it in `ReviewState` would either pollute the persisted snapshot or require a denylist of "don't save these fields." We keep it as plain `useState` at the App level instead.
 - **Worktree provenance lives on the ChangeSet itself** (`cs.worktreeSource?: WorktreeSource`), set by `LoadModal` when constructing the cs. *Initial design held it as separate App state and threaded it through `onLoad(cs, source?)`; that broke under page reload (App state was lost while the cs survived in localStorage) and under changeset switching (only one source was tracked at a time).* Stamping it on the cs means the provenance is automatically persisted, automatically per-cs, and survives the same things the cs does. Render gate is just `cs.worktreeSource ?? null`.
 - **Inspector takes one `agentContext?: AgentContextProps` bundle**, not a flat list of seven props. Optional — passing `undefined` keeps the section out of the DOM entirely. Means non-worktree-loaded changesets see the original Inspector unchanged.
-- **Refresh model is on-demand for v1.** A manual refresh button bumps a `refreshTick` that re-runs the fetch effect. Per-commit polling (the design's "live" mode) is deferred to a follow-up — once the picker UX feels right, polling is a `setInterval` on the same effect.
-- **Session-pick state lives in App.** A single `pinnedSessionFilePath` overrides the "most recent matching session" default. It clears when the user loads a different worktree (so picker selections don't carry across).
+- **Session-pick state lives in App.** A single `pinnedSessionFilePath` overrides the "most recent matching session" default. It clears when the user loads a different worktree, and it is not persisted across reload.
 - **The fetch effect is keyed on `worktreePath + commitSha + pinnedSession + refreshTick`.** Same shape as the existing `usePlan` flow in this codebase — keeps cancellation simple via a `cancelled` flag in the closure.
+- **Replies poll separately from the slice fetch.** `useDeliveredPolling` runs against `/api/agent/delivered` and `/api/agent/replies` every 2s while the tab is visible. That poll updates delivery state and merges agent post-backs into `state.interactions`; it does not re-fetch the transcript slice.
 - **Sync `setState` stays out of effect bodies.** The repo's lint config (`react-hooks/set-state-in-effect`) forbids it, and `usePlan.ts` shows the right pattern: derive a fetch key, use the adjusting-state-during-render trick (`if (lastKey !== wantedKey) { setLastKey(...); setLoading(true); ... }`) for the sync transitions, and keep the effect body itself pure-async — only `.then()` / `.catch()` / `.finally()` callbacks setState. The `cancelled` flag in the closure closes over the in-flight fetch so a stale result can't overwrite a fresher one.
 - **Symbol linking is backtick-only, not bare-identifier.** The existing `RichText` component links bare identifiers too — right call for AI plan output, wrong call for chat content (the agent says "loop" or "cursor" all the time and those would all link). We inline a small backtick-only tokenizer in `AgentContextSection` instead. The false-positive guard ("only link if the symbol is in a file the diff touches") falls out for free because `buildSymbolIndex` only emits symbols defined in the loaded ChangeSet.
 - **MCP-install detection is best-effort and informational.** The server reads `~/.claude/settings.json` and `~/.claude/settings.local.json`, looks for a `shippable` entry under `mcpServers` (the canonical Claude Code shape) — and accepts a few permissive variants (`mcp.shippable`, `mcp_servers.shippable`) so we don't false-negative users who configured via a sibling tool. Malformed or missing files return `{ installed: false }` without throwing. Project-level configs are NOT checked — would need to walk the worktree tree, brittle. False negatives surface as a "set up" install affordance at the top of the panel; comment authoring on the diff still works regardless (the affordance is purely a nudge, not a gate). For non-Claude-Code harnesses we have no programmatic detection — the affordance offers an "I installed it" dismiss button persisted per-machine in `localStorage` under `shippable.mcpInstallDismissed`.
@@ -117,4 +121,4 @@ Things that surfaced once the JSONL parser hit real transcripts:
 - **Symbol-link false positives.** Backtick-quoted spans that *happen* to match an unrelated symbol. Mitigation: only link when the symbol is also in a file the diff touches. Revisit if false positives are still annoying.
 - **Multi-session-per-commit.** If two Claude Code sessions interleaved on the same worktree, the slice could mix transcripts. v1 picks the most recent session that touched the files in the diff; we record this in the slice metadata so the user can switch.
 - **Transcript privacy.** Transcripts can contain pasted secrets. We never upload them; we render in the local app only. Document this prominently in the feature doc.
-- **Empty slices.** A commit with no transcript events (e.g., the user committed by hand). The panel falls back to a "no agent context for this commit" empty state — explicit, not a broken-looking empty section.
+- **Empty slices.** A commit with no transcript events (e.g., the user committed by hand). The panel should fall back to an explicit empty state rather than a broken-looking blank section.
