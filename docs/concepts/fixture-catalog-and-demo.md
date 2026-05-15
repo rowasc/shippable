@@ -7,4 +7,5 @@ The repo’s fixture-driven surface for showing the product without driving the 
 - Encodes canned `ReviewState` and `ReviewPlan` states as gallery fixtures.
 - Powers `/gallery.html` as a screen catalog for design and review.
 - Drives the demo reel from a simple frame script instead of hardcoding playback logic in the component.
+- Feeds `/feature-docs.html`, which pairs `docs/features/*.md` with representative fixtures so feature docs can be reviewed against a concrete UI state.
 - Gives the repo a repeatable way to inspect complex states like saturated AI notes, block comments, sign-off visuals, prompt flows, markdown preview, and desktop onboarding screens.
