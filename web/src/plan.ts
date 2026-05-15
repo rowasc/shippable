@@ -1,3 +1,4 @@
+import { isGraphAnalyzablePath } from "./codeGraph";
 import type {
   ChangeSet,
   EntryPoint,
@@ -78,8 +79,10 @@ export function buildStructureMap(cs: ChangeSet): StructureMap {
   // Backfill: fixtures and parsed diffs often declare `definesSymbols` without
   // matching `referencesSymbols`. Scan added/context text for the names we
   // know about so the graph isn't missing edges. `del` lines describe the
-  // pre-diff state and are skipped.
+  // pre-diff state and are skipped. Restrict to code files — a word-boundary
+  // match against yaml/xml/sh treats keys like `name:` as references.
   for (const f of cs.files) {
+    if (!isGraphAnalyzablePath(f.path)) continue;
     for (const [name, entry] of defs) {
       if (entry.definedIn === f.path) continue;
       if (entry.referencedIn.has(f.path)) continue;

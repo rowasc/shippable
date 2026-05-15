@@ -149,3 +149,56 @@ describe("buildStructureMap exported-symbol filter", () => {
     expect(map.symbols).toHaveLength(6);
   });
 });
+
+describe("buildStructureMap reference backfill", () => {
+  it("does not count word matches inside non-code files (yml, xml, sh)", () => {
+    // The symbol `name` is exported from a code file. A yaml file contains the
+    // literal word `name:` — the regex backfill must not treat that as a use.
+    const yamlHunk: Hunk = {
+      id: "h-yml",
+      header: "@@ h-yml @@",
+      oldStart: 1,
+      oldCount: 0,
+      newStart: 1,
+      newCount: 1,
+      lines: [{ kind: "add", text: "name: rusty" }],
+      definesSymbols: [],
+      exportedSymbols: [],
+      referencesSymbols: [],
+    };
+    const map = buildStructureMap(
+      cs([
+        file("ui.js", [hunk("h1", ["name"], ["name"])]),
+        { ...file(".lando.yml", [yamlHunk]), language: "yaml" },
+      ]),
+    );
+    const entry = map.symbols.find((s) => s.name === "name")!;
+    expect(entry).toBeDefined();
+    expect(entry.referencedIn).toEqual([]);
+  });
+
+  it("still picks up real references in code files via backfill", () => {
+    // Same shape, but the reference lives in a .js file — backfill should
+    // catch it even though referencesSymbols isn't declared on the hunk.
+    const jsHunk: Hunk = {
+      id: "h-js",
+      header: "@@ h-js @@",
+      oldStart: 1,
+      oldCount: 0,
+      newStart: 1,
+      newCount: 1,
+      lines: [{ kind: "add", text: "console.log(name);" }],
+      definesSymbols: [],
+      exportedSymbols: [],
+      referencesSymbols: [],
+    };
+    const map = buildStructureMap(
+      cs([
+        file("ui.js", [hunk("h1", ["name"], ["name"])]),
+        file("consumer.js", [jsHunk]),
+      ]),
+    );
+    const entry = map.symbols.find((s) => s.name === "name")!;
+    expect(entry.referencedIn).toEqual(["consumer.js"]);
+  });
+});
