@@ -17,7 +17,12 @@ A snapshot of how the code is laid out, alongside `docs/overview.md`.
 - `POST /api/library/refresh` — gated by `SHIPPABLE_ADMIN_TOKEN` (or `SHIPPABLE_DEV_MODE=1`).
 - `GET  /api/definition/capabilities`, `POST /api/definition` — TS/JS via `typescript-language-server`, PHP via `intelephense`/`phpactor`. Per-language module shape in `server/src/languages/`; shared `LspClient` lives in `server/src/lspClient.ts`.
 - `POST /api/code-graph` — derives diagram edges via real LSP `documentSymbol` + `references`, falling back to the regex builder per language. Implementation in `server/src/codeGraph.ts`; per-file LRU keyed on `(workspaceRoot, ref, language, file, contentHash)`.
-- `GET  /api/health`.
+- `GET  /api/interactions?changesetId=<id>` — list all interactions for a changeset.
+- `POST /api/interactions` — upsert an interaction (creates or updates by id).
+- `POST /api/interactions/enqueue` — set `worktree_path` + `agent_queue_status = 'pending'` on an existing interaction row.
+- `POST /api/interactions/unenqueue` — clear `agent_queue_status` on an interaction row.
+- `DELETE /api/interactions?id=<id>` — delete an interaction.
+- `GET  /api/health` — returns `{ ok: true, db: { status: "ok" | "error", error?: string } }`. `db.status: "error"` triggers a hard-fail boot gate in `ServerHealthGate`.
 - Origin allowlist with explicit handling of opaque origins (`Origin: null`) and `Sec-Fetch-Site`. The "null"-origin case has bitten us before; see comment in source.
 
 ## Credential flow
@@ -35,7 +40,7 @@ One pattern serves the Anthropic API key and per-host GitHub PATs:
 - `ChangeSet` → `DiffFile[]` → `Hunk[]` → `DiffLine[]`. Hunks carry symbol metadata and expand-above/below context. AI annotations and teammate reviews used to ride inline on `DiffLine`/`Hunk`; under the typed-review-interactions migration they ship as `Interaction[]` instead (see § Review interactions).
 - `ReviewPlan` = `headline` + `intent: Claim[]` + `StructureMap` + `entryPoints` (max 3). Every claim carries `EvidenceRef[]`. The UI refuses to render a claim with no evidence.
 - `ReviewState` tracks: cursor, per-hunk read lines, explicitly reviewed files (Shift+M, single verdict gesture), dismissed guides, active skills, expand levels, line selection, plus `interactions` and `detachedInteractions` (see § Review interactions).
-- Persistence: localStorage.
+- Persistence: **interactions** live in a server-owned SQLite database (`server/src/db/`), keyed by `changeset_id`, fetched lazily per changeset. **Review progress** (cursor, readLines, reviewedFiles, dismissedGuides, drafts) still goes to localStorage via `persist.ts`.
 
 ## Review interactions
 
@@ -56,7 +61,7 @@ graph TB
         UI["User composer<br/><i>c · r · a · Cmd+Enter</i><br/>authorRole: user"]:::ingest
         AI["AI annotation pipeline<br/><i>per-line + per-hunk, at ingest</i><br/>authorRole: ai"]:::ingest
         TM["Teammate-review ingest<br/>authorRole: teammate"]:::ingest
-        AG["Agent poll<br/><i>/api/agent/replies</i><br/>authorRole: agent"]:::ingest
+        AG["Agent poll<br/><i>/api/agent/replies → DB rows</i><br/>authorRole: agent"]:::ingest
         PR["GitHub PR ingest<br/><i>pr-load.ts</i><br/>authorRole: user<br/>external.source: pr"]:::ingest
         GHIN["GitHub re-pull<br/><i>sentinel-tagged inbound</i>"]:::wire
     end
@@ -97,8 +102,8 @@ graph TB
 ```
 
 Key invariants:
-- **One store.** `state.interactions: Record<threadKey, Interaction[]>` is canonical. `DiffLine`/`Hunk` carry no annotation fields; ingest pipelines emit Interactions at load time.
-- **Persistence asymmetry.** User-authored entries persist verbatim. Ingest-sourced entries (`authorRole !== "user"`) are stripped on save and regenerated on reload, so the persisted shape never duplicates ingest data.
+- **One store.** `state.interactions: Record<threadKey, Interaction[]>` is canonical for the active session. `DiffLine`/`Hunk` carry no annotation fields; ingest pipelines emit Interactions at load time.
+- **Server DB is the persistence layer.** All interactions — user, AI, teammate, agent — persist to the server-owned SQLite `interactions` table. The client upserts ingest-produced interactions on changeset load, then GETs the full set back from `/api/interactions?changesetId=…`. There is no `localStorage` fallback; a DB-unavailable condition hard-fails boot. Persistence is upsert-by-id; every producer supplies a stable id.
 - **One seam.** Every consumer — diff glyphs, sidebar count, inbox, agent wire, GitHub push — reads through `selectInteractions`. There is no second read path.
 - **Memo invalidation.** `interactionsRevision` increments on every reducer write to `state.interactions`. The seam memoises on `(changesetId, interactionsRevision)`.
 
@@ -226,7 +231,7 @@ Beyond components, the load-bearing modules in `web/src/`:
 - `feature-docs.tsx` — entry point for `/feature-docs.html`, paired with per-feature markdown under `docs/features/`.
 - `parseDiff.ts`, `highlight.ts`, `tokens.ts` — diff parsing and Shiki-based highlighting feeding `DiffView`.
 - `codeGraph.ts`, `codeGraphClient.ts` — regex graph builder used as the fallback path; the client wrapper that POSTs to `/api/code-graph` for the LSP-resolved version when a worktree is attached. Demo / paste-load callers stay on the regex path.
-- `persist.ts` — localStorage round-trip for `ReviewState`.
+- `persist.ts` — localStorage round-trip for review *progress* fields of `ReviewState` (cursor, readLines, reviewedFiles, dismissedGuides, drafts). Interactions are no longer stored here; they live in the server SQLite DB.
 
 ## Themes
 
