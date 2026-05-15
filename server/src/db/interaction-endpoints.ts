@@ -98,7 +98,9 @@ export async function handleInteractionsUpsert(
     writeJson(res, origin, 400, { error: "author must be a non-empty string" });
     return;
   }
-  if (typeof b.body !== "string" || b.body === "") {
+  // ack/unack are state toggles with no authored text — allow empty body.
+  const bodyless = b.intent === "ack" || b.intent === "unack";
+  if (typeof b.body !== "string" || (b.body === "" && !bodyless)) {
     writeJson(res, origin, 400, { error: "body must be a non-empty string" });
     return;
   }

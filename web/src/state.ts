@@ -351,11 +351,14 @@ export function reducer(state: ReviewState, action: Action): ReviewState {
         cursor: nextCursor,
         selection: null,
         readLines: addLine(state.readLines, nextCursor.hunkId, nextCursor.lineIdx),
-        // Seed interactions merge in alongside whatever the user has
-        // already authored — never overwrite. Useful for stubs and for
-        // recents that round-trip the same map.
+        // Merge incoming interactions per thread: start from current state
+        // (user-authored + stub AI notes), then append any entries from the
+        // incoming map that aren't already present by id. This lets a DB
+        // fetch re-hydrate user interactions on a stub-seeded thread without
+        // losing the AI note, while also preserving any locally-authored
+        // entries that appeared mid-session.
         interactions: action.interactions
-          ? { ...action.interactions, ...state.interactions }
+          ? mergeInteractionMaps(state.interactions, action.interactions)
           : state.interactions,
       };
     }
@@ -1357,7 +1360,16 @@ export function mergeInteractionMaps(
   const out: Record<string, Interaction[]> = { ...a };
   for (const [key, list] of Object.entries(b)) {
     if (list.length === 0) continue;
-    out[key] = out[key] ? [...out[key], ...list] : [...list];
+    const existing = out[key];
+    if (!existing) {
+      out[key] = [...list];
+      continue;
+    }
+    // Append only entries the thread doesn't already hold by id — a DB
+    // re-fetch must not double a stub-seeded note or a locally-authored reply.
+    const seen = new Set(existing.map((ix) => ix.id));
+    const added = list.filter((ix) => !seen.has(ix.id));
+    out[key] = added.length > 0 ? [...existing, ...added] : existing;
   }
   return out;
 }

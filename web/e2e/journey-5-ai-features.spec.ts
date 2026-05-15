@@ -181,17 +181,31 @@ test.describe("Journey 5 — AI features", () => {
     await page.keyboard.press("r");
     const composer = page.getByPlaceholder("Write a reply…");
     await composer.fill("e2e: looks intentional");
+
+    // Set up the response wait before submitting so we don't miss the POST.
+    // Interactions now live in the server DB (not localStorage), so we wait
+    // for the reply's POST to /api/interactions to confirm it's persisted.
+    const waitForReplyPersisted = page.waitForResponse((r) => {
+      if (!r.url().includes("/api/interactions")) return false;
+      if (r.request().method() !== "POST") return false;
+      const data = r.request().postDataJSON() as { body?: string } | null;
+      return data?.body === "e2e: looks intentional";
+    });
     await composer.press("ControlOrMeta+Enter");
     await expect(page.getByText("e2e: looks intentional")).toBeVisible();
+    await waitForReplyPersisted;
 
-    // Wait for the debounced session save, then reopen at `/` — the session
-    // resumes with the ack and the reply intact.
-    await page.waitForFunction(
-      () =>
-        (localStorage.getItem("shippable:review:v1") ?? "").includes(
-          "e2e: looks intentional",
-        ),
-    );
+    // Also wait for the debounced session snapshot to save (cursor moved to
+    // the note line via `n`, so lineIdx > 0 once the save fires).
+    await page.waitForFunction(() => {
+      const raw = localStorage.getItem("shippable:review:v1");
+      if (!raw) return false;
+      try {
+        return (JSON.parse(raw)?.cursor?.lineIdx ?? 0) > 0;
+      } catch {
+        return false;
+      }
+    });
     await visit("/");
     await expectWorkspaceLoaded(page);
     await dismissPlanOverlay(page);

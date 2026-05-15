@@ -193,6 +193,8 @@ test.describe("Journey 2 — local worktree", () => {
     await dismissPlanOverlay(page);
 
     // Read a few lines, then wait for the debounced session save to land.
+    // The condition mirrors hasProgress() — arr.length > 1 ensures the j
+    // presses themselves (not just the initial line-0 save) are captured.
     await page.keyboard.press("j");
     await page.keyboard.press("j");
     await page.keyboard.press("j");
@@ -200,7 +202,10 @@ test.describe("Journey 2 — local worktree", () => {
       const raw = localStorage.getItem("shippable:review:v1");
       if (!raw) return false;
       try {
-        return Object.keys(JSON.parse(raw).readLines ?? {}).length > 0;
+        const s = JSON.parse(raw);
+        return Object.values(s.readLines ?? {}).some(
+          (arr) => Array.isArray(arr) && arr.length > 1,
+        );
       } catch {
         return false;
       }

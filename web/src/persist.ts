@@ -167,6 +167,10 @@ export function hasProgress(s: PersistedSnapshot): boolean {
   for (const v of Object.values(s.drafts)) {
     if (v && v.trim()) return true;
   }
+  // Cursor moved beyond line 0 — user navigated the diff (e.g. jumped to a
+  // note with `n`). lineIdx = 0 is the default initial position; anything
+  // higher means deliberate engagement, even before a second line is read.
+  if (s.cursor.lineIdx > 0) return true;
   return false;
 }
 

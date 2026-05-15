@@ -71,11 +71,13 @@ function resolveBoot(): BootSeed {
     const csId = peeked.cursor.changesetId;
     const recent = loadRecents().find((r) => r.id === csId);
     if (recent && isResumableChangeset(recent.changeset)) {
+      // Stubs carry ingest-derived interactions (AI notes) in fixture code —
+      // not in the DB. Seed them inline so the inspector renders on boot
+      // before the per-changeset DB fetch completes.
+      const stub = findStub(csId);
       return {
         changesets: [recent.changeset],
-        // Interactions are fetched from the DB per changeset once it
-        // becomes active — see the fetch effect in App.
-        interactions: {},
+        interactions: stub ? { ...stub.interactions } : {},
         applyPersisted: true,
         source: recent.source,
       };
@@ -195,20 +197,37 @@ export default function App() {
   // Interactions live in the server DB, keyed by changeset id. Fetch them
   // once per changeset the first time it becomes active and merge them in
   // via LOAD_CHANGESET, whose reducer keeps any locally-authored entries
-  // (`{ ...fetched, ...state.interactions }`) and only fills in keys the
-  // client doesn't already hold. Stub fixtures still seed inline; their
-  // keys win over the (empty) DB fetch.
-  const activeCsId = activeCs?.id ?? null;
-  const fetchedCsIds = useRef(new Set<string>());
+  // and only appends DB entries not already held by id. Stub fixtures still
+  // seed inline; the merge dedups so a re-fetch can't double them.
+  //
+  // The effect keys ONLY on `activeCsId` — NOT on `state.changesets`. Every
+  // reducer dispatch produces a fresh `changesets` array reference, and an
+  // effect that re-ran on that churn would discard an in-flight fetch. We
+  // read the changeset list from a ref so the lookup stays current.
+  //
+  // `appliedCsIds` (not a plain "fetch started" guard) records changesets
+  // whose fetch *result has been applied*. StrictMode double-invokes the
+  // effect: mount → cleanup (cancels the fetch) → remount. A "started"
+  // guard would block the remount's fetch while the cancelled first fetch
+  // never applies — interactions silently never load. Keying on "applied"
+  // lets the remount re-fetch (a GET; the merge dedups), and the flag still
+  // stops a redundant fetch once one genuinely lands.
+  const changesetsRef = useRef(state.changesets);
   useEffect(() => {
-    if (!activeCsId || fetchedCsIds.current.has(activeCsId)) return;
-    fetchedCsIds.current.add(activeCsId);
-    const cs = state.changesets.find((c) => c.id === activeCsId);
-    if (!cs) return;
+    changesetsRef.current = state.changesets;
+  });
+  const activeCsId = activeCs?.id ?? null;
+  const appliedCsIds = useRef(new Set<string>());
+  useEffect(() => {
+    if (!activeCsId || appliedCsIds.current.has(activeCsId)) return;
     let cancelled = false;
     fetchInteractions(activeCsId)
       .then((fetched) => {
-        if (cancelled || fetched.length === 0) return;
+        if (cancelled) return;
+        appliedCsIds.current.add(activeCsId);
+        if (fetched.length === 0) return;
+        const cs = changesetsRef.current.find((c) => c.id === activeCsId);
+        if (!cs) return;
         const byThread: Record<string, Interaction[]> = {};
         for (const ix of fetched) {
           (byThread[ix.threadKey] ??= []).push(ix);
@@ -216,14 +235,12 @@ export default function App() {
         dispatch({ type: "LOAD_CHANGESET", changeset: cs, interactions: byThread });
       })
       .catch((err: unknown) => {
-        // Leave the id un-marked so a later re-render retries the fetch.
-        fetchedCsIds.current.delete(activeCsId);
         console.error("[shippable] interaction fetch failed:", err);
       });
     return () => {
       cancelled = true;
     };
-  }, [activeCsId, state.changesets]);
+  }, [activeCsId]);
 
   // Mirror local user-authored interaction mutations back to the DB. The
   // wrapped dispatch is what the review UI uses; App's own LOAD_CHANGESET /
