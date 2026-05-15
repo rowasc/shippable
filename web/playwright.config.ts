@@ -71,6 +71,8 @@ export default defineConfig({
         // the live APIs.
         ANTHROPIC_BASE_URL: `http://127.0.0.1:${UPSTREAM_PORT}`,
         SHIPPABLE_GITHUB_API_BASE: `http://127.0.0.1:${UPSTREAM_PORT}`,
+        // Keep e2e runs hermetic — never write to the real on-disk DB.
+        SHIPPABLE_DB_PATH: ":memory:",
       },
       reuseExistingServer: !process.env.CI,
       timeout: 30_000,
