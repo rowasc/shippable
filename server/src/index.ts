@@ -17,6 +17,11 @@ import type {
   InteractionIntent,
   InteractionTarget,
 } from "./agent-queue.ts";
+import {
+  isInteractionTarget,
+  isInteractionIntent,
+  isAuthorRole,
+} from "./agent-queue.ts";
 import { removePortFile, writePortFile } from "./port-file.ts";
 import { getCredential, hasCredential } from "./auth/store.ts";
 import {
@@ -24,6 +29,13 @@ import {
   handleAuthClear,
   handleAuthList,
 } from "./auth/endpoints.ts";
+import {
+  handleInteractionsGet,
+  handleInteractionsUpsert,
+  handleInteractionsEnqueue,
+  handleInteractionsUnenqueue,
+  handleInteractionsDelete,
+} from "./db/interaction-endpoints.ts";
 import {
   RequestBodyTooLargeError,
   readBody,
@@ -131,6 +143,21 @@ export function createApp(): Server {
     }
     if (req.method === "GET" && req.url === "/api/auth/list") {
       return await handleAuthList(req, res, origin);
+    }
+    if (req.method === "GET" && (req.url === "/api/interactions" || req.url?.startsWith("/api/interactions?"))) {
+      return await handleInteractionsGet(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/interactions") {
+      return await handleInteractionsUpsert(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/interactions/enqueue") {
+      return await handleInteractionsEnqueue(req, res, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/interactions/unenqueue") {
+      return await handleInteractionsUnenqueue(req, res, origin);
+    }
+    if (req.method === "DELETE" && (req.url === "/api/interactions" || req.url?.startsWith("/api/interactions?"))) {
+      return await handleInteractionsDelete(req, res, origin);
     }
     if (req.method === "POST" && req.url === "/api/github/pr/load") {
       return await handleGithubPrLoad(req, res, origin);
@@ -842,35 +869,11 @@ async function handleWorktreesMcpStatus(
   }
 }
 
-const INTERACTION_TARGETS: readonly InteractionTarget[] = [
-  "line",
-  "block",
-  "reply",
-];
-
 const ASK_INTENTS: readonly AskIntent[] = [
   "comment",
   "question",
   "request",
   "blocker",
-];
-
-const RESPONSE_INTENTS: readonly InteractionIntent[] = [
-  "ack",
-  "unack",
-  "accept",
-  "reject",
-];
-
-const ALL_INTENTS: readonly InteractionIntent[] = [
-  ...ASK_INTENTS,
-  ...RESPONSE_INTENTS,
-];
-
-const AUTHOR_ROLES: readonly InteractionAuthorRole[] = [
-  "user",
-  "ai",
-  "agent",
 ];
 
 const RESPONSE_INTENTS_FOR_AGENT: readonly AgentResponseIntent[] = [
@@ -1043,26 +1046,6 @@ function isAgentResponseIntent(value: unknown): value is AgentResponseIntent {
   return (
     typeof value === "string" &&
     RESPONSE_INTENTS_FOR_AGENT.includes(value as AgentResponseIntent)
-  );
-}
-
-function isInteractionTarget(value: unknown): value is InteractionTarget {
-  return (
-    typeof value === "string" &&
-    INTERACTION_TARGETS.includes(value as InteractionTarget)
-  );
-}
-
-function isInteractionIntent(value: unknown): value is InteractionIntent {
-  return (
-    typeof value === "string" &&
-    ALL_INTENTS.includes(value as InteractionIntent)
-  );
-}
-
-function isAuthorRole(value: unknown): value is InteractionAuthorRole {
-  return (
-    typeof value === "string" && AUTHOR_ROLES.includes(value as InteractionAuthorRole)
   );
 }
 

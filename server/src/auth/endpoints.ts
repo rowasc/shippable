@@ -2,7 +2,7 @@
 // the store enforces the github host blocklist on the write boundary.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readBody, writeCorsHeaders } from "../http.ts";
+import { writeJson, readJson } from "../http.ts";
 import {
   clearCredential,
   listCredentials,
@@ -25,26 +25,6 @@ function parseCredential(raw: unknown): Credential | null {
     return { kind: "github", host };
   }
   return null;
-}
-
-function writeJson(
-  res: ServerResponse,
-  origin: string | null,
-  status: number,
-  body: unknown,
-): void {
-  writeCorsHeaders(res, origin);
-  res.writeHead(status, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body));
-}
-
-async function readJson(req: IncomingMessage): Promise<unknown> {
-  const body = await readBody(req);
-  try {
-    return JSON.parse(body);
-  } catch {
-    return null;
-  }
 }
 
 export async function handleAuthSet(

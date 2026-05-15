@@ -18,6 +18,27 @@ export function isAskIntent(i: InteractionIntent): i is AskIntent {
   return i === "comment" || i === "question" || i === "request" || i === "blocker";
 }
 
+export function isInteractionTarget(v: unknown): v is InteractionTarget {
+  return v === "line" || v === "block" || v === "reply";
+}
+
+export function isInteractionIntent(v: unknown): v is InteractionIntent {
+  return (
+    v === "comment" ||
+    v === "question" ||
+    v === "request" ||
+    v === "blocker" ||
+    v === "ack" ||
+    v === "unack" ||
+    v === "accept" ||
+    v === "reject"
+  );
+}
+
+export function isAuthorRole(v: unknown): v is InteractionAuthorRole {
+  return v === "user" || v === "ai" || v === "agent";
+}
+
 /**
  * Validity rule (mirrors `web/src/types.ts#isValidInteractionPair`): response
  * intents only ever attach to other interactions — every `reply-to-*` target.

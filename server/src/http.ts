@@ -1,6 +1,6 @@
-// Shared HTTP boundary helpers (body reader + CORS writer) so multiple
-// route modules can speak the same wire dialect as `index.ts` without
-// duplicating the body-size guard.
+// Shared HTTP boundary helpers (body reader, CORS writer, JSON helpers) so
+// multiple route modules can speak the same wire dialect as `index.ts` without
+// duplicating the body-size guard or the JSON write/read pattern.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 
@@ -53,8 +53,28 @@ export function readBody(req: IncomingMessage): Promise<string> {
 
 export function writeCorsHeaders(res: ServerResponse, origin: string | null) {
   if (!origin) return;
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
+}
+
+export function writeJson(
+  res: ServerResponse,
+  origin: string | null,
+  status: number,
+  body: unknown,
+): void {
+  writeCorsHeaders(res, origin);
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+
+export async function readJson(req: IncomingMessage): Promise<unknown> {
+  const body = await readBody(req);
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
 }
