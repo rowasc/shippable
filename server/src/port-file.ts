@@ -2,6 +2,8 @@ import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import process from "node:process";
 
+import { appDataDir } from "./app-data-dir.ts";
+
 // Discovery file for clients that share the box with the sidecar (today: the
 // MCP server). Tauri picks an ephemeral port at boot and only tells the web
 // UI via the `get_sidecar_port` command; the MCP server is a separate process
@@ -29,22 +31,9 @@ export interface PortFileContent {
  * available" and continue without writing.
  */
 export function portFilePath(env: NodeJS.ProcessEnv = process.env): string | null {
-  const platform = process.platform;
-  if (platform === "darwin") {
-    const home = env.HOME;
-    if (!home) return null;
-    return join(home, "Library", "Application Support", "Shippable", "port.json");
-  }
-  if (platform === "win32") {
-    const local = env.LOCALAPPDATA;
-    if (!local) return null;
-    return join(local, "Shippable", "port.json");
-  }
-  const xdg = env.XDG_DATA_HOME;
-  if (xdg) return join(xdg, "Shippable", "port.json");
-  const home = env.HOME;
-  if (!home) return null;
-  return join(home, ".local", "share", "Shippable", "port.json");
+  const dir = appDataDir(env);
+  if (!dir) return null;
+  return join(dir, "port.json");
 }
 
 /**
