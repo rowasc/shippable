@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import "./App.css";
 import { findStub } from "./fixtures";
-import { initialState, mergeInteractionMaps, reducer } from "./state";
+import { initialState, reducer } from "./state";
 import { Welcome } from "./components/Welcome";
 import { ReviewWorkspace } from "./components/ReviewWorkspace";
 import { LiveReloadBar } from "./components/LiveReloadBar";
@@ -118,21 +118,14 @@ export default function App() {
     const initial = initialState(b.changesets, b.interactions);
     const persisted = hydrated.state;
     if (!persisted) return initial;
-    // Persisted Interactions land on top of ingest-derived ones (AI /
-    // teammate) so the round-trip ends with user-authored entries appended
-    // to each thread, after the ingest head.
-    const mergedInteractions = mergeInteractionMaps(
-      initial.interactions,
-      persisted.interactions,
-    );
+    // Boot starts with ingest-derived interactions only; persisted interactions
+    // now live in the server DB and are fetched per-changeset elsewhere.
     return {
       ...initial,
       cursor: persisted.cursor,
       readLines: persisted.readLines,
       reviewedFiles: persisted.reviewedFiles,
       dismissedGuides: persisted.dismissedGuides,
-      interactions: mergedInteractions,
-      detachedInteractions: persisted.detachedInteractions,
     };
   });
   const [recents, setRecents] = useState<RecentEntry[]>(() => {

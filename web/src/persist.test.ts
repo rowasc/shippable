@@ -1,16 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { loadSession, peekSession, saveSession } from "./persist";
+import { buildSnapshot, loadSession, peekSession, saveSession } from "./persist";
 import { initialState } from "./state";
-import type {
-  ChangeSet,
-  DetachedInteraction,
-  DiffFile,
-  DiffLine,
-  Hunk,
-  Interaction,
-} from "./types";
-import { lineNoteReplyKey } from "./types";
+import type { ChangeSet, DiffFile, DiffLine, Hunk } from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
@@ -49,215 +41,93 @@ function makeChangeset(): ChangeSet {
   };
 }
 
-function userIx(
-  over: Partial<Interaction> & { threadKey: string },
-): Interaction {
-  return {
-    id: "u1",
-    target: "line",
-    intent: "comment",
-    author: "you",
-    authorRole: "user",
-    body: "hi",
-    createdAt: "2026-05-07T00:00:00.000Z",
-    ...over,
-  };
-}
-
 afterEach(() => {
   localStorage.clear();
 });
 
-describe("persist v3 — round-trip user-authored Interactions", () => {
-  it("saves a user Interaction and reloads it untouched", () => {
+describe("persist v4 — snapshot shape only contains progress fields", () => {
+  it("buildSnapshot serializes only cursor, readLines, reviewedFiles, dismissedGuides, drafts (no interactions)", () => {
     const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const ix = userIx({
-      id: "u1",
-      threadKey: key,
-      body: "queued",
-      enqueuedCommentId: "cmt_42",
-    });
-    const state = { ...initialState([cs]), interactions: { [key]: [ix] } };
-    saveSession(state, {});
+    const state = initialState([cs]);
+    const snap = buildSnapshot(state, { "some:key": "draft text" });
+
+    expect(snap.v).toBe(4);
+    expect(snap.cursor).toEqual(state.cursor);
+    expect(snap.readLines).toBeDefined();
+    expect(snap.reviewedFiles).toBeDefined();
+    expect(snap.dismissedGuides).toBeDefined();
+    expect(snap.drafts).toEqual({ "some:key": "draft text" });
+    // No interaction fields
+    expect("interactions" in snap).toBe(false);
+    expect("detachedInteractions" in snap).toBe(false);
+  });
+
+  it("round-trips cursor, readLines, reviewedFiles, dismissedGuides, drafts", () => {
+    const cs = makeChangeset();
+    const state = {
+      ...initialState([cs]),
+      reviewedFiles: new Set(["cs1/f1"]),
+      dismissedGuides: new Set(["guide-a"]),
+      readLines: { "cs1/f1#h1": new Set([0, 1, 2]) },
+    };
+    const draftKey = "note:cs1/f1#h1:0";
+    saveSession(state, { [draftKey]: "my draft" });
 
     const hydrated = loadSession([cs]);
     expect(hydrated.state).not.toBeNull();
-    const got = hydrated.state!.interactions[key];
-    expect(got).toHaveLength(1);
-    expect(got[0].id).toBe("u1");
-    expect(got[0].enqueuedCommentId).toBe("cmt_42");
-    expect(got[0].body).toBe("queued");
+    expect(hydrated.state!.reviewedFiles).toEqual(new Set(["cs1/f1"]));
+    expect(hydrated.state!.dismissedGuides).toEqual(new Set(["guide-a"]));
+    expect(hydrated.state!.readLines["cs1/f1#h1"]).toEqual(new Set([0, 1, 2]));
+    expect(hydrated.drafts).toEqual({ [draftKey]: "my draft" });
   });
 
-  it("preserves anchor fields (anchorPath, anchorContext, anchorHash, originSha, originType)", () => {
+  it("hydrated state has no interactions or detachedInteractions fields", () => {
     const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const anchorContext: DiffLine[] = [
-      { kind: "context", text: "line a", oldNo: 1, newNo: 1 },
-      { kind: "context", text: "line b", oldNo: 2, newNo: 2 },
-    ];
-    const ix = userIx({
-      threadKey: key,
-      body: "anchored",
-      enqueuedCommentId: null,
-      anchorPath: "cs1/f1.ts",
-      anchorContext,
-      anchorHash: "deadbeef",
-      originSha: "abc1234",
-      originType: "committed",
-    });
-    const state = { ...initialState([cs]), interactions: { [key]: [ix] } };
-    saveSession(state, {});
-
-    const got = loadSession([cs]).state!.interactions[key][0];
-    expect(got.anchorPath).toBe("cs1/f1.ts");
-    expect(got.anchorContext).toEqual(anchorContext);
-    expect(got.anchorHash).toBe("deadbeef");
-    expect(got.originSha).toBe("abc1234");
-    expect(got.originType).toBe("committed");
-  });
-
-  it("round-trips detached Interactions", () => {
-    const cs = makeChangeset();
-    const detached: DetachedInteraction = {
-      interaction: userIx({
-        id: "r-d",
-        threadKey: "user:cs1/f1#h1:0",
-        body: "stranded",
-        anchorPath: "cs1/gone.ts",
-        anchorContext: [
-          { kind: "context", text: "vanishing", oldNo: 1, newNo: 1 },
-        ],
-        anchorHash: "feedface",
-        originSha: "1234567890",
-        originType: "dirty",
-      }),
-      threadKey: "user:cs1/f1#h1:0",
-    };
-    const state = {
-      ...initialState([cs]),
-      detachedInteractions: [detached],
-    };
-    saveSession(state, {});
+    saveSession(initialState([cs]), {});
 
     const hydrated = loadSession([cs]);
-    expect(hydrated.state!.detachedInteractions).toEqual([detached]);
+    expect(hydrated.state).not.toBeNull();
+    expect("interactions" in hydrated.state!).toBe(false);
+    expect("detachedInteractions" in hydrated.state!).toBe(false);
   });
 });
 
-describe("persist v3 — strip non-user-authored entries on save", () => {
-  it("drops AI and teammate Interactions on save (they regenerate from ingest)", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const userEntry = userIx({ id: "u1", threadKey: key, body: "my reply" });
-    const aiEntry: Interaction = {
-      id: "ai:1",
-      threadKey: key,
-      target: "line",
-      intent: "comment",
-      author: "ai",
-      authorRole: "ai",
-      body: "AI head",
-      createdAt: "0001-01-01T00:00:00.000Z",
-    };
-    const state = {
-      ...initialState([cs]),
-      interactions: { [key]: [aiEntry, userEntry] },
-    };
-    saveSession(state, {});
-
-    const raw = localStorage.getItem(STORAGE_KEY);
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!);
-    expect(parsed.interactions[key]).toHaveLength(1);
-    expect(parsed.interactions[key][0].id).toBe("u1");
-  });
-
-  it("drops PR-imported (external.source === 'pr') Interactions on save", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const local = userIx({ id: "u1", threadKey: key, body: "local" });
-    const pr = userIx({
-      id: "pr-comment:42",
-      threadKey: key,
-      author: "external-reviewer",
-      body: "consider X",
-      external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r42" },
-    });
-    const detachedPr: DetachedInteraction = {
-      interaction: userIx({
-        id: "pr-comment:43",
-        threadKey: key,
-        author: "external-reviewer",
-        body: "stale comment",
-        external: { source: "pr", htmlUrl: "https://github.com/x/y/pull/1#r43" },
-      }),
-      threadKey: key,
-    };
-    const state = {
-      ...initialState([cs]),
-      interactions: { [key]: [local, pr] },
-      detachedInteractions: [detachedPr],
-    };
-    saveSession(state, {});
-
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-    expect(parsed.interactions[key]).toHaveLength(1);
-    expect(parsed.interactions[key][0].id).toBe("u1");
-    expect(parsed.detachedInteractions).toEqual([]);
-  });
-
-  it("drops agent-authored Interactions on save (they regenerate from polling)", () => {
-    const cs = makeChangeset();
-    const key = lineNoteReplyKey("cs1/f1#h1", 0);
-    const userEntry = userIx({
-      id: "u1",
-      threadKey: key,
-      enqueuedCommentId: "cmt_1",
-    });
-    const agentEntry: Interaction = {
-      id: "ar1",
-      threadKey: key,
-      target: "reply",
-      intent: "accept",
-      author: "agent",
-      authorRole: "agent",
-      body: "fixed it",
-      createdAt: "2026-05-07T00:01:00.000Z",
-    };
-    const state = {
-      ...initialState([cs]),
-      interactions: { [key]: [userEntry, agentEntry] },
-    };
-    saveSession(state, {});
-
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-    expect(parsed.interactions[key]).toHaveLength(1);
-    expect(parsed.interactions[key][0].id).toBe("u1");
-  });
-});
-
-describe("persist v3 — fails closed on non-v3 snapshots", () => {
-  it("peekSession returns null for v < 3", () => {
+describe("persist v4 — fails closed on non-v4 snapshots", () => {
+  it("peekSession returns null for v < 4 (old v3 snapshot)", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        v: 2,
+        v: 3,
         cursor: { changesetId: "cs", fileId: "f", hunkId: "h", lineIdx: 0 },
         readLines: {},
         reviewedFiles: [],
         dismissedGuides: [],
-        ackedNotes: [],
-        replies: {},
-        detachedReplies: [],
+        interactions: {},
+        detachedInteractions: [],
         drafts: {},
       }),
     );
     expect(peekSession()).toBeNull();
   });
 
-  it("loadSession returns empty hydration for v > 3", () => {
+  it("loadSession returns empty hydration for a v3 snapshot (old format rejected)", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        v: 3,
+        cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "cs1/f1#h1", lineIdx: 0 },
+        readLines: {},
+        reviewedFiles: [],
+        dismissedGuides: [],
+        interactions: {},
+        detachedInteractions: [],
+        drafts: {},
+      }),
+    );
+    expect(loadSession([])).toEqual({ state: null, drafts: {} });
+  });
+
+  it("loadSession returns empty hydration for v > 4", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -266,8 +136,6 @@ describe("persist v3 — fails closed on non-v3 snapshots", () => {
         readLines: {},
         reviewedFiles: [],
         dismissedGuides: [],
-        interactions: {},
-        detachedInteractions: [],
         drafts: {},
       }),
     );
@@ -280,43 +148,21 @@ describe("persist v3 — fails closed on non-v3 snapshots", () => {
   });
 });
 
-describe("persist v3 — hunk-validity filtering", () => {
-  it("drops Interactions whose hunkId no longer exists in the loaded changeset", () => {
+describe("persist v4 — hunk-validity filtering for drafts", () => {
+  it("drops drafts whose hunkId no longer exists in the loaded changeset", () => {
     const cs = makeChangeset();
-    const valid = lineNoteReplyKey("cs1/f1#h1", 0);
-    const stale = lineNoteReplyKey("cs1/f1#deleted", 0);
-    const state = {
-      ...initialState([cs]),
-      interactions: {
-        [valid]: [userIx({ id: "keep", threadKey: valid })],
-        [stale]: [userIx({ id: "drop", threadKey: stale })],
-      },
-    };
-    saveSession(state, {});
+    const state = initialState([cs]);
+    saveSession(state, {
+      "note:cs1/f1#h1:0": "keep me",
+      "note:cs1/f1#deleted:0": "drop me",
+    });
 
     const hydrated = loadSession([cs]);
-    expect(Object.keys(hydrated.state!.interactions)).toEqual([valid]);
-  });
-
-  it("keeps detached entries even when their hunk is gone (the whole point of detached)", () => {
-    const cs = makeChangeset();
-    const detached: DetachedInteraction = {
-      interaction: userIx({
-        id: "r-d",
-        threadKey: "user:cs1/f1#deleted:0",
-        anchorPath: "cs1/gone.ts",
-      }),
-      threadKey: "user:cs1/f1#deleted:0",
-    };
-    const state = { ...initialState([cs]), detachedInteractions: [detached] };
-    saveSession(state, {});
-
-    const hydrated = loadSession([cs]);
-    expect(hydrated.state!.detachedInteractions).toEqual([detached]);
+    expect(hydrated.drafts).toEqual({ "note:cs1/f1#h1:0": "keep me" });
   });
 });
 
-describe("persist v3 — empty / unusable changeset boot path", () => {
+describe("persist v4 — empty / unusable changeset boot path", () => {
   // Repro for the blank-screen crash: a clean worktree reload produced a
   // ChangeSet with `files: []`, recents persisted it, the next boot rehydrated
   // it, and defaultCursor crashed reading `files[0].hunks[0]`.
@@ -334,13 +180,11 @@ describe("persist v3 — empty / unusable changeset boot path", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        v: 3,
+        v: 4,
         cursor: { changesetId: "wt-clean", fileId: "x", hunkId: "y", lineIdx: 0 },
         readLines: {},
         reviewedFiles: [],
         dismissedGuides: [],
-        interactions: {},
-        detachedInteractions: [],
         drafts: {},
       }),
     );
@@ -359,13 +203,11 @@ describe("persist v3 — empty / unusable changeset boot path", () => {
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
-        v: 3,
+        v: 4,
         cursor: { changesetId: "cs1", fileId: "cs1/f1", hunkId: "missing", lineIdx: 0 },
         readLines: {},
         reviewedFiles: [],
         dismissedGuides: [],
-        interactions: {},
-        detachedInteractions: [],
         drafts: {},
       }),
     );

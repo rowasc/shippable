@@ -8,17 +8,11 @@
  * and trivial to inspect with devtools.
  *
  * Why not Zustand / React Query / etc: this is throwaway prototype glue.
- * If/when the tool moves to a real backend, this whole module becomes
- * a sync queue and the shape stays roughly the same.
+ * Interactions have moved to the server DB; this module now persists ONLY
+ * review progress (cursor, readLines, reviewedFiles, dismissedGuides, drafts).
  */
 
-import type {
-  ChangeSet,
-  Cursor,
-  DetachedInteraction,
-  Interaction,
-  ReviewState,
-} from "./types";
+import type { ChangeSet, Cursor, ReviewState } from "./types";
 
 const STORAGE_KEY = "shippable:review:v1";
 
@@ -65,31 +59,18 @@ export function setLiveReloadEnabled(
   }
 }
 
-// Head schema version is 3. There is no v2 → v3 migration: snapshots
-// whose `v` isn't exactly 3 are rejected at load and the store boots
-// empty. The prototype has no users to migrate, so the cost is wiping our
-// own dev/test state — which is fine.
+// Head schema version is 4. Snapshots whose `v` isn't exactly 4 are rejected
+// at load and the store boots empty. The prototype has no users to migrate.
+// v3 → v4: interactions and detachedInteractions removed (moved to SQLite).
 
 /** What we actually serialize — Sets become arrays, ephemeral fields drop. */
 interface PersistedSnapshot {
-  v: 3;
+  v: 4;
   cursor: Cursor;
   /** Set<number> → number[] per hunk id. */
   readLines: Record<string, number[]>;
   reviewedFiles: string[];
   dismissedGuides: string[];
-  /**
-   * Per-thread Interaction store. Persisted entries are user-authored only;
-   * ingest-sourced entries (authorRole !== "user") regenerate from ingest
-   * on reload, and PR-imported entries (external.source === "pr") re-arrive
-   * with the next PR fetch — both are filtered out at save time.
-   */
-  interactions: Record<string, Interaction[]>;
-  /**
-   * Interactions whose anchor didn't match anywhere in the latest reload
-   * of their changeset. Same user-authored-only filter as `interactions`.
-   */
-  detachedInteractions: DetachedInteraction[];
   drafts: Record<string, string>;
 }
 
@@ -101,8 +82,6 @@ export interface HydratedSession {
     readLines: Record<string, Set<number>>;
     reviewedFiles: Set<string>;
     dismissedGuides: Set<string>;
-    interactions: Record<string, Interaction[]>;
-    detachedInteractions: DetachedInteraction[];
   } | null;
   drafts: Record<string, string>;
 }
@@ -120,33 +99,14 @@ export function buildSnapshot(
     if (set.size === 0) continue;
     readLines[hunkId] = Array.from(set).sort((a, b) => a - b);
   }
-  // Strip ingest-sourced + PR-imported entries — those regenerate from
-  // their source pipelines on reload, so persisting them would either
-  // duplicate or stale.
-  const interactions: Record<string, Interaction[]> = {};
-  for (const [key, list] of Object.entries(state.interactions)) {
-    const kept = list.filter(isPersistable);
-    if (kept.length > 0) interactions[key] = kept;
-  }
-  const detachedInteractions = state.detachedInteractions.filter((d) =>
-    isPersistable(d.interaction),
-  );
   return {
-    v: 3,
+    v: 4,
     cursor: state.cursor,
     readLines,
     reviewedFiles: Array.from(state.reviewedFiles).sort(),
     dismissedGuides: Array.from(state.dismissedGuides).sort(),
-    interactions,
-    detachedInteractions,
     drafts,
   };
-}
-
-function isPersistable(ix: Interaction): boolean {
-  if (ix.authorRole !== "user") return false;
-  if (ix.external) return false;
-  return true;
 }
 
 /** Best-effort save. Swallows storage errors (private mode, quota) silently. */
@@ -207,12 +167,6 @@ export function hasProgress(s: PersistedSnapshot): boolean {
   for (const v of Object.values(s.drafts)) {
     if (v && v.trim()) return true;
   }
-  // Any user-authored Interaction is "user did this" — user comments,
-  // block ranges, replies, ack/unack/accept/reject. Empty arrays don't
-  // count (the persist filter would have dropped them).
-  for (const list of Object.values(s.interactions)) {
-    if (list.length > 0) return true;
-  }
   return false;
 }
 
@@ -271,10 +225,6 @@ export function loadSession(changesets: ChangeSet[]): HydratedSession {
       readLines,
       reviewedFiles: new Set(snapshot.reviewedFiles.filter((id) => validFileIds.has(id))),
       dismissedGuides: new Set(snapshot.dismissedGuides),
-      interactions: filterInteractionsByHunk(snapshot.interactions, validHunkIds),
-      // Detached entries don't reference live hunk ids — they survive even
-      // when the originating hunk is gone, by definition. Keep them all.
-      detachedInteractions: snapshot.detachedInteractions,
     },
     drafts: filterDraftsByHunk(snapshot.drafts, validHunkIds),
   };
@@ -286,13 +236,11 @@ function isPersistedSnapshot(x: unknown): x is PersistedSnapshot {
   if (!x || typeof x !== "object") return false;
   const o = x as Record<string, unknown>;
   return (
-    o.v === 3 &&
+    o.v === 4 &&
     typeof o.cursor === "object" &&
     typeof o.readLines === "object" &&
     Array.isArray(o.reviewedFiles) &&
     Array.isArray(o.dismissedGuides) &&
-    typeof o.interactions === "object" &&
-    Array.isArray(o.detachedInteractions) &&
     typeof o.drafts === "object"
   );
 }
@@ -340,21 +288,6 @@ function collectFileIds(changesets: ChangeSet[]): Set<string> {
   const out = new Set<string>();
   for (const cs of changesets) {
     for (const f of cs.files) out.add(f.id);
-  }
-  return out;
-}
-
-/** Thread-key keys embed a hunkId — drop ones whose hunk no longer exists. */
-function filterInteractionsByHunk(
-  interactions: Record<string, Interaction[]>,
-  validHunkIds: Set<string>,
-): Record<string, Interaction[]> {
-  const out: Record<string, Interaction[]> = {};
-  for (const [key, list] of Object.entries(interactions)) {
-    if (!list || list.length === 0) continue;
-    if (replyKeyTargetsValidHunk(key, validHunkIds)) {
-      out[key] = list;
-    }
   }
   return out;
 }
